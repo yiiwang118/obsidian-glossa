@@ -1,0 +1,41 @@
+# Build output (uploaded as Release artifacts, not committed)
+main.js
+main.js.map
+
+# Dependencies
+node_modules/
+tests/node_modules/
+
+# Runtime data — NEVER commit
+data.json
+chats.json
+embeddings.json
+embeddings.json.bak
+embeddings.json.tmp
+checkpoints.json
+checkpoints.json.bak
+checkpoints.json.tmp
+nested_skill_dirs.json
+tool_outputs/
+.glossa/
+
+# Local env / secrets
+.env
+.env.local
+*.key
+*.pem
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test artifacts
+tests/.cache/
+/tmp/

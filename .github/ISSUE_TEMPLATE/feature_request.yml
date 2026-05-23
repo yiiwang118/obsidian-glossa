@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a feature or improvement
+title: "[feat] "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Brief is better than thorough — a one-paragraph "why" beats a 1500-word spec.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem?
+      description: The user-facing pain point. Skip if the feature is purely additive ("I want X").
+      placeholder: When I do X, I have to manually do Y every time, which slows down my Z workflow.
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: How would the feature work? Concrete UX preferred over architectural opinions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you've tried, or related plugins / patterns that solve this elsewhere.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This is in scope for an AI-sidebar plugin (not better solved by a standalone tool or a different plugin).
+        - label: I'd be open to contributing the PR if the maintainer points me at the right entry points.

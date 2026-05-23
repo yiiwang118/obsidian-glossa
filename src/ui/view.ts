@@ -1,0 +1,3027 @@
+import {
+  ItemView, WorkspaceLeaf, MarkdownView, TFile, Notice, Menu,
+} from 'obsidian';
+import type GlossaPlugin from '../main';
+import { ContextManager } from '../context/manager';
+import {
+  getCurrentSelection, resolveFile, resolveFolder, resolveTag, resolveWebUrl, resolveClipboard,
+  resolveDroppedFile,
+  makeSelectionItem, makeCurrentFileItem,
+  listFilesForPicker, listFoldersForPicker, listTagsForPicker,
+} from '../context/sources';
+import { BUILTIN_SLASH_COMMANDS, applySlashTemplate } from '../commands/slash';
+import { Popup, type PopupItem } from './popup';
+import { ICON, AURORA_ORB_SVG } from './icons';
+import { el, clear, uid, debounce } from '../utils/dom';
+import { formatTokenCount } from '../utils/tokens';
+import { buildProvider } from '../providers/registry';
+import type { ChatMessage, ContextItem, ContextItemRef, ChatSession, Endpoint, ToolEvent, PlanItem } from '../types';
+import { modelContextWindow } from '../types';
+import { CustomApiProvider } from '../providers/custom_api';
+import type { MessageInput } from '../providers/types';
+import { runAgentLoop } from '../agent/loop';
+import { compactSession, applyCompact, estimateSessionTokens, undoCompact as undoCompactInSession } from '../agent/compact';
+import {
+  metaFor,
+  activityDescriptionFor,
+  renderToolUseMessage as toolUseMessage,
+  renderToolResultMessage as toolResultMessage,
+  renderToolUseRejectedMessage as toolRejectedMessage,
+  renderToolUseErrorMessage as toolErrorMessage,
+} from '../agent/tool_meta';
+import { quickNotice } from '../utils/notice';
+import type { ToolImpl } from '../agent/tools';
+import type { ApprovalResult } from '../agent/approval';
+import { diffToHtml } from '../utils/diff';
+import { renderInto, decorateCodeBlocks, trimIncompleteMath } from '../utils/markdown';
+import { t, bi, onLanguageChange } from '../utils/i18n';
+import { loadProjectContext } from '../context/project_context';
+
+export const VIEW_TYPE_GLOSSA = 'glossa-view';
+
+interface MsgUI {
+  msg: ChatMessage;
+  wrap: HTMLElement;
+  body: HTMLElement;
+  toolStack?: HTMLElement;
+  actionsEl?: HTMLElement;
+  reasoningCard?: HTMLElement;
+  reasoningBody?: HTMLElement;
+}
+
+export class GlossaView extends ItemView {
+  plugin: GlossaPlugin;
+  ctx: ContextManager;
+
+  // DOM
+  private rootEl: HTMLElement;
+  private modelBtn: HTMLElement;
+  private tokenBadge: HTMLElement;
+  private contextBarEl: HTMLElement;
+  private selectionPreviewEl: HTMLElement;
+  private planBoardEl: HTMLElement;
+  private get currentPlan(): PlanItem[] { return this.session.plan ?? []; }
+  private messagesEl: HTMLElement;
+  private emptyEl: HTMLElement | null = null;
+  inputEl: HTMLTextAreaElement;     // public so /commands can populate it
+  private inputWrap: HTMLElement;   // composer card — Aurora ring lives on it
+  private submitBtn: HTMLButtonElement;
+  private costBar: HTMLElement;
+
+  // State
+  private session: ChatSession;
+  private streaming = false;
+  /** Cursor into session.messages user-msgs for ↑/↓ history recall. -1 = not in
+   *  history-nav mode (user is drafting fresh text). */
+  private historyCursor = -1;
+  /** Snapshot of textarea contents when history nav started, so ↓-all-the-way-down
+   *  restores what the user was actually typing. */
+  private historyDraft = '';
+  private abortCtl: AbortController | null = null;
+  private popup = new Popup();
+  private msgUIs = new Map<string, MsgUI>();
+  private streamingMsgUI: MsgUI | null = null;
+  private currentAsstMsg: ChatMessage | null = null;
+  /** LRU cache of rendered message HTML, keyed by `${role}\x00${content}`.
+   *  Populated lazily after the FIRST markdown render of each message;
+   *  consulted on re-renders (loadSession / compact undo / history modal
+   *  preview). Capped at 200 entries — older ones evict on insert. Reset
+   *  is not needed across sessions because the key is content-addressed:
+   *  identical content from any session reuses the same HTML. */
+  private renderCache = new Map<string, string>();
+  /** Bumped on every session boundary (newSession / loadSession). Submit()
+   *  captures the value at start; every async callback (onText, onTool*,
+   *  finalizeAsstRender) checks it before mutating UI / messages. A
+   *  mismatch means "the user switched sessions while a chunk was in
+   *  flight" — we drop the chunk silently. Without this guard, chunks
+   *  arriving after a switch would write into the new session's messages
+   *  array and corrupt history. */
+  private sessionToken = 0;
+  /** Shared turnId for every assistant message produced from the same user turn
+   *  — set fresh at submit(), reused by onStepBoundary + flushAndStartNewAsstSegment. */
+  private currentTurnId: string | null = null;
+  private streamingBuf = '';
+  /** True when the most recently consumed stream chunk in the current message
+   *  was a tool_event. If text then resumes, we treat it as a NEW assistant
+   *  segment and create a fresh message bubble so the rendering matches the
+   *  actual turn shape: text → tools → text → tools → final text. */
+  private lastChunkWasTool = false;
+  /** Wall-clock when the current streaming message started (for the
+   *  .nc-msg-elapsed counter on the assistant role label). Reset per segment. */
+  private streamingStartedAt = 0;
+  private currentSelection: { text: string; source: string; file?: TFile } | null = null;
+  /** Path of an auto-attached "current file" pill the user has explicitly
+   *  dismissed via its × button. While this matches the active file's path,
+   *  refreshAutoContext skips re-attaching it — otherwise active-leaf-change
+   *  / file-open events would silently re-add the pill on the next tick and
+   *  the × click would appear to do nothing. Cleared when the active file
+   *  changes to a different path. */
+  private dismissedCurrentPath: string | null = null;
+  private sessionCostUSD = 0;
+  private sessionInputTokens = 0;
+  private sessionOutputTokens = 0;
+
+  constructor(leaf: WorkspaceLeaf, plugin: GlossaPlugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.ctx = new ContextManager();
+    this.session = this.newSession();
+  }
+
+  getViewType() { return VIEW_TYPE_GLOSSA; }
+  getDisplayText() { return 'Glossa'; }
+  getIcon() { return 'glossa'; }
+
+  async onOpen() {
+    this.rootEl = this.containerEl.children[1] as HTMLElement;
+    this.rootEl.empty();
+    this.rootEl.addClass('glossa-view');
+    // Back-compat: the root class was renamed in 0.3 — keep the old class on
+    // for any community themes that already targeted `.note-codex-view`. Costs
+    // nothing and prevents a stylesheet break for users with custom CSS.
+    this.rootEl.addClass('note-codex-view');
+    this.applyCssVars();
+
+    this.buildHeader();
+    this.planBoardEl = el('div', { className: 'nc-plan-board', parent: this.rootEl });
+    this.planBoardEl.style.display = 'none';
+    this.messagesEl = el('div', { className: 'nc-messages', parent: this.rootEl });
+    this.renderEmpty();
+    this.buildInput();
+    this.costBar = el('div', { className: 'nc-cost-bar', parent: this.rootEl });
+    this.renderCostBar();
+
+    this.ctx.on(() => { this.renderContextBar(); this.updateTokenBadge(); });
+
+    this.refreshAutoContext();
+    // Some users opened the sidebar while no file was active yet; the initial
+    // refreshAutoContext() ran with workspace.getActiveFile() returning null
+    // and the current-file pill never appeared. Re-run once on layout-ready
+    // (Obsidian guarantees an active file is resolved by then), then keep the
+    // event-driven updates.
+    this.app.workspace.onLayoutReady(() => this.refreshAutoContext());
+    this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.refreshAutoContext()));
+    this.registerEvent(this.app.workspace.on('file-open', () => this.refreshAutoContext()));
+    this.registerEvent(this.app.workspace.on('editor-selection-change' as any, () => this.refreshSelection()));
+    document.addEventListener('selectionchange', this.onDomSelectionChange);
+
+    // Re-render any header / input chrome whose strings come from `t()` when
+    // the user toggles language in settings — no plugin reload required.
+    this.langUnsub = onLanguageChange(() => this.rebuildChrome());
+  }
+
+  private langUnsub: (() => void) | null = null;
+  /** Rebuild the static chrome (header, input footer, empty state) so any
+   *  `t()`-sourced label picks up the new language. Messages keep their
+   *  rendered content (model-generated text is language-neutral). */
+  private rebuildChrome() {
+    if (!this.rootEl) return;
+    // Inputs hold a value we don't want to lose; preserve + restore.
+    const inputBackup = this.inputEl?.value ?? '';
+    // Header
+    const header = this.rootEl.querySelector('.nc-header'); header?.remove();
+    this.buildHeader();
+    this.rootEl.insertBefore(this.rootEl.querySelector('.nc-header')!, this.planBoardEl);
+    // Input area
+    const inputWrap = this.rootEl.querySelector('.nc-input-wrap'); inputWrap?.remove();
+    const costBar = this.costBar; costBar.remove();
+    this.buildInput();
+    this.rootEl.appendChild(costBar);
+    if (this.inputEl) this.inputEl.value = inputBackup;
+    // Empty-state placeholder if we're still on a fresh session
+    if (this.session.messages.length === 0) this.renderEmpty();
+    this.renderCostBar();
+    this.refreshFromSettings();
+  }
+
+  onDomSelectionChange = debounce(() => this.refreshSelection(), 300);
+
+  /** Apply user-tunable CSS variables to the view root. The single Font size
+   *  slider in Settings drives both the base prose font (`--nc-base-font`) and
+   *  the reasoning card's body font (`--nc-reasoning-font`). They follow each
+   *  other rather than being two separate knobs — one slider is what users
+   *  actually want; differential scaling was over-engineered. */
+  applyCssVars() {
+    if (!this.rootEl) return;
+    const size = Math.max(11, Math.min(18, this.plugin.settings.reasoningFontSize ?? 13));
+    this.rootEl.style.setProperty('--nc-base-font', `${size}px`);
+    this.rootEl.style.setProperty('--nc-reasoning-font', `${size}px`);
+    // Derived ratios so everything scales together: small captions, header,
+    // pills. Pinned to the base via em values whenever possible, but these
+    // explicit-px feeders cover spots that need integer rounding for crispness.
+    this.rootEl.style.setProperty('--nc-font-sm', `${Math.max(10, size - 2)}px`);
+    this.rootEl.style.setProperty('--nc-font-xs', `${Math.max(9, size - 3)}px`);
+  }
+
+  async onClose() {
+    document.removeEventListener('selectionchange', this.onDomSelectionChange);
+    this.popup.destroy();
+    this.langUnsub?.();
+    this.langUnsub = null;
+    await this.flushPersistNow();
+  }
+
+  /* ============================================================
+     Header
+     ============================================================ */
+  private modeToggle: HTMLElement;
+
+  private buildHeader() {
+    const header = el('div', { className: 'nc-header', parent: this.rootEl });
+
+    // Plan / Act segmented control — aurora knob slides between the two
+    // options. Click anywhere on the container toggles; the click handler
+    // resolves the target mode from the segment that was hit so clicking
+    // the already-active side is a no-op rather than a flip.
+    this.modeToggle = el('div', { className: 'nc-mode-seg', parent: header });
+    const planSeg = el('button', { className: 'nc-mode-seg-opt', parent: this.modeToggle, text: 'Plan' });
+    planSeg.setAttribute('data-opt', 'plan');
+    const actSeg = el('button', { className: 'nc-mode-seg-opt', parent: this.modeToggle, text: 'Act' });
+    actSeg.setAttribute('data-opt', 'act');
+    this.updateModeToggle();
+    const pickMode = async (target: 'plan' | 'act') => {
+      if (this.plugin.settings.runMode === target) return;
+      this.plugin.settings.runMode = target;
+      await this.plugin.saveSettings();
+      this.updateModeToggle();
+    };
+    planSeg.onclick = () => pickMode('plan');
+    actSeg.onclick  = () => pickMode('act');
+
+    this.tokenBadge = el('span', { className: 'nc-token-badge', parent: header, title: t('token_total') });
+    this.updateTokenBadge();
+
+    el('span', { className: 'nc-header-spacer', parent: header });
+
+    const newBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('new_chat') });
+    newBtn.innerHTML = ICON.plus;
+    newBtn.onclick = () => this.startNewSession();
+
+    // Aurora v0.4: history popover stays as a dedicated header icon because
+    // it's a high-frequency action (chat-list lookups happen many times per
+    // session). Settings is the low-frequency action — collapsed into ⋯.
+    // This keeps the header at 3 right-side icons instead of 4.
+    const histBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('chat_history') });
+    histBtn.innerHTML = ICON.history;
+    histBtn.onclick = () => this.toggleHistoryPopover(histBtn);
+
+    const moreBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('more') });
+    moreBtn.innerHTML = ICON.more;
+    moreBtn.onclick = (e) => this.openMoreMenu(e);
+  }
+
+  /** Public — called by plugin after settings save so chrome stays fresh. */
+  refreshFromSettings() {
+    this.updateModelBtn();
+    this.updateModeToggle();
+    this.renderCostBar();
+    this.refreshComposerPills?.();
+  }
+
+  private updateModeToggle() {
+    if (!this.modeToggle) return;
+    const mode = this.plugin.settings.runMode;
+    // The knob slide is driven entirely by data-mode + CSS — no DOM rebuild.
+    // Preserving the children avoids re-attaching click handlers and lets
+    // the slide animation play continuously when toggled.
+    this.modeToggle.setAttribute('data-mode', mode);
+    this.modeToggle.classList.toggle('plan', mode === 'plan');
+    this.modeToggle.classList.toggle('act', mode === 'act');
+    this.modeToggle.title = mode === 'plan' ? t('plan_tooltip') : t('act_tooltip');
+  }
+  /** History popover anchored to the history icon. Click toggles, Esc / outside
+   *  click closes. Self-contained floating layer — does NOT mutate the layout
+   *  of the messages area, so it can't trigger the hover-scrollbar oscillation
+   *  the earlier drawer suffered from. */
+  private histPopEl: HTMLElement | null = null;
+  private histPopCleanup: (() => void) | null = null;
+  private async toggleHistoryPopover(anchor: HTMLElement) {
+    if (this.histPopEl) { this.closeHistoryPopover(); return; }
+    const { renderHistoryPopover } = await import('./history_modal');
+    // NO backdrop — earlier feedback: dimming the rest of the page makes the
+    // popover feel like a modal. We want a Raycast / Cursor task-list feel
+    // (small floating panel, surrounding page stays alive). Outside-click
+    // still closes via the document-level listener below.
+    const host = document.createElement('div');
+    host.className = 'nc-history-popover';
+    document.body.appendChild(host);
+    this.histPopEl = host;
+
+    // Position below the anchor, right-aligned. Use rAF so we measure after
+    // the host has been laid out.
+    requestAnimationFrame(() => this.positionHistoryPopover(anchor));
+
+    const cleanupView = renderHistoryPopover(host, this.plugin, {
+      onPick: (s) => { this.closeHistoryPopover(); this.loadSession(s.id); },
+      onClose: () => this.closeHistoryPopover(),
+    });
+
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') { ev.preventDefault(); this.closeHistoryPopover(); }
+    };
+    const onDocClick = (ev: MouseEvent) => {
+      const t = ev.target as Node;
+      if (host.contains(t) || anchor.contains(t)) return;
+      this.closeHistoryPopover();
+    };
+    const onScroll = () => this.positionHistoryPopover(anchor);
+    document.addEventListener('keydown', onKey, true);
+    // Defer mousedown registration so the same click that opened the
+    // popover doesn't immediately close it.
+    setTimeout(() => document.addEventListener('mousedown', onDocClick, true), 0);
+    window.addEventListener('resize', onScroll);
+    this.histPopCleanup = () => {
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('mousedown', onDocClick, true);
+      window.removeEventListener('resize', onScroll);
+      cleanupView();
+    };
+  }
+  private positionHistoryPopover(anchor: HTMLElement) {
+    if (!this.histPopEl) return;
+    const r = anchor.getBoundingClientRect();
+    const popW = 320;
+    const popMaxH = Math.min(460, window.innerHeight - r.bottom - 24);
+    this.histPopEl.style.width = `${popW}px`;
+    this.histPopEl.style.maxHeight = `${popMaxH}px`;
+    // Right-align with the anchor, clamped inside viewport.
+    let left = r.right - popW;
+    left = Math.max(8, Math.min(window.innerWidth - popW - 8, left));
+    const top = Math.min(window.innerHeight - popMaxH - 8, r.bottom + 6);
+    this.histPopEl.style.left = `${left}px`;
+    this.histPopEl.style.top = `${top}px`;
+  }
+  private closeHistoryPopover() {
+    if (!this.histPopEl) return;
+    this.histPopCleanup?.();
+    this.histPopCleanup = null;
+    const el = this.histPopEl;
+    this.histPopEl = null;
+    el.classList.add('closing');
+    setTimeout(() => el.remove(), 140);
+  }
+
+  private openMoreMenu(e: MouseEvent) {
+    const menu = new Menu();
+    // Aurora v0.4: settings was previously a dedicated header icon — moved
+    // here to free the header for the higher-frequency actions (new chat,
+    // history, more). Keep it at the top of the menu so it stays discoverable.
+    menu.addItem(it => it.setIcon('settings').setTitle(t('settings')).onClick(() => {
+      (this.app as any).setting.open();
+      (this.app as any).setting.openTabById(this.plugin.manifest.id);
+    }));
+    menu.addSeparator();
+    menu.addItem(it => it.setTitle('Clear messages').onClick(() => this.startNewSession()));
+    menu.addItem(it => it.setTitle('Copy entire conversation').onClick(() => {
+      const txt = this.session.messages.map(m => `### ${m.role}\n${m.content}`).join('\n\n---\n\n');
+      navigator.clipboard.writeText(txt); quickNotice('Conversation copied.');
+    }));
+    menu.addItem(it => it.setTitle('Export chat → note').onClick(() => this.exportChatToNote()));
+    menu.addSeparator();
+    menu.addItem(it => it.setTitle('Save first user message as workflow').onClick(() => this.saveAsWorkflow()));
+    if (this.plugin.settings.workflows.length) {
+      menu.addItem(it => it.setTitle('Run workflow…').onClick(e2 => this.openWorkflowMenu(e2 as any)));
+    }
+    menu.addSeparator();
+    menu.addItem(it => it.setTitle('Regenerate last response').onClick(() => this.regenerateLast()));
+    menu.showAtMouseEvent(e);
+  }
+
+  private saveAsWorkflow() {
+    const firstUser = this.session.messages.find(m => m.role === 'user');
+    if (!firstUser) { quickNotice('No user message in this session.'); return; }
+    const title = (this.session.title || firstUser.content.slice(0, 40)).trim();
+    this.plugin.settings.workflows.unshift({
+      id: uid(), title, prompt: firstUser.content, createdAt: Date.now(),
+    });
+    if (this.plugin.settings.workflows.length > 50) this.plugin.settings.workflows.length = 50;
+    this.plugin.saveSettings();
+    quickNotice(`Saved as workflow: "${title.slice(0, 40)}"`);
+  }
+  private openWorkflowMenu(e: MouseEvent) {
+    const menu = new Menu();
+    for (const w of this.plugin.settings.workflows) {
+      menu.addItem(it => it.setTitle(w.title).onClick(() => {
+        this.inputEl.value = w.prompt;
+        this.inputEl.dispatchEvent(new Event('input'));
+        this.inputEl.focus();
+      }));
+    }
+    menu.addSeparator();
+    menu.addItem(it => it.setTitle('Manage in settings').onClick(() => (this.app as any).setting.open()));
+    menu.showAtMouseEvent(e);
+  }
+
+  private updateTokenBadge() {
+    if (!this.tokenBadge) return;
+    const ctxN = this.ctx.totalTokens();
+    const selN = this.currentSelection ? Math.max(1, Math.ceil(this.currentSelection.text.length / 4)) : 0;
+    const total = ctxN + selN;
+    this.tokenBadge.textContent = formatTokenCount(total);
+    this.tokenBadge.title = `Context: ${ctxN} tok${selN ? ` + Selection: ${selN} tok` : ''} = ${total}`;
+    this.tokenBadge.toggleClass('warn', total > this.plugin.settings.warnTokenThreshold);
+  }
+
+  /* ============================================================
+     Context bar / selection preview (inline above input)
+     ============================================================ */
+  private async refreshAutoContext() {
+    if (!this.plugin.settings.autoAttachCurrentFile) {
+      this.ctx.updateCurrent(null);
+    } else {
+      const af = this.app.workspace.getActiveFile();
+      // Clear the "dismissed" sentinel as soon as the user navigates to a
+      // different file — the dismissal was about THAT specific file, not a
+      // permanent opt-out of the auto-attach feature.
+      if (this.dismissedCurrentPath && (!af || af.path !== this.dismissedCurrentPath)) {
+        this.dismissedCurrentPath = null;
+      }
+      const userDismissed = !!(af && af.path === this.dismissedCurrentPath);
+      if (userDismissed) {
+        this.ctx.updateCurrent(null);
+      } else if (af && af.extension === 'md') {
+        const content = await this.app.vault.cachedRead(af);
+        this.ctx.updateCurrent(makeCurrentFileItem(af, content));
+      } else if (af) {
+        this.ctx.updateCurrent({
+          id: 'current-' + af.path, kind: 'file',
+          label: af.basename + '.' + af.extension,
+          detail: af.path,
+          content: `### Current file: ${af.path}\n(non-markdown; select text to attach content.)`,
+          tokens: 0, pinned: false, isCurrent: true,
+        });
+      } else {
+        this.ctx.updateCurrent(null);
+      }
+    }
+    this.refreshSelection();
+  }
+
+  private refreshSelection() {
+    if (!this.plugin.settings.autoAttachSelection) {
+      this.currentSelection = null;
+      this.renderSelectionPreview();
+      this.updateTokenBadge();
+      return;
+    }
+    const sel = getCurrentSelection(this.app);
+    if (sel && sel.text.trim().length >= 2) {
+      if (!this.currentSelection || this.currentSelection.text !== sel.text) {
+        this.currentSelection = sel;
+        this.renderSelectionPreview();
+        this.updateTokenBadge();
+      }
+      return;
+    }
+    // Selection is empty. Only KEEP the existing one if the user is *actively typing*
+    // in our chat textarea (i.e., the textarea is the focused element). Any other focus
+    // state — editor pane, status bar, ribbon, another sidebar — counts as "deselected".
+    const typingInChat = document.activeElement === this.inputEl;
+    if (!typingInChat) {
+      if (this.currentSelection) {
+        this.currentSelection = null;
+        this.renderSelectionPreview();
+        this.updateTokenBadge();
+      }
+    }
+  }
+
+  private renderSelectionPreview() {
+    if (!this.selectionPreviewEl) return;
+    clear(this.selectionPreviewEl);
+    if (!this.currentSelection) { this.selectionPreviewEl.style.display = 'none'; return; }
+    this.selectionPreviewEl.style.display = '';
+    const ic = el('span', { className: 'nc-selection-preview-icon', parent: this.selectionPreviewEl });
+    ic.innerHTML = ICON.quote;
+    const body = el('div', { className: 'nc-selection-preview-body', parent: this.selectionPreviewEl });
+    el('div', { className: 'nc-selection-preview-text', text: this.currentSelection.text, parent: body });
+    const meta = el('div', { className: 'nc-selection-preview-meta', parent: body });
+    el('span', { className: 'nc-selection-preview-source', text: this.currentSelection.source, parent: meta });
+    if (this.currentSelection.file) {
+      el('span', { className: 'nc-selection-preview-file', text: this.currentSelection.file.basename, title: this.currentSelection.file.path, parent: meta });
+    }
+    el('span', { className: 'nc-selection-preview-chars', text: `${this.currentSelection.text.length} chars`, parent: meta });
+    const close = el('span', { className: 'nc-selection-preview-close', parent: this.selectionPreviewEl, title: 'Detach selection' });
+    close.innerHTML = ICON.x;
+    close.onclick = () => { this.currentSelection = null; this.renderSelectionPreview(); };
+  }
+
+  private contextBarSig = '';
+  private renderContextBar() {
+    if (!this.contextBarEl) return;
+    // Skip the re-render (and its fade-in animation) when the visible pills are unchanged.
+    const sig = this.ctx.list().map(it => `${it.kind}:${it.label}:${it.detail}:${it.pinned ? 1 : 0}:${it.isCurrent ? 1 : 0}`).join('|');
+    if (sig === this.contextBarSig) return;
+    this.contextBarSig = sig;
+    clear(this.contextBarEl);
+    for (const it of this.ctx.list()) {
+      const pill = el('span', {
+        className: 'nc-pill' + (it.pinned ? ' pinned' : '') + (it.isCurrent ? ' current' : '') + (it.kind === 'image' ? ' image' : ''),
+        parent: this.contextBarEl,
+      });
+      if (it.kind === 'image' && it.content.startsWith('data:image/')) {
+        const thumb = el('img', { className: 'nc-pill-thumb', parent: pill });
+        (thumb as HTMLImageElement).src = it.content;
+      } else {
+        const ic = el('span', { className: 'nc-pill-icon', parent: pill });
+        ic.innerHTML = pillIcon(it);
+      }
+      el('span', { className: 'nc-pill-label', text: it.label, title: it.detail || it.label, parent: pill });
+      if (it.isCurrent) {
+        el('span', { className: 'nc-pill-meta', text: 'Current', parent: pill });
+      } else if (it.kind === 'image') {
+        el('span', { className: 'nc-pill-meta', text: 'IMG', parent: pill });
+      } else {
+        el('span', { className: 'nc-pill-meta', text: formatTokenCount(it.tokens), parent: pill });
+      }
+      const close = el('span', { className: 'nc-pill-close', parent: pill, title: 'Remove' });
+      close.innerHTML = ICON.x;
+      // Single removal routine shared by both close-button and context-menu paths.
+      // The "current file" pill has TWO subtleties the regular ctx.remove
+      // path can't handle on its own:
+      //   1. `auto-attach current file` re-runs makeCurrentFileItem on every
+      //      active-leaf-change / file-open and assigns a fresh uid() each
+      //      time. The id captured in this closure can therefore be stale,
+      //      and ctx.remove(staleId) becomes a no-op. → For current pills,
+      //      use ctx.updateCurrent(null) which keys off `isCurrent` not id.
+      //   2. Even after removal, refreshAutoContext would silently re-attach
+      //      the same file on the next event. → Park the file path in
+      //      `dismissedCurrentPath` so refreshAutoContext skips re-attach
+      //      until the user opens a different file.
+      const removeThis = () => {
+        if (it.isCurrent) {
+          if (it.detail) this.dismissedCurrentPath = it.detail;
+          this.ctx.updateCurrent(null);
+        } else {
+          this.ctx.remove(it.id);
+        }
+      };
+      close.onclick = (e) => {
+        e.stopPropagation();
+        removeThis();
+      };
+      pill.onclick = () => this.openContextItem(it);
+      pill.oncontextmenu = (e) => {
+        e.preventDefault();
+        const m = new Menu();
+        m.addItem(i => i.setTitle(it.pinned ? 'Unpin' : 'Pin').onClick(() => this.ctx.togglePin(it.id)));
+        if (it.kind === 'file' && it.detail) {
+          m.addItem(i => i.setTitle('Open file').onClick(() => this.openContextItem(it)));
+        }
+        m.addItem(i => i.setTitle('Remove').onClick(removeThis));
+        m.showAtMouseEvent(e);
+      };
+    }
+  }
+
+  private openContextItem(it: ContextItem) {
+    if (it.kind === 'file' && it.detail) {
+      const f = this.app.vault.getAbstractFileByPath(it.detail);
+      if (f instanceof TFile) this.app.workspace.getLeaf(false).openFile(f);
+    }
+  }
+
+  /* ============================================================
+     Empty state
+     ============================================================ */
+  private renderEmpty() {
+    clear(this.messagesEl);
+    this.emptyEl = el('div', { className: 'nc-empty', parent: this.messagesEl });
+    // Aurora orb — replaces the prior bot glyph as the hero artwork.
+    // Breathing scale animation lives entirely in CSS (.g-orb-halo, .g-orb-core)
+    // so this method stays pure DOM.
+    const orb = el('div', { className: 'nc-empty-icon nc-empty-orb', parent: this.emptyEl });
+    orb.innerHTML = AURORA_ORB_SVG;
+    // Title — keeps the existing aurora-flow gradient via .nc-empty-title CSS.
+    el('div', { className: 'nc-empty-title', text: t('empty_title'), parent: this.emptyEl });
+
+    // Chips live in a group container with a list role so screen readers
+    // announce them as "List, 4 items"; each chip is a button so Tab
+    // navigation works and Enter activates (matches click semantics).
+    const chips = el('div', { className: 'nc-example-chips', parent: this.emptyEl, attrs: { role: 'list' } });
+    const examples = [
+      { cmd: '/translate', text: bi('Translate the selection',     '翻译选中段落') },
+      { cmd: '/summarize', text: bi('Summarise the current note',   '总结当前笔记') },
+      { cmd: '/explain',   text: bi('Explain the selected concept', '解释选中的概念') },
+      { cmd: '@',          text: bi('Attach another note as context', '把另一篇笔记加进上下文') },
+    ];
+    examples.forEach((ex, i) => {
+      // <button> so keyboard nav + screen reader semantics come for free
+      // (was <div>, which screen readers skipped entirely).
+      const chip = document.createElement('button');
+      chip.className = 'nc-example-chip';
+      chip.type = 'button';
+      chip.setAttribute('role', 'listitem');
+      chip.setAttribute('aria-label', `${ex.cmd} — ${ex.text}`);
+      chips.appendChild(chip);
+      chip.style.setProperty('--g-stagger', `${i * 60}ms`);
+      el('span', { className: 'nc-example-chip-cmd', text: ex.cmd, parent: chip });
+      el('span', { className: 'nc-example-chip-text', text: ex.text, parent: chip });
+      const arrow = el('span', { className: 'nc-example-chip-arrow', parent: chip });
+      arrow.innerHTML = ICON.arrowRight;
+      const fire = () => {
+        this.inputEl.value = ex.cmd + (ex.cmd === '@' ? '' : ' ');
+        this.inputEl.focus();
+        this.inputEl.dispatchEvent(new Event('input'));
+      };
+      chip.onclick = fire;
+      // Keyboard activation is automatic for <button>, but we also handle
+      // Space the same way for visual parity with Enter.
+    });
+  }
+
+  /* ============================================================
+     Messages rendering
+     ============================================================ */
+  private renderMessage(m: ChatMessage): MsgUI {
+    if (this.emptyEl?.isConnected) { this.emptyEl.remove(); this.emptyEl = null; }
+    // "Continuation" = this assistant msg shares a turnId with the immediately
+    // previous assistant msg. Used to collapse role row + footer between
+    // segments so multi-segment codex turns read as one continuous reply.
+    let isContinuation = false;
+    if (m.role === 'assistant' && m.turnId) {
+      const last = this.messagesEl.lastElementChild as HTMLElement | null;
+      if (last?.classList.contains('nc-msg') && last.classList.contains('assistant')) {
+        const prevTurn = last.getAttribute('data-turn-id');
+        if (prevTurn && prevTurn === m.turnId) isContinuation = true;
+      }
+    }
+    const continuationCls = isContinuation ? ' nc-asst-continuation' : '';
+    const wrap = el('div', { className: `nc-msg ${m.role}${m.compactSummary ? ' compact-summary collapsed' : ''}${continuationCls}`, parent: this.messagesEl });
+    if (m.role === 'assistant' && m.turnId) wrap.setAttribute('data-turn-id', m.turnId);
+
+    const role = el('div', { className: 'nc-msg-role', parent: wrap });
+    const ricon = el('span', { className: 'nc-role-icon', parent: role });
+    if (m.compactSummary) {
+      // Distinct icon + label + interactive collapse/undo controls
+      ricon.innerHTML = ICON.folderFile;
+      const depthBadge = (m.summaryDepth && m.summaryDepth > 1) ? ` · L${m.summaryDepth}` : '';
+      const tag = m.summaryOfCount
+        ? `Compacted · ${m.summaryOfCount} msgs · ~${formatTokenCount(m.summaryTokensSaved ?? 0)} tok saved${depthBadge}`
+        : 'Compacted summary' + depthBadge;
+      el('span', { text: tag, className: 'nc-compact-tag', parent: role });
+      // Actions row inside the header
+      const acts = el('span', { className: 'nc-compact-actions', parent: role });
+      // Expand / collapse toggle
+      const toggleBtn = el('button', { className: 'nc-compact-toggle', parent: acts });
+      toggleBtn.innerHTML = ICON.chevronDown;
+      toggleBtn.title = 'Toggle summary';
+      toggleBtn.onclick = (e) => { e.stopPropagation(); wrap.classList.toggle('collapsed'); };
+      // Undo button — only present if a snapshot exists for this summary
+      const hasSnapshot = (this.session.compactHistory ?? []).some(s => s.summaryId === m.id);
+      if (hasSnapshot) {
+        const undoBtn = el('button', { className: 'nc-compact-undo', parent: acts, attrs: { title: 'Restore the pre-compact messages' } });
+        undoBtn.innerHTML = `${ICON.undo}<span>Undo</span>`;
+        undoBtn.onclick = (e) => { e.stopPropagation(); this.undoCompact(m.id); };
+      }
+      // Whole header row toggles collapse too (but ignore clicks on action buttons)
+      role.onclick = (e) => {
+        if ((e.target as HTMLElement).closest('.nc-compact-actions')) return;
+        wrap.classList.toggle('collapsed');
+      };
+    } else if (m.role === 'user') {
+      // No role row for user — the darker bubble bg is the visual marker.
+      role.classList.add('hidden-role');
+    } else {
+      ricon.innerHTML = ICON.bot;
+      el('span', { text: 'Glossa', className: 'nc-role-name', parent: role });
+      // Live elapsed-time counter — only updates while the message is in the
+      // `.streaming` state. Surfaces during the long codex-CLI "Thinking…" wait
+      // (xhigh reasoning can take 30–60s before a single token surfaces).
+      el('span', { className: 'nc-msg-elapsed', parent: role, text: '' });
+    }
+
+    // DOM order matches the model's thought→speech progression: reasoning FIRST,
+    // then prose, then tool actions. Read top-to-bottom = chronologically correct.
+
+    // Persistent reasoning card (separate from inline <thinking> blocks). Goes ABOVE
+    // the body so reasoning visually precedes the prose it produced.
+    let reasoningCard: HTMLElement | undefined;
+    let reasoningBody: HTMLElement | undefined;
+    if (m.role === 'assistant') {
+      reasoningCard = el('details', { className: 'nc-thinking-card nc-reasoning', parent: wrap });
+      const sum = el('summary', { className: 'nc-thinking-summary', parent: reasoningCard });
+      const lbl = el('span', { parent: sum });
+      lbl.textContent = `🧠 Reasoning ${m.reasoningContent ? `(${m.reasoningContent.length.toLocaleString()} chars)` : '(streaming…)'}`;
+      reasoningBody = el('div', { className: 'nc-thinking-body', parent: reasoningCard });
+      const lazyRender = () => {
+        if (!reasoningCard?.hasAttribute('open') || !m.reasoningContent || !reasoningBody) return;
+        renderInto(this.app, m.reasoningContent, reasoningBody, this).catch(() => {});
+      };
+      reasoningCard.addEventListener('toggle', lazyRender);
+      if (!m.reasoningContent) reasoningCard.style.display = 'none';
+    }
+
+    // Inline <thinking>…</thinking> / <reasoning>…</reasoning> blocks extracted
+    // from the model's text content are MERGED into the unified reasoning card
+    // above (m.reasoningContent), not rendered as a separate card. Previously
+    // we showed two distinct "🧠 Reasoning" cards per turn for models that mix
+    // both channels — confusing.
+    // Prefer the user-facing pretty form (e.g. just "/summarize") over the
+     // full expanded template that was actually sent to the model. Falls back
+     // to `content` for legacy messages and all assistant messages.
+    const bodySrc = m.displayContent ?? m.content ?? '';
+    const { visible, thinking } = extractThinking(bodySrc);
+    if (thinking && reasoningCard && m.role === 'assistant' && !(m as any)._mergedInlineThinking) {
+      // Append the extracted block to the existing reasoningContent so the
+      // single unified card displays everything. Persist on the message so
+      // export / replay see the merged form.
+      //
+      // Guarded by `_mergedInlineThinking` so re-renders (loadSession,
+      // compact, history modal) don't append the same block again — without
+      // the guard, every reload doubled `reasoningContent` length, which
+      // surfaced as ever-growing "Reasoning (N chars)" labels.
+      const merged = m.reasoningContent
+        ? `${m.reasoningContent}\n\n---\n\n${thinking}`
+        : thinking;
+      m.reasoningContent = merged;
+      (m as any)._mergedInlineThinking = true;
+      // Update the unified card label
+      const lbl = reasoningCard.querySelector('.nc-thinking-summary') as HTMLElement | null;
+      if (lbl) lbl.textContent = `🧠 Reasoning (${merged.length.toLocaleString()} chars)`;
+      reasoningCard.style.display = '';
+    }
+
+    // Main visible content. Hash-cache: a message's rendered HTML only
+    // depends on (role, content). On batch load (loadSession, compact undo,
+    // history switch) we re-render every message; the cache lets us skip
+    // markdown + MathJax + mermaid for content we've rendered before in
+    // this session, turning a 200-message switch from O(N) renders into
+    // O(N) cheap innerHTML assigns. Cache is per-view-instance + LRU-capped
+    // so it doesn't grow unbounded across sessions.
+    const body = el('div', { className: 'nc-msg-body', parent: wrap });
+    const cacheKey = `${m.role}\x00${visible}`;
+    const cached = this.renderCache.get(cacheKey);
+    if (cached !== undefined) {
+      // Trusted HTML: cached value was produced by Obsidian's MarkdownRenderer
+      // (which sanitises) and stored without further mutation. Refresh
+      // LRU position by re-setting.
+      body.innerHTML = cached;
+      this.renderCache.delete(cacheKey);
+      this.renderCache.set(cacheKey, cached);
+      if (m.role === 'assistant') decorateCodeBlocks(body, this.codeBlockHandlers());
+    } else {
+      renderInto(this.app, visible, body, this)
+        .then(() => {
+          if (m.role === 'assistant') decorateCodeBlocks(body, this.codeBlockHandlers());
+          // After render, snapshot innerHTML into the cache. Cap at 200 entries
+          // (Map iterates in insertion order — drop the oldest).
+          try {
+            const html = body.innerHTML;
+            if (html && html.length < 200_000) {
+              this.renderCache.set(cacheKey, html);
+              if (this.renderCache.size > 200) {
+                const oldest = this.renderCache.keys().next().value;
+                if (oldest != null) this.renderCache.delete(oldest);
+              }
+            }
+          } catch {}
+        })
+        .catch(() => {});
+    }
+
+    // Selection echo (user-side): show the quoted snippet that went into the prompt.
+    if (m.role === 'user' && m.selectionEcho) {
+      const echo = el('details', { className: 'nc-selection-echo', parent: wrap });
+      el('summary', { className: 'nc-selection-echo-summary', text: `📎 Selection · ${m.selectionEcho.source}${m.selectionEcho.file ? ' · ' + m.selectionEcho.file : ''} (${m.selectionEcho.text.length} chars)`, parent: echo });
+      const pre = el('pre', { className: 'nc-selection-echo-body', parent: echo });
+      pre.textContent = m.selectionEcho.text.slice(0, 4000) + (m.selectionEcho.text.length > 4000 ? '\n…[truncated]' : '');
+    }
+
+    // Tool event stack (after body — actions follow the explanation that triggered them).
+    let toolStack: HTMLElement | undefined;
+    if (m.role === 'assistant') {
+      toolStack = el('div', { className: 'nc-tool-events-stack', parent: wrap });
+      if (m.toolEvents && m.toolEvents.length) {
+        for (const ev of m.toolEvents) this.appendToolCard(toolStack, ev);
+        this.updateToolStackCollapse(toolStack);
+      }
+    }
+
+    const ui: MsgUI = { msg: m, wrap, body, toolStack, reasoningCard, reasoningBody };
+    this.msgUIs.set(m.id, ui);
+
+    this.renderMessageActions(wrap, m);
+    ui.actionsEl = wrap.querySelector('.nc-msg-actions') as HTMLElement;
+
+    // History replay: apply preamble style for messages with text+tools loaded from storage.
+    if (m.role === 'assistant') this.applyPreambleStyle(ui, m);
+
+    this.scrollToBottom();
+    return ui;
+  }
+
+  /* ---------- Plan board (todo_write sticky) ---------- */
+  private updatePlanBoard(items: any[]) {
+    this.session.plan = items
+      .filter(it => it && typeof it.content === 'string')
+      .map(it => ({
+        content: String(it.content),
+        activeForm: typeof it.activeForm === 'string' ? it.activeForm : undefined,
+        status: (['pending','in_progress','completed'].includes(it.status) ? it.status : 'pending') as PlanItem['status'],
+      }));
+    this.renderPlanBoard();
+    // Persist so the plan survives a reload / session switch
+    this.persistSession();
+  }
+
+  private renderPlanBoard() {
+    if (!this.planBoardEl) return;
+    if (this.currentPlan.length === 0) { this.planBoardEl.style.display = 'none'; clear(this.planBoardEl); return; }
+    this.planBoardEl.style.display = '';
+    clear(this.planBoardEl);
+
+    const done = this.currentPlan.filter(i => i.status === 'completed').length;
+    const total = this.currentPlan.length;
+    // Auto-collapse the body when every item is completed — header still shows the
+    // final progress badge so users can re-open it to review.
+    const allDone = total > 0 && done === total;
+    if (allDone) this.planBoardEl.classList.add('collapsed');
+    else this.planBoardEl.classList.remove('collapsed');
+
+    const header = el('div', { className: 'nc-plan-header', parent: this.planBoardEl });
+    const titleWrap = el('div', { className: 'nc-plan-title-wrap', parent: header });
+    const titleIcon = el('span', { className: 'nc-plan-title-icon', parent: titleWrap });
+    titleIcon.innerHTML = ICON.check;
+    el('span', { className: 'nc-plan-title', text: 'Plan', parent: titleWrap });
+    el('span', { className: 'nc-plan-progress', text: `${done} / ${total}`, parent: header });
+    const toggle = el('span', { className: 'nc-plan-toggle', text: '▾', parent: header });
+
+    const list = el('div', { className: 'nc-plan-list', parent: this.planBoardEl });
+    for (let i = 0; i < this.currentPlan.length; i++) {
+      const it = this.currentPlan[i];
+      const row = el('div', { className: `nc-plan-item ${it.status}`, parent: list });
+      const mark = el('span', { className: 'nc-plan-mark', parent: row });
+      mark.textContent = it.status === 'completed' ? '✓'
+                       : it.status === 'in_progress' ? '◐'
+                       : '○';
+      // Show activeForm for the currently-running step; imperative form otherwise.
+      const label = it.status === 'in_progress' && it.activeForm ? it.activeForm : it.content;
+      el('span', { className: 'nc-plan-text', text: label, parent: row });
+    }
+    // Click on header collapses the body
+    header.onclick = () => {
+      const open = !this.planBoardEl.classList.contains('collapsed');
+      this.planBoardEl.classList.toggle('collapsed', open);
+      toggle.textContent = open ? '▸' : '▾';
+    };
+  }
+
+  /** When loading a session from history, recover the latest plan from messages.
+   *  Only used as fallback for sessions saved before `session.plan` existed. */
+  private rebuildPlanFromSession() {
+    if (this.session.plan && this.session.plan.length > 0) { this.renderPlanBoard(); return; }
+    let recovered: PlanItem[] = [];
+    for (const m of this.session.messages) {
+      for (const ev of m.toolEvents ?? []) {
+        if (ev.name === 'todo_write' && Array.isArray(ev.args?.items)) {
+          recovered = ev.args.items.map((it: any) => ({
+            content: String(it?.content ?? ''),
+            activeForm: typeof it?.activeForm === 'string' ? it.activeForm : undefined,
+            status: (['pending','in_progress','completed'].includes(it?.status) ? it.status : 'pending') as PlanItem['status'],
+          }));
+        }
+      }
+    }
+    if (recovered.length > 0) this.session.plan = recovered;
+    this.renderPlanBoard();
+  }
+
+  /* ---------- Tool event cards ---------- */
+  private appendToolCard(stack: HTMLElement, ev: ToolEvent): HTMLElement {
+    const attrs: Record<string, string> = { 'data-tool-id': ev.id, 'data-started-at': String(ev.startedAt) };
+    if (ev.endedAt) attrs['data-ended-at'] = String(ev.endedAt);
+    const box = el('div', {
+      className: 'nc-tool-event' + (ev.status === 'success' ? ' collapsed' : ''),
+      parent: stack,
+      attrs,
+    });
+    this.renderToolCard(box, ev);
+    return box;
+  }
+
+  private renderToolCard(box: HTMLElement, ev: ToolEvent) {
+    clear(box);
+    const meta = metaFor(ev.name);
+    box.style.setProperty('--tool-color', meta.color);
+
+    const hdr = el('div', { className: 'nc-tool-event-header', parent: box });
+
+    // Icon
+    const icon = el('span', { className: 'nc-tool-icon', parent: hdr });
+    icon.innerHTML = meta.icon;
+
+    // Header text — prefer the tool's own renderer for custom-formatted
+    // headers (e.g. a tool that wants to colorize args or show a badge).
+    // Falls back to the default verb+summary split layout when the tool
+    // didn't register a renderer.
+    const isRunning = ev.status === 'running' || ev.status === 'pending';
+    const custom = toolUseMessage(ev.name, ev.args);
+    if (custom instanceof HTMLElement) {
+      // Tool returned a DOM node — attach as a single header chunk.
+      custom.classList.add('nc-tool-event-name');
+      hdr.appendChild(custom);
+    } else if (typeof custom === 'string' && custom.length > 0 && !isRunning) {
+      // Tool returned plain text — render it as the verb/label span.
+      // (For the running state we still want the activity description, which
+      // returns "<verb> <summary>" — used below to keep spinner text consistent.)
+      el('span', { className: 'nc-tool-event-name', text: custom, parent: hdr });
+    } else {
+      // Default 2-span layout: verb/label + summary, with activityDescription
+      // applied while running so the user sees e.g. "Reading Foo.md" not "Read note Foo.md".
+      const verbOrLabel = isRunning ? activityDescriptionFor(ev.name, ev.args) : meta.label;
+      el('span', { className: 'nc-tool-event-name', text: verbOrLabel, parent: hdr });
+      // When NOT running, also show the summary as a separate span so the
+      // user can still see the file path next to the tool label.
+      if (!isRunning) {
+        const summary = meta.summarize ? meta.summarize(ev.args) : '';
+        if (summary) el('span', { className: 'nc-tool-event-args', text: summary, title: summary, parent: hdr });
+      }
+    }
+
+    // Elapsed time
+    const elapsed = ev.endedAt ? ev.endedAt - ev.startedAt : Date.now() - ev.startedAt;
+    el('span', { className: 'nc-tool-event-elapsed', text: formatElapsed(elapsed), parent: hdr });
+
+    // Status pill
+    const statusText = ev.status === 'success' ? '✓' : ev.status === 'error' ? '✕' : ev.status === 'denied' ? '−' : '·';
+    el('span', { className: `nc-tool-event-status ${ev.status}`, text: statusText, parent: hdr });
+
+    // Chevron
+    const chev = el('span', { className: 'nc-tool-event-chev', parent: hdr });
+    chev.innerHTML = ICON.arrowRight;
+
+    const body = el('div', { className: 'nc-tool-event-body', parent: box });
+    const argsDetails = el('details', { parent: body });
+    el('summary', { text: 'args', parent: argsDetails });
+    el('pre', { text: JSON.stringify(ev.args ?? {}, null, 2), parent: argsDetails });
+
+    // Result / error / denied — each branch consults the tool's own renderer
+    // first, then falls back to a default `<pre>` block. Custom renderers
+    // return either an HTMLElement (mounted directly) or a string (wrapped
+    // in <pre>).
+    const attachCustom = (parent: HTMLElement, node: HTMLElement | string | null): boolean => {
+      if (node == null) return false;
+      if (node instanceof HTMLElement) { parent.appendChild(node); return true; }
+      if (typeof node === 'string' && node.length > 0) {
+        el('pre', { text: node, parent });
+        return true;
+      }
+      return false;
+    };
+
+    if (ev.status === 'denied') {
+      const denDetails = el('details', { parent: body, attrs: { open: 'true' } });
+      el('summary', { text: 'denied', parent: denDetails });
+      const customDen = toolRejectedMessage(ev.name, ev.args);
+      if (!attachCustom(denDetails, customDen)) {
+        el('pre', { text: String(ev.result ?? 'User denied this action.'), parent: denDetails });
+      }
+    } else if (ev.status === 'error') {
+      const errDetails = el('details', { parent: body, attrs: { open: 'true' } });
+      el('summary', { text: 'error', parent: errDetails });
+      const customErr = toolErrorMessage(ev.name, String(ev.result ?? ''), ev.args);
+      if (!attachCustom(errDetails, customErr)) {
+        el('pre', { text: String(ev.result ?? '(no error message)').slice(0, 4000), parent: errDetails });
+      }
+    } else if (ev.result != null) {
+      const resDetails = el('details', { parent: body, attrs: { open: 'true' } });
+      el('summary', { text: 'result', parent: resDetails });
+      const customRes = toolResultMessage(ev.name, String(ev.result), ev.args);
+      if (!attachCustom(resDetails, customRes)) {
+        el('pre', { text: String(ev.result).slice(0, 4000), parent: resDetails });
+      }
+    }
+    hdr.onclick = (e) => {
+      const t = e.target as HTMLElement;
+      if (t.tagName === 'PRE' || t.tagName === 'SUMMARY' || t.tagName === 'DETAILS') return;
+      box.classList.toggle('collapsed');
+    };
+  }
+
+  private upsertToolEvent(ui: MsgUI, ev: ToolEvent) {
+    if (!ui.toolStack) ui.toolStack = el('div', { className: 'nc-tool-events-stack', parent: ui.wrap });
+    let card = ui.toolStack.querySelector(`[data-tool-id="${ev.id}"]`) as HTMLElement | null;
+    if (!card) {
+      this.appendToolCard(ui.toolStack, ev);
+    } else {
+      this.renderToolCard(card, ev);
+      card.classList.toggle('collapsed', ev.status === 'success');
+      if (ev.endedAt) (card as HTMLElement).dataset.endedAt = String(ev.endedAt);
+    }
+    this.updateToolStackCollapse(ui.toolStack);
+    this.scrollToBottom();
+  }
+
+  /** When a stack has 5+ cards AND every one is success (no error/denied/running),
+   *  auto-collapse to a single "⚙ Ran N tools · Xs · all ✓" summary line. Below
+   *  the threshold, just show the cards. Any pending/failed state keeps the
+   *  stack fully expanded — those need to stay visible.
+   *
+   *  Clicking the summary toggles expansion. */
+  private updateToolStackCollapse(stack: HTMLElement) {
+    // Aurora v0.4: threshold lowered from 5 to 3 so most multi-tool turns
+    // present as a single ribbon by default. 1-2 cards still expand inline
+    // (a "🔧 2 actions ▾" ribbon for two would feel like over-collapsing).
+    const AUTO_COLLAPSE = 3;
+    const cards = Array.from(stack.querySelectorAll(':scope > [data-tool-id]')) as HTMLElement[];
+    stack.querySelector(':scope > .nc-tool-stack-summary')?.remove();
+    stack.querySelector(':scope > .nc-tool-stack-more')?.remove();
+
+    const allDone = cards.every(c => {
+      const s = c.querySelector('.nc-tool-event-status');
+      return s && (s.classList.contains('success'));
+    });
+    const hasFailure = cards.some(c => c.querySelector('.nc-tool-event-status.error, .nc-tool-event-status.denied'));
+    const shouldCollapse = cards.length >= AUTO_COLLAPSE && allDone && !stack.classList.contains('expanded');
+
+    if (!shouldCollapse) {
+      stack.classList.remove('truncated');
+      for (const c of cards) c.classList.remove('hidden');
+      if (cards.length >= AUTO_COLLAPSE && allDone) {
+        // Currently expanded — offer a collapse pill back to the summary.
+        const collapse = el('button', { className: 'nc-tool-stack-more nc-tool-stack-collapse', parent: stack });
+        el('span', { className: 'nc-tool-stack-more-label', text: `Collapse · ${cards.length} tools`, parent: collapse });
+        collapse.onclick = () => { stack.classList.remove('expanded'); this.updateToolStackCollapse(stack); };
+      }
+      return;
+    }
+
+    // Collapsed state: hide all tool cards, show summary line.
+    for (const c of cards) c.classList.add('hidden');
+    stack.classList.add('truncated');
+    let totalMs = 0;
+    for (const c of cards) {
+      const started = parseInt((c as HTMLElement).dataset.startedAt ?? '0');
+      const ended = parseInt((c as HTMLElement).dataset.endedAt ?? `${Date.now()}`);
+      if (started && ended >= started) totalMs += ended - started;
+    }
+    const dur = totalMs < 1000 ? `${totalMs}ms` : `${(totalMs / 1000).toFixed(1)}s`;
+    const summary = el('button', { className: 'nc-tool-stack-summary', parent: stack });
+    summary.innerHTML = `<span class="nc-tool-stack-summary-icon">⚙</span> Ran ${cards.length} tools · ${dur} · <span class="nc-tool-stack-summary-ok">all ✓</span> <span class="nc-tool-stack-summary-chev">▸</span>`;
+    summary.onclick = () => { stack.classList.add('expanded'); this.updateToolStackCollapse(stack); };
+    if (hasFailure) (summary.querySelector('.nc-tool-stack-summary-ok') as HTMLElement).textContent = 'some failed';
+  }
+
+  private renderMessageActions(wrap: HTMLElement, m: ChatMessage) {
+    // Footer row: timestamp on the left + small action icons on the right,
+    // ALWAYS visible (no hover gating). Mirrors the iMessage / Slack pattern.
+    const footer = el('div', { className: 'nc-msg-footer', parent: wrap });
+    const ts = el('span', { className: 'nc-msg-time', parent: footer });
+    ts.textContent = this.formatMessageTime(m.timestamp);
+    const actions = el('div', { className: 'nc-msg-actions', parent: footer });
+    const mkBtn = (icon: string, label: string, onClick: () => void) => {
+      const b = el('button', { parent: actions, title: label, className: 'nc-icon-action' });
+      b.innerHTML = icon;
+      b.onclick = onClick;
+      return b;
+    };
+    const copyBtn = mkBtn(ICON.copy, 'Copy', () => {
+      navigator.clipboard.writeText(m.content);
+      copyBtn.innerHTML = ICON.checkThick;
+      copyBtn.style.color = '#3fb950';
+      setTimeout(() => { copyBtn.innerHTML = ICON.copy; copyBtn.style.color = ''; }, 900);
+    });
+    if (m.role === 'assistant') {
+      mkBtn(ICON.refresh, t('regenerate'), () => this.regenerateLast());
+      // Insert / Apply require an active markdown editor and many users never
+      // use them — hidden in 0.3 to declutter the footer. They live in the
+      // command palette (Glossa: Edit selection with AI…) if needed.
+      mkBtn(ICON.file, t('save_as_note'), () => this.saveResponseAsNote(m));
+      mkBtn(ICON.history, t('fork_from'), () => this.forkFromMessage(m));
+      this.plugin.checkpoint.listForSession(this.session.id).then(list => {
+        const cp = list.find(c => c.turnId === m.id && c.snapshots.length > 0);
+        if (cp) {
+          mkBtn(ICON.refresh, 'Rollback file edits made in this turn', async () => {
+            const paths = cp.snapshots.map(s => s.path).join('\n  • ');
+            if (!confirm(`Rollback will overwrite ${cp.snapshots.length} file(s):\n  • ${paths}\n\nContinue?`)) return;
+            const { restored, failed } = await this.plugin.checkpoint.rollback(this.session.id, m.id);
+            quickNotice(`Rolled back ${restored} file(s)${failed.length ? `, ${failed.length} failed` : ''}.`);
+          });
+        }
+      });
+    }
+  }
+
+  private formatMessageTime(ts: number): string {
+    const d = new Date(ts);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  private forkFromMessage(m: ChatMessage) {
+    const idx = this.session.messages.findIndex(x => x.id === m.id);
+    if (idx < 0) return;
+    const kept = this.session.messages.slice(0, idx + 1);
+    const forked: ChatSession = {
+      id: uid(),
+      title: `Fork of ${this.session.title || 'chat'}`,
+      createdAt: Date.now(), updatedAt: Date.now(),
+      mode: this.session.mode,
+      endpointId: this.session.endpointId,
+      messages: JSON.parse(JSON.stringify(kept)),
+    };
+    this.persistSession();
+    this.plugin.store.saveSession(forked);
+    this.loadSession(forked.id);
+    quickNotice(`Forked: ${forked.title}`);
+  }
+
+
+  private codeBlockHandlers() {
+    return {
+      copy: (s: string) => { navigator.clipboard.writeText(s);; },
+      insert: (s: string) => this.insertAtCursor(s),
+      apply: (s: string) => this.applyEdit(s),
+    };
+  }
+
+  private scrollToBottom() {
+    // Only auto-scroll if the user is already near the bottom. If they scrolled
+    // up to read history, leave them alone — don't yank them down. 96px
+    // tolerance allows for the bottom action row + a bit of padding.
+    const msgsEl = this.messagesEl;
+    const distanceFromBottom = msgsEl.scrollHeight - (msgsEl.scrollTop + msgsEl.clientHeight);
+    if (distanceFromBottom < 96) {
+      msgsEl.scrollTo({ top: msgsEl.scrollHeight, behavior: 'smooth' });
+    }
+  }
+
+  /* ============================================================
+     Streaming render — Obsidian MarkdownRenderer everywhere (safe, no innerHTML).
+     Throttle 100ms; serialize concurrent renders; re-fire if buffer changed during render.
+     ============================================================ */
+  private streamRenderTimer: any;
+  private streamRenderInFlight = false;
+  private scheduleStreamingRender() {
+    if (this.streamRenderTimer || this.streamRenderInFlight || !this.streamingMsgUI) return;
+    this.streamRenderTimer = setTimeout(() => {
+      this.streamRenderTimer = null;
+      this.doStreamingRender();
+    }, 150);     // 150ms to reduce math flicker
+  }
+  /** Incremental render strategy: split the buffer at \n\n boundaries; render
+   *  the COMPLETED paragraphs once and append them, then re-render only the
+   *  trailing incomplete paragraph each tick. This avoids reparsing the whole
+   *  message (and re-typesetting all math) on every 150ms streaming tick.
+   *
+   *  Tracking state lives on streamingMsgUI: `committedParas` counts paragraphs
+   *  already appended (immutable); `tailEl` holds the in-progress last
+   *  paragraph that gets re-rendered. */
+  private async doStreamingRender() {
+    if (this.streamRenderInFlight || !this.streamingMsgUI) return;
+    this.streamRenderInFlight = true;
+    const snapshot = this.streamingBuf;
+    try {
+      const safe = trimIncompleteMath(snapshot);
+      const ui = this.streamingMsgUI as MsgUI & { _committedParas?: number; _tailEl?: HTMLElement };
+      const paras = safe.split('\n\n');
+      const committed = ui._committedParas ?? 0;
+      // Stable paragraphs: everything except the last one (which is still
+      // growing). Append any new ones (paras.length - 1 > committed).
+      if (paras.length - 1 > committed) {
+        for (let i = committed; i < paras.length - 1; i++) {
+          const wrap = document.createElement('div');
+          wrap.className = 'nc-stream-para';
+          // Insert BEFORE the tail element so paragraph order is correct.
+          if (ui._tailEl?.isConnected) ui.body.insertBefore(wrap, ui._tailEl);
+          else ui.body.appendChild(wrap);
+          await renderInto(this.app, paras[i], wrap, this);
+        }
+        ui._committedParas = paras.length - 1;
+      }
+      // Render the trailing (incomplete) paragraph — reuses tailEl so we don't
+      // accumulate orphan nodes.
+      if (!ui._tailEl || !ui._tailEl.isConnected) {
+        ui._tailEl = document.createElement('div');
+        ui._tailEl.className = 'nc-stream-para nc-stream-tail';
+        ui.body.appendChild(ui._tailEl);
+      }
+      const tailText = paras[paras.length - 1] ?? '';
+      // Fast-path: if the trailing paragraph has NO markdown syntax that
+      // would need a real parse (no math `$`, no code fences/backticks, no
+      // wikilinks/embeds, no callouts, no list/heading prefix), skip the
+      // markdown renderer + MathJax typeset and just set textContent. For
+      // pure-prose streaming (the common case during a long answer) this
+      // turns each tick from ~10-30ms into <1ms.
+      const hasMarkdown = /[`$]|^\s*[#>\-*\d]|\[\[/m.test(tailText);
+      if (!hasMarkdown) {
+        ui._tailEl.textContent = tailText;
+      } else {
+        await renderInto(this.app, tailText, ui._tailEl, this);
+      }
+    } catch (e) { /* ignore */ }
+    this.streamRenderInFlight = false;
+    if (this.streamingMsgUI && this.streamingBuf !== snapshot) this.scheduleStreamingRender();
+  }
+
+  /** Finalize the current streaming assistant message and immediately start
+   *  a fresh one. Called from `onText` when a tool ran in this same step and
+   *  text resumes — codex emits multiple agent_messages per turn interspersed
+   *  with tool calls, and we render each as its own bubble for readability. */
+  private flushAndStartNewAsstSegment() {
+    if (this.currentAsstMsg && this.streamingMsgUI) {
+      this.currentAsstMsg.content = this.streamingBuf;
+      this.streamingMsgUI.wrap.classList.remove('streaming');
+      this.finalizeReasoningLabel(this.streamingMsgUI, this.currentAsstMsg);
+      // Synchronously apply preamble/has-tools styling — fire-and-forget the
+      // markdown re-render so we don't block the new text from showing.
+      this.finalizeAsstRender(this.streamingMsgUI, this.currentAsstMsg).catch(() => {});
+    }
+    this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId ?? undefined };
+    this.session.messages.push(this.currentAsstMsg);
+    this.streamingBuf = '';
+    this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
+    this.streamingMsgUI.wrap.classList.add('streaming');
+    this.streamingStartedAt = Date.now();    // per-segment timer
+  }
+
+  /* ============================================================
+     Inline approval — replaces the modal popup
+     ============================================================ */
+  private askInlineApproval(tool: ToolImpl, args: any): Promise<ApprovalResult> {
+    return new Promise(async resolve => {
+      const host = this.streamingMsgUI?.wrap ?? this.messagesEl;
+      const wrap = el('div', { className: 'nc-inline-approval', parent: host });
+      const hdr = el('div', { className: 'nc-inline-approval-hdr', parent: wrap });
+      const ic = el('span', { className: 'nc-inline-approval-icon', parent: hdr });
+      ic.innerHTML = metaFor(tool.spec.name).icon;
+      // Header text — let the tool override via `renderToolUseMessage`; fall
+      // back to `<verb> — <describe>` to keep parity with prior behavior.
+      const customHdr = toolUseMessage(tool.spec.name, args);
+      if (customHdr instanceof HTMLElement) {
+        customHdr.classList.add('nc-inline-approval-title');
+        hdr.appendChild(customHdr);
+      } else {
+        const headerText = typeof customHdr === 'string' && customHdr.length > 0
+          ? `${customHdr} — ${tool.describe(args) ?? tool.spec.name}`
+          : `${metaFor(tool.spec.name).verb} — ${tool.describe(args) ?? tool.spec.name}`;
+        el('span', { className: 'nc-inline-approval-title', text: headerText, parent: hdr });
+      }
+
+      // Compact diff preview for known write tools (collapsed by default)
+      try {
+        const name = tool.spec.name;
+
+        // apply_patch + envelope → multi-file colored preview
+        if (name === 'apply_patch' && typeof args.patch === 'string' && (await import('../agent/patch_envelope')).looksLikeEnvelope(args.patch)) {
+          const { previewEnvelope } = await import('../agent/patch_envelope');
+          const { files, parseError } = await previewEnvelope(args.patch, async (p) => {
+            const f = this.app.vault.getAbstractFileByPath(p);
+            return f && 'extension' in (f as any) ? await this.app.vault.read(f as any) : null;
+          });
+          if (parseError) {
+            el('div', { className: 'nc-inline-approval-warning', text: `Parse error: ${parseError}`, parent: wrap });
+          } else {
+            const det = el('details', { parent: wrap });
+            el('summary', { className: 'nc-inline-approval-diff-summary', text: `Show diff (${files.length} file${files.length === 1 ? '' : 's'})`, parent: det });
+            for (const fp of files) {
+              const sec = el('div', { className: 'nc-inline-file-section', parent: det });
+              const head = el('div', { className: 'nc-inline-approval-file', parent: sec });
+              el('span', { className: `nc-approval-op-pill ${fp.kind}`, text: fp.kind, parent: head });
+              const label = fp.movePath && fp.movePath !== fp.path ? `${fp.path} → ${fp.movePath}` : fp.path;
+              el('span', { text: label, parent: head });
+              if (fp.warning) el('div', { className: 'nc-inline-approval-warning', text: '⚠ ' + fp.warning, parent: sec });
+              if (fp.kind === 'delete') {
+                el('div', { className: 'nc-diff-line del', text: `(file will be deleted)`, parent: sec });
+              } else if (fp.oldText !== (fp.newText ?? '')) {
+                const box = el('div', { className: 'nc-diff-box nc-inline-diff-box', parent: sec });
+                box.innerHTML = diffToHtml(fp.oldText, fp.newText ?? '');
+              } else {
+                el('div', { className: 'nc-diff-line eq', text: '(no changes)', parent: sec });
+              }
+            }
+          }
+        } else {
+          // Legacy / single-file path
+          let oldText = '', newText = '', label = '';
+          if (name === 'file_edit') {
+            label = args.file_path ?? '';
+            if (args.old_string === '') {
+              oldText = ''; newText = args.new_string ?? '';
+            } else {
+              const f = this.app.vault.getAbstractFileByPath(args.file_path);
+              if (f && 'extension' in (f as any)) {
+                try { oldText = await this.app.vault.read(f as any); } catch {}
+              }
+              if (typeof args.old_string === 'string' && oldText.includes(args.old_string)) {
+                newText = args.replace_all
+                  ? oldText.split(args.old_string).join(args.new_string ?? '')
+                  : oldText.replace(args.old_string, args.new_string ?? '');
+              } else {
+                newText = oldText;
+              }
+            }
+          } else if (name === 'write_note' || name === 'create_note' || name === 'edit_section' || name === 'apply_patch' || name === 'append_to_note') {
+            label = args.path ?? '';
+            const f = this.app.vault.getAbstractFileByPath(args.path);
+            if (f && 'extension' in (f as any)) {
+              try { oldText = await this.app.vault.read(f as any); } catch {}
+            }
+            if (name === 'write_note' || name === 'create_note') newText = args.content ?? '';
+            else if (name === 'edit_section' && typeof args.find === 'string' && args.find && oldText.includes(args.find)) newText = oldText.replace(args.find, args.replace ?? '');
+            else if (name === 'append_to_note') newText = oldText + (oldText.endsWith('\n') ? '' : '\n') + (args.text ?? '');
+            else if (name === 'apply_patch' && Array.isArray(args.edits)) {
+              let cur = oldText;
+              for (const ed of args.edits) if (typeof ed?.search === 'string' && cur.includes(ed.search)) cur = cur.replace(ed.search, ed.replace ?? '');
+              newText = cur;
+            }
+          }
+          if (label) el('div', { className: 'nc-inline-approval-file', text: label, parent: wrap });
+          if (oldText !== newText) {
+            const det = el('details', { parent: wrap });
+            el('summary', { className: 'nc-inline-approval-diff-summary', text: 'Show diff', parent: det });
+            const box = el('div', { className: 'nc-diff-box nc-inline-diff-box', parent: det });
+            box.innerHTML = diffToHtml(oldText, newText);
+          }
+        }
+      } catch {}
+
+      /* --- "Always allow" rule selector --- */
+      // Show only when the tool has a path-ish arg (so folder/path scopes make sense)
+      const path = (args?.path ?? args?.file_path) as string | undefined;
+      const folder = path ? path.split('/').slice(0, -1).join('/') : undefined;
+      type RuleChoice = 'once' | 'session-tool' | 'always-tool' | 'always-folder' | 'always-path' | 'always-mcp-server';
+      let ruleChoice: RuleChoice = 'once';
+      const ruleRow = el('div', { className: 'nc-inline-rule-row', parent: wrap });
+      el('span', { text: 'Persist:', className: 'nc-inline-rule-label', parent: ruleRow });
+      const opts: { value: RuleChoice; label: string }[] = [
+        { value: 'once', label: 'Just this once' },
+        { value: 'session-tool', label: `Allow ${tool.spec.name} this session` },
+        { value: 'always-tool', label: `Always allow ${tool.spec.name}` },
+      ];
+      if (folder) opts.push({ value: 'always-folder', label: `…in /${folder}` });
+      if (path)   opts.push({ value: 'always-path',   label: `…for ${path.split('/').slice(-1)[0]}` });
+      // MCP namespaced tool: "<server>__<tool>" → offer server-level allow
+      const mcpServer = tool.spec.name.includes('__') ? tool.spec.name.split('__')[0] : null;
+      if (mcpServer) opts.push({ value: 'always-mcp-server', label: `Always allow MCP server "${mcpServer}"` });
+      const sel = el('select', { className: 'nc-inline-rule-select', parent: ruleRow }) as HTMLSelectElement;
+      for (const o of opts) {
+        const optEl = document.createElement('option');
+        optEl.value = o.value; optEl.textContent = o.label;
+        sel.appendChild(optEl);
+      }
+      sel.onchange = () => { ruleChoice = sel.value as RuleChoice; };
+
+      const acts = el('div', { className: 'nc-inline-approval-actions', parent: wrap });
+      // Hint row: discreet keyboard shortcuts to the left of the buttons so the
+      // user knows Enter/Esc/A work without having to hover for tooltips.
+      const hints = el('span', { className: 'nc-inline-approval-hints', parent: acts });
+      hints.innerHTML = `<kbd>↵</kbd> approve · <kbd>Esc</kbd> deny · <kbd>A</kbd> always`;
+      const deny = el('button', { className: 'nc-inline-deny', parent: acts, title: 'Deny (Esc)' });
+      deny.innerHTML = 'Deny';
+      const approve = el('button', { className: 'nc-inline-approve', parent: acts, title: 'Approve (Enter)' });
+      approve.innerHTML = 'Approve';
+
+      const buildRule = (): import('../types').PermissionRule | undefined => {
+        if (ruleChoice === 'once') return undefined;
+        const base = { addedAt: Date.now(), behavior: 'allow' as const };
+        if (ruleChoice === 'session-tool')      return { ...base, tool: tool.spec.name, scope: 'global', scopedToSessionId: this.session.id };
+        if (ruleChoice === 'always-tool')       return { ...base, tool: tool.spec.name, scope: 'global' };
+        if (ruleChoice === 'always-folder' && folder !== undefined)
+                                                 return { ...base, tool: tool.spec.name, scope: 'folder', value: folder };
+        if (ruleChoice === 'always-path' && path) return { ...base, tool: tool.spec.name, scope: 'path', value: path };
+        if (ruleChoice === 'always-mcp-server' && mcpServer)
+                                                 return { ...base, tool: `mcp:${mcpServer}:*`, scope: 'global' };
+        return undefined;
+      };
+      const finish = (ok: boolean) => {
+        wrap.remove();
+        if (!ok) return resolve({ ok });
+        resolve({ ok, persistRule: buildRule() });
+      };
+      deny.onclick = () => finish(false);
+      approve.onclick = () => finish(true);
+      this.scrollToBottom();
+
+      const keyH = (e: KeyboardEvent) => {
+        if (!wrap.isConnected) { document.removeEventListener('keydown', keyH, true); return; }
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.removeEventListener('keydown', keyH, true); finish(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); document.removeEventListener('keydown', keyH, true); finish(false); }
+        // 'a' (always-allow this tool globally) — only when focus isn't inside an input.
+        else if ((e.key === 'a' || e.key === 'A') && !(document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement)) {
+          e.preventDefault();
+          ruleChoice = 'always-tool';
+          document.removeEventListener('keydown', keyH, true);
+          finish(true);
+        }
+      };
+      document.addEventListener('keydown', keyH, true);
+    });
+  }
+
+  private reasoningRenderTimer: any;
+  private scheduleReasoningRender() {
+    if (this.reasoningRenderTimer || !this.streamingMsgUI?.reasoningCard) return;
+    this.reasoningRenderTimer = setTimeout(async () => {
+      this.reasoningRenderTimer = null;
+      const ui = this.streamingMsgUI;
+      const content = this.currentAsstMsg?.reasoningContent ?? '';
+      if (!ui?.reasoningCard || !ui.reasoningBody) return;
+      ui.reasoningCard.style.display = '';
+      // Stay COLLAPSED — user clicks to peek. Only update the summary label.
+      const sum = ui.reasoningCard.querySelector('.nc-thinking-summary span');
+      if (sum) sum.textContent = `🧠 Reasoning (${content.length.toLocaleString()} chars${this.streaming ? ' · streaming' : ''})`;
+      // Only render the body content if the user has actually opened it.
+      if (ui.reasoningCard.hasAttribute('open')) {
+        try { await renderInto(this.app, content, ui.reasoningBody, this); } catch {}
+      }
+    }, 300);
+  }
+
+  private elapsedTimer: any;
+  private startElapsedTicker() {
+    if (this.elapsedTimer) return;
+    this.elapsedTimer = setInterval(() => this.tickElapsed(), 250);
+  }
+  private stopElapsedTicker() {
+    if (this.elapsedTimer) { clearInterval(this.elapsedTimer); this.elapsedTimer = null; }
+  }
+  private tickElapsed() {
+    // Update the per-message elapsed counter on the role label.
+    if (this.streamingMsgUI && this.streamingStartedAt > 0) {
+      const elapsed = (Date.now() - this.streamingStartedAt) / 1000;
+      const elEl = this.streamingMsgUI.wrap.querySelector('.nc-msg-elapsed') as HTMLElement | null;
+      if (elEl) {
+        if (elapsed < 1.0) elEl.textContent = '';
+        else if (elapsed < 60) elEl.textContent = `${elapsed.toFixed(1)}s`;
+        else elEl.textContent = `${Math.floor(elapsed / 60)}m${(elapsed % 60).toFixed(0).padStart(2, '0')}s`;
+      }
+    }
+    if (!this.streamingMsgUI?.toolStack) return;
+    const now = Date.now();
+    this.streamingMsgUI.toolStack.querySelectorAll('.nc-tool-event').forEach(card => {
+      const statusEl = card.querySelector('.nc-tool-event-status') as HTMLElement | null;
+      if (!statusEl) return;
+      const isActive = statusEl.classList.contains('running') || statusEl.classList.contains('pending');
+      if (!isActive) return;
+      const elapsedEl = card.querySelector('.nc-tool-event-elapsed');
+      const startedAttr = (card as HTMLElement).dataset.startedAt;
+      if (elapsedEl && startedAttr) {
+        elapsedEl.textContent = formatElapsed(now - parseInt(startedAttr));
+      }
+    });
+  }
+
+  /* ============================================================
+     Input
+     ============================================================ */
+  private inputRafPending = false;
+  /** Single source of truth for textarea auto-sizing. Coalesces concurrent
+   *  recomputes into one rAF frame, sets `height:auto` first (so shrinking
+   *  works), then clamps to [min-height (from CSS), 240px]. Used by typing,
+   *  slash insertion, history recall, submit clear — every path that
+   *  mutates `inputEl.value`. */
+  private recomputeInputHeight() {
+    if (this.inputRafPending) return;
+    this.inputRafPending = true;
+    requestAnimationFrame(() => {
+      this.inputRafPending = false;
+      if (!this.inputEl) return;
+      this.inputEl.style.height = 'auto';
+      // Force a synchronous reflow so scrollHeight reflects the new content,
+      // not the prior (potentially taller) box.
+      void this.inputEl.offsetHeight;
+      const h = Math.min(this.inputEl.scrollHeight, 240);
+      this.inputEl.style.height = h + 'px';
+    });
+  }
+
+  // Composer DOM refs that survive across rebuilds.
+  private permPillEl!: HTMLElement;
+  private reasoningPillEl!: HTMLElement;
+
+  private buildInput() {
+    const wrap = el('div', { className: 'nc-input-wrap', parent: this.rootEl });
+    this.inputWrap = wrap;
+
+    this.selectionPreviewEl = el('div', { className: 'nc-selection-preview', parent: wrap });
+    this.selectionPreviewEl.style.display = 'none';
+    this.contextBarEl = el('div', { className: 'nc-context-bar', parent: wrap });
+
+    this.inputEl = el('textarea', {
+      className: 'nc-input', parent: wrap,
+      attrs: {
+        placeholder: t('placeholder_input'),
+        // a11y: explicit label + role so screen readers announce the
+        // composer purpose rather than just "textarea".
+        'aria-label': t('placeholder_input'),
+        role: 'textbox',
+        'aria-multiline': 'true',
+      },
+    }) as HTMLTextAreaElement;
+
+    this.inputEl.addEventListener('input', () => {
+      this.handleTrigger();
+      this.historyCursor = -1;
+      this.recomputeInputHeight();
+    });
+    this.inputEl.addEventListener('keydown', (e) => {
+      // IME composition guard: Chinese / Japanese / Korean input methods open
+      // a candidate-selection panel while the user types. Pressing Enter then
+      // COMMITS the IME selection — we must NOT treat that keydown as a
+      // "send" intent. `e.isComposing` is the modern flag; legacy WebKit
+      // doesn't set it but reports keyCode 229. Cover both.
+      if (e.isComposing || (e as any).keyCode === 229) return;
+      if (this.popup.onKey(e)) { e.preventDefault(); return; }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.submit(); return; }
+      if (e.key === 'Enter' && !e.shiftKey && this.inputEl.value.trim() && !this.streaming) {
+        e.preventDefault(); this.submit(); return;
+      }
+      if (e.key === 'ArrowUp' && this.caretAtTop()) {
+        if (this.recallHistory(-1)) e.preventDefault();
+      } else if (e.key === 'ArrowDown' && this.caretAtBottom()) {
+        if (this.recallHistory(+1)) e.preventDefault();
+      }
+    });
+
+    /* Footer (Cursor-style):
+       [+]  [permissions ▼]   (spacer)   [reasoning ▼]  [send] */
+    const footer = el('div', { className: 'nc-input-footer', parent: wrap });
+
+    // (1) Attach button — hidden file input + button
+    const fileInput = el('input', { className: 'nc-file-input', parent: footer, type: 'file', attrs: { multiple: 'true', accept: '*/*' } }) as HTMLInputElement;
+    fileInput.style.display = 'none';
+    fileInput.onchange = async () => {
+      if (fileInput.files) for (const f of Array.from(fileInput.files)) this.ctx.add(await resolveDroppedFile(f));
+      fileInput.value = '';
+    };
+    const attachBtn = el('button', { className: 'nc-composer-icon-btn', parent: footer, title: t('attach_file') });
+    attachBtn.innerHTML = ICON.plusThin;
+    attachBtn.onclick = () => fileInput.click();
+
+    // (2) Permission pill — quick toggle of read-only / workspace-write / full
+    this.permPillEl = el('button', { className: 'nc-composer-pill nc-perm-pill', parent: footer });
+    this.updatePermPill();
+    this.permPillEl.onclick = (e) => this.openPermissionMenu(e);
+
+    // (3) Model chip — moved below the textarea per user feedback. Sits right
+    //     after the permission pill so the "current behaviour" cluster
+    //     (permissions + model) reads as a single group on the left.
+    this.modelBtn = el('span', { className: 'nc-model-chip', parent: footer, title: 'Pick endpoint / model' });
+    this.updateModelBtn();
+    this.modelBtn.onclick = (e) => this.openEndpointMenu(e);
+
+    // (spacer)
+    el('span', { className: 'nc-input-footer-spacer', parent: footer });
+
+    // (3) Reasoning effort pill — brain + level
+    this.reasoningPillEl = el('button', { className: 'nc-composer-pill nc-reasoning-pill', parent: footer });
+    this.updateReasoningPill();
+    this.reasoningPillEl.onclick = (e) => this.openReasoningMenu(e);
+
+    // (4) Send / stop
+    this.submitBtn = el('button', { className: 'nc-submit-btn nc-submit-icon-only', parent: footer }) as HTMLButtonElement;
+    this.updateSubmitBtn();
+    this.submitBtn.onclick = () => this.streaming ? this.cancelStream() : this.submit();
+
+    this.installDropZone(wrap);
+    this.inputEl.addEventListener('paste', async (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      let used = false;
+      for (const it of Array.from(items)) {
+        if (it.kind === 'file') {
+          const f = it.getAsFile();
+          if (f) { this.ctx.add(await resolveDroppedFile(f)); used = true; }
+        }
+      }
+      if (used) e.preventDefault();
+    });
+  }
+
+  /* ---------- Composer pills (permissions + reasoning) ---------- */
+
+  private permLabel(): string {
+    const lvl = this.plugin.settings.permissionLevel;
+    if (lvl === 'read-only')       return bi('Read only', '只读');
+    if (lvl === 'workspace-write') return bi('Workspace write', '可写 vault');
+    return bi('Full access', '完全权限');
+  }
+  private updatePermPill() {
+    if (!this.permPillEl) return;
+    clear(this.permPillEl);
+    const lvl = this.plugin.settings.permissionLevel;
+    // Lucide `shield` family — keyed to the permission level. Drawn at
+    // viewBox 24×24, stroke 2 (Lucide native) so they render at canonical
+    // weight when the pill renders the SVG at 14px.
+    let path: string;
+    if (lvl === 'read-only') {
+      // shield-check
+      path = `<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>`;
+    } else if (lvl === 'workspace-write') {
+      // shield-half
+      path = `<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 22V2"/>`;
+    } else {
+      // shield-alert (full access — flag with a !)
+      path = `<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/>`;
+    }
+    const ic = el('span', { className: 'nc-pill-glyph', parent: this.permPillEl });
+    ic.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+    el('span', { className: 'nc-pill-text', text: this.permLabel(), parent: this.permPillEl });
+    el('span', { className: 'nc-pill-caret', text: '▾', parent: this.permPillEl });
+    this.permPillEl.title = bi('Click to switch permission level', '点击切换权限级别');
+    this.permPillEl.classList.toggle('perm-read',  lvl === 'read-only');
+    this.permPillEl.classList.toggle('perm-write', lvl === 'workspace-write');
+    this.permPillEl.classList.toggle('perm-full',  lvl === 'full');
+  }
+  /** Show or hide the shared popup against `anchor`. If the popup is already
+   *  open against the SAME anchor, second click hides it (toggle). If open
+   *  against a different anchor, switch to the new one. */
+  private togglePopup(anchor: HTMLElement, items: PopupItem[]) {
+    if (this.popup.isOpen() && this.popup.currentAnchor() === anchor) {
+      this.popup.hide();
+      return;
+    }
+    this.popup.show(anchor, items);
+  }
+
+  private openPermissionMenu(_e: MouseEvent) {
+    const cur = this.plugin.settings.permissionLevel;
+    const opts: { v: 'read-only' | 'workspace-write' | 'full'; label: string }[] = [
+      { v: 'read-only',       label: bi('Read only',       '只读') },
+      { v: 'workspace-write', label: bi('Workspace write', '可写 vault') },
+      { v: 'full',            label: bi('Full access',     '完全权限') },
+    ];
+    const items: PopupItem[] = opts.map(o => ({
+      label: o.label,
+      checked: cur === o.v,
+      onSelect: async () => {
+        this.plugin.settings.permissionLevel = o.v;
+        await this.plugin.saveSettings();
+        this.updatePermPill();
+      },
+    }));
+    this.togglePopup(this.permPillEl, items);
+  }
+
+  /** Reasoning effort levels actually supported by the active endpoint. Codex
+   *  supports the full set including 'xhigh'; OpenAI/Anthropic stop at 'high';
+   *  endpoints that don't surface a reasoning knob are filtered to ['off'] so
+   *  the pill greys out. */
+  private reasoningOptionsForActive(): { v: import('../types').ReasoningEffort; label: string }[] {
+    const ep = this.activeEndpoint();
+    if (!ep) return [];
+    const base = [
+      { v: 'off' as const,    label: t('effort_off') },
+      { v: 'low' as const,    label: t('effort_low') },
+      { v: 'medium' as const, label: t('effort_medium') },
+      { v: 'high' as const,   label: t('effort_high') },
+    ];
+    if (ep.kind === 'codex-cli') return [...base, { v: 'xhigh' as const, label: t('effort_xhigh') }];
+    return base;
+  }
+  private updateReasoningPill() {
+    if (!this.reasoningPillEl) return;
+    clear(this.reasoningPillEl);
+    const ep = this.activeEndpoint();
+    const effort = (ep?.reasoningEffort ?? 'medium') as import('../types').ReasoningEffort;
+    const ic = el('span', { className: 'nc-pill-glyph', parent: this.reasoningPillEl });
+    // Lucide `sparkles` — same icon ChatGPT and Cursor use for reasoning /
+    // thinking. Universally readable, brand-neutral.
+    ic.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>`;
+    // Subtle subscript so users see the current level at a glance.
+    const map: Record<string, string> = { off: '·', low: 'L', medium: 'M', high: 'H', xhigh: 'X' };
+    el('span', { className: 'nc-pill-sub', text: map[effort] ?? 'M', parent: this.reasoningPillEl });
+    el('span', { className: 'nc-pill-caret', text: '▾', parent: this.reasoningPillEl });
+    this.reasoningPillEl.title = bi(`Reasoning effort: ${effort}`, `思考强度：${effort}`);
+    this.reasoningPillEl.classList.toggle('disabled', !ep);
+  }
+  private async openReasoningMenu(_e: MouseEvent) {
+    const ep = this.activeEndpoint();
+    if (!ep) return;
+    const cur = ep.reasoningEffort ?? 'medium';
+    const items: PopupItem[] = this.reasoningOptionsForActive().map(o => ({
+      label: o.label,
+      checked: cur === o.v,
+      onSelect: async () => {
+        ep.reasoningEffort = o.v;
+        await this.plugin.saveSettings();
+        this.updateReasoningPill();
+      },
+    }));
+    this.togglePopup(this.reasoningPillEl, items);
+  }
+
+  /** Public — refreshes the composer pills after settings change. */
+  refreshComposerPills() {
+    this.updatePermPill();
+    this.updateReasoningPill();
+  }
+
+  private installDropZone(wrap: HTMLElement) {
+    let overlay: HTMLElement | null = null;
+    const showOverlay = () => {
+      if (overlay) return;
+      overlay = el('div', { className: 'nc-drop-overlay', parent: wrap, text: 'Drop files to attach' });
+    };
+    const hideOverlay = () => { overlay?.remove(); overlay = null; };
+
+    wrap.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      showOverlay();
+    });
+    wrap.addEventListener('dragleave', (e) => {
+      if (e.relatedTarget && wrap.contains(e.relatedTarget as Node)) return;
+      hideOverlay();
+    });
+    wrap.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      hideOverlay();
+      const files = e.dataTransfer?.files;
+      if (!files) return;
+      for (const f of Array.from(files)) {
+        try { this.ctx.add(await resolveDroppedFile(f)); }
+        catch (err: any) { quickNotice(`Failed to attach ${f.name}: ${err.message}`); }
+      }
+    });
+  }
+
+  /** Aurora v0.4: visual handoff when the user sends. Drops a ghost
+   *  element with the textarea content at the input's exact position,
+   *  then drifts it up + fades it out so the eye is "carried" toward
+   *  where the assistant message will appear. Bails early on
+   *  reduced-motion preference or overlong text so we never paint a
+   *  giant translucent slab over the canvas. */
+  private playSendFlyout(text: string) {
+    if (!text) return;
+    if (!this.inputEl || !this.inputWrap) return;
+    if (text.length > 400) return;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const rect = this.inputWrap.getBoundingClientRect();
+    const ghost = document.createElement('div');
+    ghost.className = 'nc-send-flyout';
+    ghost.textContent = text;
+    Object.assign(ghost.style, {
+      position: 'fixed',
+      left: `${rect.left + 8}px`,
+      top:  `${rect.top + 8}px`,
+      width:  `${rect.width - 16}px`,
+      maxHeight: '120px',
+    });
+    document.body.appendChild(ghost);
+    // Two-frame deferral: one frame for the browser to paint the ghost at
+    // its origin, another to apply the .flying class. Without this both
+    // states fire in the same paint and the transition is skipped.
+    requestAnimationFrame(() => requestAnimationFrame(() => ghost.classList.add('flying')));
+    window.setTimeout(() => ghost.remove(), 520);
+  }
+
+  private updateSubmitBtn() {
+    clear(this.submitBtn);
+    const ic = el('span', { className: 'nc-btn-icon', parent: this.submitBtn });
+    if (this.streaming) {
+      this.submitBtn.classList.add('stop');
+      this.submitBtn.title = 'Stop';
+      ic.innerHTML = ICON.stop;
+      // Aurora ring on the composer also activates during streaming so
+      // the "alive" signal is multi-locus (button morph + ring rotates).
+      this.inputWrap?.classList.add('streaming');
+      // Clear any stale "just finished" ping in case the user re-sends fast.
+      this.inputWrap?.classList.remove('streamed');
+    } else {
+      // Detect a transition (streaming → idle). The composer briefly flashes
+      // a cyan success ring before fading back to its rest state — this is
+      // the visual "done" cue tied to result-to-claim cycle completion.
+      const wasStreaming = this.inputWrap?.classList.contains('streaming') ?? false;
+      this.submitBtn.classList.remove('stop');
+      this.submitBtn.title = 'Send (⌘/Ctrl+↵)';
+      ic.innerHTML = ICON.send;
+      this.inputWrap?.classList.remove('streaming');
+      if (wasStreaming) {
+        this.inputWrap?.classList.add('streamed');
+        window.setTimeout(() => this.inputWrap?.classList.remove('streamed'), 900);
+      }
+    }
+  }
+
+  private updateModelBtn() {
+    clear(this.modelBtn);
+    const active = this.activeEndpoint();
+    if (!active) {
+      el('span', { className: 'nc-model-label', text: bi('No endpoint', '未配置 endpoint'), parent: this.modelBtn });
+      const a = el('span', { className: 'nc-arrow', parent: this.modelBtn });
+      a.innerHTML = ICON.arrowDown;
+      this.modelBtn.title = bi('No endpoint — open settings', '未配置 endpoint — 打开设置');
+      return;
+    }
+    // Show ONLY the user-defined label. The underlying model id moves into
+    // the tooltip — the chip stays compact and the label drives identity.
+    el('span', { className: 'nc-model-label', text: active.label, parent: this.modelBtn });
+    const a = el('span', { className: 'nc-arrow', parent: this.modelBtn });
+    a.innerHTML = ICON.arrowDown;
+    const model = active.model ?? bi('(default)', '（默认）');
+    this.modelBtn.title = `${active.label}\nmodel: ${model}\n${bi('click to switch', '点击切换')}`;
+  }
+
+  private openEndpointMenu(_e: MouseEvent) {
+    const active = this.activeEndpoint();
+    const eps = this.plugin.settings.endpoints;
+    const items: PopupItem[] = [];
+
+    if (!active && eps.length === 0) {
+      items.push({
+        label: bi('No endpoints — open Settings', '未配置 endpoint — 打开设置'),
+        onSelect: () => (this.app as any).setting.open(),
+      });
+      this.togglePopup(this.modelBtn, items);
+      return;
+    }
+
+    // Section 1: models of the active endpoint
+    if (active) {
+      const models = active.availableModels && active.availableModels.length
+        ? active.availableModels
+        : (active.model ? [active.model] : []);
+      for (const m of models.slice(0, 25)) {
+        items.push({
+          label: m,
+          section: active.label,
+          checked: active.model === m,
+          onSelect: async () => {
+            active.model = m;
+            await this.plugin.saveSettings();
+          },
+        });
+      }
+      if (active.kind === 'custom-api') {
+        items.push({
+          label: bi('↻ Detect models', '↻ 检测可用模型'),
+          section: active.label,
+          onSelect: async () => {
+            quickNotice(bi('Detecting models…', '检测中…'));
+            const list = await new CustomApiProvider(active).listModels();
+            if (list.length) {
+              active.availableModels = list;
+              await this.plugin.saveSettings();
+              quickNotice(bi(`Found ${list.length} models.`, `共发现 ${list.length} 个模型。`));
+            } else {
+              quickNotice(bi('No models returned by this endpoint.', '该 endpoint 未返回模型列表。'));
+            }
+          },
+        });
+      }
+    }
+
+    // Section 2: switch endpoint
+    const others = eps.filter(x => x.id !== this.plugin.settings.activeEndpointId);
+    for (const ep of others) {
+      items.push({
+        label: ep.label,
+        section: bi('Switch endpoint', '切换 endpoint'),
+        onSelect: async () => {
+          this.plugin.settings.activeEndpointId = ep.id;
+          await this.plugin.saveSettings();
+        },
+      });
+    }
+
+    // Section 3: manage
+    items.push({
+      label: bi('Manage endpoints…', '管理 endpoint…'),
+      section: bi('More', '更多'),
+      onSelect: () => {
+        (this.app as any).setting.open();
+        (this.app as any).setting.openTabById('glossa');
+      },
+    });
+
+    this.togglePopup(this.modelBtn, items);
+  }
+
+  /* ============================================================
+     @ / / triggers
+     ============================================================ */
+  private handleTrigger() {
+    const v = this.inputEl.value;
+    const cur = this.inputEl.selectionStart;
+    let i = cur - 1;
+    while (i >= 0 && !/\s/.test(v[i])) i--;
+    const tokenStart = i + 1;
+    const token = v.slice(tokenStart, cur);
+    if (token.startsWith('@')) this.showMentionPopup(token.slice(1), tokenStart);
+    else if (token.startsWith('/')) this.showSlashPopup(token.slice(1), tokenStart);
+    else this.popup.hide();
+  }
+
+  private showMentionPopup(query: string, tokenStart: number) {
+    const items: PopupItem[] = [];
+    items.push({
+      label: 'clipboard', hint: 'paste clipboard',
+      iconSvg: ICON.clipboard, section: 'GENERIC',
+      onSelect: async () => { const c = await resolveClipboard(); if (c) this.ctx.add(c); this.removeToken(tokenStart); }
+    });
+    items.push({
+      label: query.match(/^https?:\/\//) ? query : 'web URL…', hint: 'fetch page',
+      iconSvg: ICON.globe, section: 'GENERIC',
+      onSelect: async () => {
+        const url = query.match(/^https?:\/\//) ? query : prompt('URL?') || '';
+        if (url) { const it = await resolveWebUrl(url); this.ctx.add(it); }
+        this.removeToken(tokenStart);
+      }
+    });
+    // Aurora v0.4: limits bumped (10/8/8 → 25/15/15) and the picker now
+    // shows ALL vault files (PDF, images, code, .canvas, …) not just .md.
+    // Icon adapts to extension so a PNG looks distinct from a markdown
+    // note in the list; the extension is appended to the label (except
+    // for .md which stays bare since that's the default).
+    for (const f of listFilesForPicker(this.app, query, 25)) {
+      const ext = (f.file.extension || '').toLowerCase();
+      const isImg = /^(png|jpg|jpeg|gif|webp|bmp|svg)$/.test(ext);
+      const labelExt = ext && ext !== 'md' ? '.' + ext : '';
+      items.push({
+        label: f.file.basename + labelExt,
+        hint: f.file.path,
+        iconSvg: isImg ? ICON.image : ICON.file,
+        section: 'FILES',
+        onSelect: async () => { this.ctx.add(await resolveFile(this.app, f.file)); this.removeToken(tokenStart); }
+      });
+    }
+    for (const f of listFoldersForPicker(this.app, query, 15)) {
+      items.push({
+        label: f.folder.path || '/', iconSvg: ICON.folder, section: 'FOLDERS',
+        onSelect: async () => { this.ctx.add(await resolveFolder(this.app, f.folder)); this.removeToken(tokenStart); }
+      });
+    }
+    for (const t of listTagsForPicker(this.app, query, 15)) {
+      items.push({
+        label: t, iconSvg: ICON.tag, section: 'TAGS',
+        onSelect: async () => { this.ctx.add(await resolveTag(this.app, t)); this.removeToken(tokenStart); }
+      });
+    }
+    if (items.length === 0) this.popup.hide();
+    else this.popup.show(this.inputEl, items);
+  }
+
+  private showSlashPopup(query: string, tokenStart: number) {
+    const q = query.toLowerCase();
+
+    // Action commands — don't insert a template, run plugin behaviour directly
+    const actions: { trigger: string; title: string; run: () => Promise<void> }[] = [
+      {
+        trigger: '/compact', title: 'Compact conversation',
+        run: async () => {
+          this.removeToken(tokenStart);
+          this.inputEl.value = '';
+          this.recomputeInputHeight();
+          const ep = this.activeEndpoint();
+          if (!ep) { quickNotice('No endpoint configured.'); return; }
+          const epReady = await this.plugin.getDecryptedEndpoint(ep);
+          if (!epReady) { quickNotice('Endpoint locked or invalid.'); return; }
+          await this.runAutoCompact(epReady, 'manual');
+        },
+      },
+    ];
+    const actionItems: PopupItem[] = actions
+      .filter(a => a.trigger.slice(1).toLowerCase().includes(q) || a.title.toLowerCase().includes(q))
+      .map(a => ({
+        label: a.trigger, hint: a.title, iconSvg: ICON.wrench, section: 'ACTION',
+        onSelect: a.run,
+      }));
+
+    const all = [...BUILTIN_SLASH_COMMANDS, ...this.plugin.settings.customSlashCommands];
+    const templateItems: PopupItem[] = all
+      .filter(c => c.trigger.slice(1).toLowerCase().includes(q) || c.title.toLowerCase().includes(q))
+      .map(c => ({
+        label: c.trigger, hint: c.title, iconSvg: ICON.wrench,
+        section: c.custom ? 'CUSTOM' : 'BUILT-IN',
+        // applySlash rewrites the entire textarea value (replacing any partial
+        // trigger like "/transl" the user typed). Do NOT also call removeToken
+        // — that would re-slice the freshly rewritten string with the stale
+        // tokenStart and either over-delete or leave a phantom-tall textarea.
+        onSelect: async () => { await this.applySlash(c); }
+      }));
+
+    const items = [...actionItems, ...templateItems];
+    if (items.length === 0) this.popup.hide();
+    else this.popup.show(this.inputEl, items);
+  }
+
+  private removeToken(tokenStart: number) {
+    const v = this.inputEl.value;
+    const cur = this.inputEl.selectionStart;
+    this.inputEl.value = v.slice(0, tokenStart) + v.slice(cur);
+    this.inputEl.focus();
+  }
+
+  /** True iff the textarea caret is at offset 0 (or whole content is empty).
+   *  ↑-key history nav only kicks in here so it doesn't fight in-text cursor moves. */
+  private caretAtTop(): boolean {
+    const v = this.inputEl.value;
+    if (!v) return true;
+    const s = this.inputEl.selectionStart ?? 0;
+    return s === 0;
+  }
+  private caretAtBottom(): boolean {
+    const v = this.inputEl.value;
+    if (!v) return true;
+    const s = this.inputEl.selectionEnd ?? 0;
+    return s === v.length;
+  }
+
+  /** Recall a previous user message into the input box. dir=-1 = older, +1 = newer.
+   *  Returns true if we consumed the key (i.e., handled history) — caller preventDefaults. */
+  private recallHistory(dir: -1 | 1): boolean {
+    const userMsgs = this.session.messages.filter(m => m.role === 'user');
+    if (userMsgs.length === 0) return false;
+    // Entering history mode for the first time → snapshot the current draft so ↓ can restore.
+    if (this.historyCursor === -1) {
+      if (dir > 0) return false;  // can't go newer than "drafting" state
+      this.historyDraft = this.inputEl.value;
+      this.historyCursor = userMsgs.length - 1;
+    } else {
+      this.historyCursor += dir;
+      if (this.historyCursor < 0) this.historyCursor = 0;
+      if (this.historyCursor >= userMsgs.length) {
+        // Past the newest → restore the draft and exit history mode
+        this.inputEl.value = this.historyDraft;
+        this.recomputeInputHeight();
+        const len = this.historyDraft.length;
+        this.inputEl.setSelectionRange(len, len);
+        this.historyCursor = -1;
+        return true;
+      }
+    }
+    const text = userMsgs[this.historyCursor].content ?? '';
+    this.inputEl.value = text;
+    this.recomputeInputHeight();
+    // Park caret at end so the user can keep typing forward immediately.
+    const len = text.length;
+    this.inputEl.setSelectionRange(len, len);
+    return true;
+  }
+
+  private async applySlash(cmd: { template: string; trigger?: string; title?: string }) {
+    // The textarea must NOT grow when a slash command is picked. Solution: insert
+    // ONLY a one-line trigger (e.g. `/translate Chinese`) and expand the full template
+    // at submit time. The user sees a compact pill of intent; the model gets the
+    // full prompt + content. Default arg is pulled from the ${args:Default} marker.
+    const defaultArgMatch = cmd.template.match(/\$\{args(?::([^}]+))?\}/);
+    const defaultArg = defaultArgMatch ? (defaultArgMatch[1] ?? '') : '';
+    const trigger = cmd.trigger ?? '/cmd';
+    const oneLiner = defaultArg ? `${trigger} ${defaultArg}` : `${trigger} `;
+    this.inputEl.value = oneLiner;
+    this.inputEl.selectionStart = this.inputEl.selectionEnd = oneLiner.length;
+    this.recomputeInputHeight();
+    this.inputEl.focus();
+    this.inputEl.classList.add('nc-flash');
+    setTimeout(() => this.inputEl.classList.remove('nc-flash'), 380);
+  }
+
+  /** If the input starts with a known slash trigger like `/translate Chinese`, expand
+   *  that to the full template at submit time. Anything after the first line is appended
+   *  as user supplement to the expanded prompt. */
+  private async expandSlashTrigger(text: string): Promise<string> {
+    const newlineIdx = text.indexOf('\n');
+    const firstLine = (newlineIdx >= 0 ? text.slice(0, newlineIdx) : text).trim();
+    const supplement = newlineIdx >= 0 ? text.slice(newlineIdx + 1).trim() : '';
+    const m = firstLine.match(/^(\/[A-Za-z][\w-]*)(?:\s+(.*))?$/);
+    if (!m) return text;
+    const trigger = m[1];
+    const argStr = (m[2] ?? '').trim();
+    const all = [...BUILTIN_SLASH_COMMANDS, ...this.plugin.settings.customSlashCommands];
+    const cmd = all.find(c => c.trigger === trigger);
+    if (!cmd) return text;        // unknown trigger → leave text as-is
+
+    const af = this.app.workspace.getActiveFile();
+    const sel = this.currentSelection?.text ?? '';
+    const fileContent = af && af.extension === 'md' ? await this.app.vault.cachedRead(af) : '';
+    const expanded = applySlashTemplate({
+      template: cmd.template, selection: sel, fileContent,
+      fileName: af?.basename ?? '', vaultName: this.app.vault.getName(),
+      args: argStr,
+    });
+    return supplement ? `${expanded}\n\n${supplement}` : expanded;
+  }
+
+  /** Legacy compact-marker resolver — still honoured for any `{{...}}` left in by
+   *  callers that didn't go through the slash-trigger path (e.g. workflows). */
+  private async resolveSlashMarkers(text: string): Promise<string> {
+    if (!/\{\{(context|selection|file)\}\}/.test(text)) return text;
+    const sel = this.currentSelection?.text ?? '';
+    const af = this.app.workspace.getActiveFile();
+    const fileContent = af && af.extension === 'md' ? await this.app.vault.cachedRead(af) : '';
+    return text
+      .replace(/\{\{context\}\}/g,   sel || fileContent || '')
+      .replace(/\{\{selection\}\}/g, sel || '')
+      .replace(/\{\{file\}\}/g,      fileContent || '');
+  }
+
+  /** Expand the session's ChatMessage[] into model-facing MessageInput[] for the agent
+   *  loop. Critically: preserves PRIOR tool calls and tool results so cross-turn
+   *  references like "the third point you just read" work. Each assistant message that
+   *  ran tools re-emits its tool_use blocks via `toolCalls`; each toolEvent becomes a
+   *  separate role:'tool' message with id + result content.
+   *
+   *  Skips: tool-role messages that already exist as canonical entries (they're
+   *  rebuilt from toolEvents), the active user turn, and the empty placeholder
+   *  assistant message we just created.
+   *
+   *  MEMORY MODEL: This is the single source of truth for the conversation
+   *  context across ALL providers. The returned MessageInput[] is reserialized
+   *  per provider (OpenAI/Anthropic JSON for custom-api, stdin pipe for
+   *  codex/claude CLIs). That's why memory works across mixed-endpoint chats —
+   *  the next provider call always sees the full history regardless of which
+   *  endpoint produced each prior turn. The trade-off is no provider-side
+   *  caching survives between turns (e.g. codex starts a new thread_id every
+   *  invocation; Anthropic prompt caching gets a chance only if cache_control
+   *  markers happen to land on the same prefix). */
+  /** Some reasoner models (DeepSeek R1 family) REQUIRE prior assistant turns
+   *  to include reasoning_content or they 4xx. Others (gpt-4o, Claude) ignore
+   *  it and just pay extra tokens. Detect by model name + apiStyle. */
+  private modelRequiresReasoningPassthrough(): boolean {
+    const ep = this.activeEndpoint();
+    if (!ep) return false;
+    const model = (ep.model ?? '').toLowerCase();
+    // DeepSeek-reasoner / Qwen QwQ / R1-distill style models — match common substrings
+    if (/reasoner|deepseek-r1|deepseek-v3.*think|qwq|r1-distill/.test(model)) return true;
+    return false;
+  }
+
+  private buildModelHistory(currentUserId: string, currentAsstId: string | undefined): MessageInput[] {
+    const passReasoning = this.modelRequiresReasoningPassthrough();
+    const out: MessageInput[] = [];
+    for (const m of this.session.messages) {
+      if (m.id === currentUserId) continue;
+      if (currentAsstId && m.id === currentAsstId) continue;
+      // Bare role:'tool' messages on a ChatMessage are legacy / accidental — the loop
+      // expects them to be reconstructed from toolEvents below. Skip.
+      if (m.role === 'tool') continue;
+      if (m.role === 'assistant' && m.toolEvents && m.toolEvents.length > 0) {
+        // First push the assistant turn with its tool_use blocks
+        const toolCalls = m.toolEvents.map(ev => ({ id: ev.id, name: ev.name, args: ev.args ?? {} }));
+        out.push({
+          role: 'assistant',
+          content: m.content ?? '',
+          toolCalls,
+          reasoningContent: passReasoning ? m.reasoningContent : undefined,
+        });
+        // Then a role:'tool' message for each tool result (skipped only if the event was denied with no result)
+        for (const ev of m.toolEvents) {
+          if (ev.result == null && ev.status !== 'success' && ev.status !== 'error' && ev.status !== 'denied') continue;
+          out.push({
+            role: 'tool',
+            toolCallId: ev.id,
+            toolName: ev.name,
+            content: String(ev.result ?? ''),
+            toolContentBlocks: ev.contentBlocks,
+            toolIsError: ev.status === 'error' || ev.status === 'denied',
+          });
+        }
+      } else {
+        out.push({
+          role: m.role as 'user' | 'assistant',
+          content: m.content ?? '',
+          reasoningContent: m.role === 'assistant' && passReasoning ? m.reasoningContent : undefined,
+        });
+      }
+    }
+    return out;
+  }
+
+  /** Run a one-shot summarisation request, replace the older messages in this session
+   *  with the resulting summary, and rerender. Called both pre-submit (auto trigger)
+   *  and from the `/compact` slash command (manual trigger). */
+  private async runAutoCompact(ep: Endpoint, reason: 'auto' | 'manual') {
+    if (this.session.messages.length < 4) { if (reason === 'manual') quickNotice('Not enough history to compact.'); return; }
+    const vaultRoot = (this.app.vault.adapter as any).basePath as string | undefined;
+    const provider = buildProvider(ep, this.plugin.settings.globalProxy, vaultRoot);
+    const keepRecent = 2;
+
+    // Insert a transient loading card at the END of the messages list
+    const loading = el('div', { className: 'nc-compact-loading', parent: this.messagesEl });
+    const spinner = el('div', { className: 'nc-compact-loading-spinner', parent: loading });
+    spinner.innerHTML = ICON.spinnerRing;
+    el('span', { className: 'nc-compact-loading-text',
+      text: `Summarising ${this.session.messages.length - keepRecent} older messages…`, parent: loading });
+    this.scrollToBottom();
+
+    try {
+      const result = await compactSession(this.session, {
+        provider,
+        model: ep.model,
+        keepRecent,
+        signal: this.abortCtl?.signal,
+      });
+      loading.remove();
+      if (!result) { if (reason === 'manual') quickNotice('Nothing to compact.'); return; }
+      applyCompact(this.session, result, keepRecent);
+      this.msgUIs.clear();
+      clear(this.messagesEl);
+      this.messagesEl.classList.add('no-anim');
+      for (const m of this.session.messages) this.renderMessage(m);
+      requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
+      await this.flushPersistNow();
+      quickNotice(`Compacted ${result.summarisedCount} msgs → 1 summary (~${formatTokenCount(result.tokensSaved)} tok saved)`);
+    } catch (e: any) {
+      loading.remove();
+      quickNotice(`Compact failed: ${e.message ?? e}`);
+    }
+  }
+
+  /** Restore the messages that a given summary replaced. */
+  private async undoCompact(summaryId: string) {
+    const ok = undoCompactInSession(this.session, summaryId);
+    if (!ok) { quickNotice('No snapshot for this summary.'); return; }
+    this.msgUIs.clear();
+    clear(this.messagesEl);
+    this.messagesEl.classList.add('no-anim');
+    for (const m of this.session.messages) this.renderMessage(m);
+    requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
+    await this.flushPersistNow();
+    quickNotice('Restored pre-compact history.');
+  }
+
+  /* ============================================================
+     Submit — runs the agent loop (with tools if endpoint supports it)
+     ============================================================ */
+  private async submit() {
+    if (this.streaming) return;
+    const raw = this.inputEl.value.trim();
+    if (!raw) return;
+
+    // Clear the input IMMEDIATELY so Enter feels snappy. If a downstream
+    // pre-flight check fails (no endpoint, locked keys), we restore the
+    // original text so the user can fix the issue and retry.
+    const inputBackup = this.inputEl.value;
+    const restoreInput = () => {
+      this.inputEl.value = inputBackup;
+      this.recomputeInputHeight();
+      this.inputEl.focus();
+    };
+    // Aurora v0.4: visual "flying" handoff — a ghost copy of the textarea
+    // content drifts upward and fades as the message bubble takes its place.
+    // No-op for reduced-motion users; skipped for long inputs to avoid a
+    // huge translucent block flashing across the screen.
+    this.playSendFlyout(inputBackup);
+    this.inputEl.value = '';
+    this.recomputeInputHeight();
+    this.historyCursor = -1; this.historyDraft = '';
+
+    // 1) If the line starts with a known `/<trigger> [arg]`, expand to its full template
+    // 2) Then resolve any legacy {{...}} markers
+    // Both happen at submit time so the textarea itself never grew.
+    const triggered = await this.expandSlashTrigger(raw);
+    const text = await this.resolveSlashMarkers(triggered);
+    const ep = this.activeEndpoint();
+    if (!ep) { restoreInput(); quickNotice('No endpoint configured. Open settings.'); return; }
+
+    // Decrypt endpoint FIRST — fail before touching UI / message state so we don't leave
+    // an empty assistant bubble + cursor on the screen.
+    const epReady = await this.plugin.getDecryptedEndpoint(ep);
+    if (!epReady) { restoreInput(); quickNotice('Endpoint key locked or invalid. Unlock encryption or re-enter the API key.'); return; }
+
+    // Warn user when Use-Obsidian-fetch is on (tools / images are silently disabled).
+    if (epReady.kind === 'custom-api' && epReady.useObsidianFetch) {
+      if (this.ctx.imagesForAPI().length) {
+        quickNotice('Images are ignored in "Use Obsidian requestUrl" mode.');
+      }
+      // Block tools downstream — agent loop checks this via canSendTools below.
+    }
+
+    // Auto-compact: if the existing session is approaching the context budget, summarise
+    // the older messages into a single recap before adding the new user turn.
+    // If we run pre-submit compact, we set _preSubmitCompacted = true so the
+    // reactive (context_overflow) compaction inside loop.ts is suppressed for
+    // this turn — otherwise we'd burn TWO compaction LLM calls back-to-back.
+    let preSubmitCompacted = false;
+    if (this.plugin.settings.autoCompactEnabled) {
+      const used = estimateSessionTokens(this.session);
+      const budget = this.plugin.settings.maxContextTokens;
+      const threshold = budget * (this.plugin.settings.autoCompactThresholdPct / 100);
+      if (used > threshold) {
+        await this.runAutoCompact(epReady, 'auto');
+        preSubmitCompacted = true;
+      }
+    }
+
+    // Re-validate selection at submit time: if the source DOM no longer has any selection
+    // AND focus isn't currently in the sidebar (i.e., user has clicked away from both), drop it.
+    {
+      const winSel = window.getSelection()?.toString().trim() ?? '';
+      const focusInSidebar = this.containerEl.contains(document.activeElement);
+      if (!winSel && !focusInSidebar) {
+        this.currentSelection = null;
+        this.renderSelectionPreview();
+      }
+    }
+    const selectionContextBlock = this.currentSelection
+      ? `### Selection (from ${this.currentSelection.source}${this.currentSelection.file ? `, ${this.currentSelection.file.path}` : ''}):\n\n${this.currentSelection.text}`
+      : '';
+
+    // Save only lightweight metadata refs — never the resolved file/image contents.
+    const ctxSnap: ContextItemRef[] = this.ctx.list().map(it => ({
+      kind: it.kind, label: it.label, detail: it.detail, tokens: it.tokens, pinned: it.pinned,
+    }));
+    // If the user typed a slash trigger and we expanded it (text !== raw),
+    // remember the raw form for display. The bubble shows "/summarize" while
+    // the model receives the full expanded template via `content`.
+    const wasExpanded = text !== raw;
+    const userMsg: ChatMessage = {
+      id: uid(), role: 'user', content: text, timestamp: Date.now(), contextSnapshot: ctxSnap,
+      displayContent: wasExpanded ? raw : undefined,
+      selectionEcho: this.currentSelection ? {
+        text: this.currentSelection.text,
+        source: this.currentSelection.source,
+        file: this.currentSelection.file?.path,
+      } : undefined,
+    };
+    this.session.messages.push(userMsg);
+    this.renderMessage(userMsg);
+
+    // Input + history cursor were already cleared at the top of submit() so the
+    // box feels instant. We just reset the selection echo here.
+    this.currentSelection = null;
+    this.renderSelectionPreview();
+
+    // Start a new assistant message — fresh turnId for this user turn.
+    this.currentTurnId = uid();
+    this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId };
+    this.session.messages.push(this.currentAsstMsg);
+    this.streamingBuf = '';
+    this.streaming = true;
+    // Mirror streaming state to the view root so CSS animations (act pulse,
+    // future skeleton effects) can scope themselves to active streams and
+    // stay calm when idle. See styles.css .glossa-streaming.
+    this.rootEl?.classList.add('glossa-streaming');
+    this.updateSubmitBtn();
+    this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
+    this.streamingMsgUI.wrap.classList.add('streaming');
+    this.streamingStartedAt = Date.now();
+
+    // Wrap everything that follows in try/finally — any thrown error (provider
+    // crash, runAgentLoop edge case, finalize bug) MUST still reset the
+    // streaming flag. Without this guard the flag stays stuck on `true` and
+    // every subsequent submit() returns early at the top check, giving the
+    // "model stopped answering after one bad turn" symptom the user reported.
+    try {
+
+    const vaultRoot = (this.app.vault.adapter as any).basePath as string | undefined;
+    const provider = buildProvider(epReady, this.plugin.settings.globalProxy, vaultRoot);
+    // Hard cap = a hair below the absolute context window so we leave room for the
+    // system prompt + the assistant's response. Soft cap is the user's settings value.
+    const softCap = this.plugin.settings.maxContextTokens;
+    const hardCap = Math.floor(softCap * 0.92);
+    const { text: ctxBlock, dropped, forcedDrops } = this.ctx.asPromptBlock(softCap, hardCap);
+    if (dropped.length > 0) {
+      quickNotice(`Context budget: dropped ${dropped.length} unpinned item(s) (${dropped.map(d => d.label).join(', ').slice(0, 80)}) to fit ${formatTokenCount(softCap)} tokens. Pin to keep.`);
+    }
+    if (forcedDrops.length > 0) {
+      // Hard cap kicked in — even pinned/current items had to be dropped. Surface
+      // this loudly because it changes what the model sees vs what the user sees pinned.
+      new Notice(`⚠ HARD context cap exceeded: had to drop ${forcedDrops.length} pinned/current item(s): ${forcedDrops.map(d => d.label).join(', ')}. Compress or remove items to keep them.`, 10000);
+    }
+    const sysPrompt = await this.buildSystemPrompt();
+    // When the user fired a slash command and we expanded its template, the
+    // template body ALREADY includes the selection / file content via the
+    // ${selection-or-file} marker. Re-injecting ctxBlock + selectionContextBlock
+    // on top of that produces a prompt with the same file pasted 2-3 times,
+    // which (a) wastes context budget and (b) confuses models into echoing
+    // the original instead of summarising. So for expanded slash commands we
+    // skip the auto-attached context — the template is canonical.
+    const finalUserContent = wasExpanded
+      ? text
+      : [ctxBlock, selectionContextBlock, text].filter(Boolean).join('\n\n');
+
+    // Build a FULL model-facing history that PRESERVES tool calls + tool results from
+    // prior turns. Without this, the model loses everything it ever read/wrote and can
+    // only guess from its own final replies (#2). Each assistant turn that ran tools
+    // re-emits the tool_use blocks; each toolEvent becomes a role:'tool' message.
+    const history = this.buildModelHistory(userMsg.id, this.currentAsstMsg!.id);
+
+    this.abortCtl = new AbortController();
+
+    // Custom API → we control the tool-use protocol → enable our tool dispatch.
+    // CLI providers → either single-shot (no tools) or fullAgent (their own tool dispatch).
+    // For read-only permission we still expose read-side tools.
+    // requestUrl path is non-streaming + non-tool-aware → must disable.
+    const enableTools = ep.kind === 'custom-api' && !ep.useObsidianFetch;
+    if (ep.kind === 'custom-api' && ep.useObsidianFetch && this.plugin.settings.runMode === 'act') {
+      quickNotice('Tools disabled in "Use Obsidian requestUrl" mode — switch off requestUrl for full agent.');
+    }
+    this.startElapsedTicker();
+
+    // Session-token race guard: capture the token at the moment this submit
+    // begins. Every callback below checks `live()` and silently drops the
+    // event if the user switched / cleared the session mid-stream. Without
+    // this guard, chunks queued before a switch would write into the new
+    // session's messages array and corrupt history.
+    const myToken = this.sessionToken;
+    const live = () => myToken === this.sessionToken;
+
+    await runAgentLoop({
+      app: this.app,
+      provider,
+      systemPrompt: sysPrompt,
+      userContent: finalUserContent,
+      history,
+      enableTools,
+      endpointKind: ep.kind,
+      endpointFullAgent: !!(epReady as any).cliFullAgent,
+      permissionLevel: this.plugin.settings.permissionLevel,
+      runMode: this.plugin.settings.runMode,
+      maxSteps: this.plugin.settings.agentMaxSteps,
+      autoApproveTools: this.plugin.settings.agentAlwaysApproveTools,
+      neverApproveTools: this.plugin.settings.agentNeverApproveTools,
+      permissionRules: this.plugin.settings.permissionRules,
+      onPermissionRulePersist: async (rule) => {
+        this.plugin.settings.permissionRules = [
+          // Drop any superseded duplicate (same tool + scope + value + session scope)
+          ...this.plugin.settings.permissionRules.filter(r =>
+            !(r.tool === rule.tool && r.scope === rule.scope && r.value === rule.value && r.scopedToSessionId === rule.scopedToSessionId)),
+          rule,
+        ];
+        await this.plugin.saveSettings();
+        const scopeStr = rule.scopedToSessionId
+          ? 'this session'
+          : (rule.value ? rule.scope + ' ' + rule.value : 'globally');
+        quickNotice(`Saved: ${rule.behavior} ${rule.tool} ${scopeStr}`);
+      },
+      onPermissionDecision: (entry) => {
+        const log = this.plugin.settings.permissionLog ?? [];
+        log.push(entry);
+        // FIFO cap at 200
+        if (log.length > 200) log.splice(0, log.length - 200);
+        this.plugin.settings.permissionLog = log;
+        // Fire-and-forget persistence — don't block the loop on disk write
+        this.plugin.saveSettings().catch(() => {});
+      },
+      model: ep.model,
+      signal: this.abortCtl.signal,
+      attachedImages: this.ctx.imagesForAPI(),
+      checkpoint: this.plugin.checkpoint,
+      sessionId: this.session.id,
+      turnId: this.currentAsstMsg?.id,
+      mcp: this.plugin.mcp,
+      approver: (tool, args) => this.askInlineApproval(tool, args),
+
+      // Reactive compaction: when the server says the prompt is too long, summarise
+      // the session and return a fresh message array for the loop to retry with.
+      // Skip if we already compacted pre-submit in this turn (loop.ts also has
+      // its own once-per-turn guard, but defence-in-depth here saves the LLM call).
+      onContextOverflow: async () => {
+        if (preSubmitCompacted) {
+          quickNotice('Pre-submit compaction already happened — refusing second pass to avoid burning a duplicate LLM call. Increase context window or open a fresh chat.', 6000);
+          return null;
+        }
+        // Drop the empty assistant bubble that the failed turn created
+        if (this.currentAsstMsg) {
+          this.session.messages = this.session.messages.filter(m => m.id !== this.currentAsstMsg!.id);
+          if (this.streamingMsgUI) this.streamingMsgUI.wrap.remove();
+        }
+        quickNotice('Context window exceeded — compacting and retrying…', 3000);
+        await this.runAutoCompact(epReady, 'auto');
+        preSubmitCompacted = true;     // suppress further reactive compactions this turn
+        // Reinstate the assistant bubble at the tail (loop will continue streaming into it)
+        if (this.currentAsstMsg) {
+          this.session.messages.push(this.currentAsstMsg);
+          this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
+          this.streamingMsgUI.wrap.classList.add('streaming');
+        }
+        // Rebuild the message array for the loop from the compacted session, excluding
+        // the assistant placeholder + the user turn itself (the loop appends both).
+        const history = this.buildModelHistory(userMsg.id, this.currentAsstMsg?.id);
+        return [
+          ...history,
+          { role: 'user', content: finalUserContent },
+        ];
+      },
+      onText: (delta) => {
+        if (!live()) return;
+        if (this.lastChunkWasTool) {
+          this.flushAndStartNewAsstSegment();
+        }
+        this.lastChunkWasTool = false;
+        this.streamingBuf += delta;
+        if (this.currentAsstMsg) this.currentAsstMsg.content = this.streamingBuf;
+        this.scheduleStreamingRender();
+      },
+      onReasoning: (delta) => {
+        if (!live()) return;
+        if (!this.currentAsstMsg) return;
+        this.currentAsstMsg.reasoningContent = (this.currentAsstMsg.reasoningContent ?? '') + delta;
+        this.scheduleReasoningRender();
+      },
+      onToolStart: (ev) => {
+        if (!live()) return;
+        if (!this.currentAsstMsg || !this.streamingMsgUI) return;
+        this.currentAsstMsg.toolEvents = this.currentAsstMsg.toolEvents ?? [];
+        if (!this.currentAsstMsg.toolEvents.find(t => t.id === ev.id)) this.currentAsstMsg.toolEvents.push(ev);
+        this.upsertToolEvent(this.streamingMsgUI, ev);
+        this.streamingMsgUI.wrap.classList.add('has-tools');
+        this.lastChunkWasTool = true;
+      },
+      onToolEnd: (ev) => {
+        if (!live()) return;
+        if (!this.currentAsstMsg || !this.streamingMsgUI) return;
+        const list = this.currentAsstMsg.toolEvents ?? [];
+        const idx = list.findIndex(t => t.id === ev.id);
+        if (idx >= 0) list[idx] = ev; else list.push(ev);
+        this.currentAsstMsg.toolEvents = list;
+        this.upsertToolEvent(this.streamingMsgUI, ev);
+        if (ev.name === 'todo_write' && Array.isArray(ev.args?.items)) {
+          this.updatePlanBoard(ev.args.items);
+        }
+        this.lastChunkWasTool = true;
+      },
+      onStepBoundary: async () => {
+        if (!live()) return;
+        if (this.currentAsstMsg && this.streamingMsgUI) {
+          this.currentAsstMsg.content = this.streamingBuf;
+          this.streamingMsgUI.wrap.classList.remove('streaming');
+          this.finalizeReasoningLabel(this.streamingMsgUI, this.currentAsstMsg);
+          await this.finalizeAsstRender(this.streamingMsgUI, this.currentAsstMsg);
+        }
+        // Re-check after the await — session may have switched while
+        // finalizeAsstRender was awaiting (markdown/MathJax can be slow).
+        if (!live()) return;
+        this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId ?? undefined };
+        this.session.messages.push(this.currentAsstMsg);
+        this.streamingBuf = '';
+        this.lastChunkWasTool = false;
+        this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
+        this.streamingMsgUI.wrap.classList.add('streaming');
+        this.streamingStartedAt = Date.now();
+      },
+      onError: (err) => {
+        if (!live()) return;
+        this.streamingBuf += `\n\n**[error]** ${err}`;
+        if (this.currentAsstMsg) this.currentAsstMsg.content = this.streamingBuf;
+        this.scheduleStreamingRender();
+      },
+      onFinal: (usage) => {
+        if (!live()) return;
+        if (usage && this.currentAsstMsg) {
+          this.currentAsstMsg.usage = usage;
+          if (usage.input) this.sessionInputTokens += usage.input;
+          if (usage.output) this.sessionOutputTokens += usage.output;
+          if (usage.costUSD) this.sessionCostUSD += usage.costUSD;
+        }
+      },
+    });
+
+    // Flush + finalize — runs for ALL termination paths (success / error / abort / max-steps).
+    // Strip streaming class + reasoning "streaming…" label from EVERY assistant message
+    // in the current session, not just the latest, so leftover state from earlier steps
+    // can't survive a max-steps termination.
+    if (this.currentAsstMsg && this.streamingMsgUI) {
+      this.currentAsstMsg.content = this.streamingBuf;
+      this.streamingMsgUI.wrap.classList.remove('streaming');
+      this.finalizeReasoningLabel(this.streamingMsgUI, this.currentAsstMsg);
+      await this.finalizeAsstRender(this.streamingMsgUI, this.currentAsstMsg);
+    }
+    for (const ui of this.msgUIs.values()) {
+      ui.wrap.classList.remove('streaming');
+      this.finalizeReasoningLabel(ui, ui.msg);
+      // Belt-and-suspenders: any tool card left in 'running' / 'pending' state
+      // (because the provider was SIGTERM'd mid-flight) gets marked 'denied'
+      // so the pulse animation stops. Without this the purple status pill
+      // keeps animating forever on the dead card.
+      for (const ev of (ui.msg.toolEvents ?? [])) {
+        if (ev.status === 'running' || ev.status === 'pending') {
+          ev.status = 'denied';
+          ev.endedAt = Date.now();
+          this.upsertToolEvent(ui, ev);
+        }
+      }
+    }
+    // If the plan has an in_progress item but we terminated abnormally, mark it as
+    // blocked so the user sees the agent gave up rather than is "still running".
+    if (this.session.plan?.some(p => p.status === 'in_progress')) {
+      this.session.plan = this.session.plan.map(p =>
+        p.status === 'in_progress' ? { ...p, content: `${p.content} (stopped)`, status: 'pending' as const } : p);
+      this.renderPlanBoard();
+    }
+
+    this.renderCostBar();
+    this.session.updatedAt = Date.now();
+    // Title heuristic: first assistant reply after a user turn, OR the session
+    // still has the default 'New chat' title. The old condition `length === 2`
+    // broke when the first assistant message was deleted/regenerated — the
+    // session would keep 'New chat' forever.
+    // Auto-title trigger: the title is still the placeholder. Match both
+    // language defaults — the new-session factory hardcodes 'New chat' (EN),
+    // but a zh user who blanks the title in history_modal lands on '（无标题）'
+    // (per history_modal.ts:217). Without matching all forms, zh users'
+    // sessions silently keep their stale default forever.
+    const placeholderTitles = new Set(['New chat', '新对话', '(untitled)', '（无标题）']);
+    const needsTitle = !this.session.title || placeholderTitles.has(this.session.title);
+    if (needsTitle && text.trim()) this.session.title = text.slice(0, 60);
+    await this.flushPersistNow();
+    } catch (err: any) {
+      // Surface the error to the user AND release the streaming lock.
+      console.error('[Glossa] submit failed', err);
+      quickNotice(bi(`Error: ${err?.message ?? err}`, `出错：${err?.message ?? err}`));
+      // Clean up the empty assistant bubble we optimistically pushed before
+      // the loop started. Without this, a failed submit leaves a permanent
+      // empty card in the saved session (and the DOM); reloading the
+      // session shows a ghost message-of-air for every prior failed turn.
+      try {
+        const a = this.currentAsstMsg;
+        if (a && (!a.content || a.content.length === 0) && (!a.toolEvents || a.toolEvents.length === 0)) {
+          this.session.messages = this.session.messages.filter(m => m.id !== a.id);
+          // Remove the rendered bubble too.
+          try { this.streamingMsgUI?.wrap?.remove(); } catch {}
+        }
+      } catch (e) { console.warn('[Glossa] empty-assistant cleanup failed', e); }
+    } finally {
+      this.stopElapsedTicker();
+      this.streaming = false;
+      // Drop the view-root streaming class so the act pulse stops animating
+      // (paired with .add() at submit start).
+      this.rootEl?.classList.remove('glossa-streaming');
+      this.updateSubmitBtn();
+      this.streamingMsgUI = null;
+      this.currentAsstMsg = null;
+    }
+    // Drop one-shot context (images, ephemeral attachments) after submit; keep pinned + current.
+    this.ctx.resetUnpinned();
+  }
+
+  /** After streaming ends, render the final message via Obsidian (math / wikilinks / mermaid). */
+  private async finalizeAsstRender(ui: MsgUI, m: ChatMessage) {
+    if (this.streamRenderTimer) { clearTimeout(this.streamRenderTimer); this.streamRenderTimer = null; }
+    // Wait for any in-flight stream render to settle
+    while (this.streamRenderInFlight) await new Promise(r => setTimeout(r, 20));
+    await renderInto(this.app, m.content || '', ui.body, this, this.app.workspace.getActiveFile()?.path ?? '');
+    decorateCodeBlocks(ui.body, this.codeBlockHandlers());
+    this.applyPreambleStyle(ui, m);
+  }
+
+  /** Drop the "streaming…" suffix from a reasoning card's summary when the step ends.
+   *  Also hides the card entirely if no reasoning was captured this step.
+   *  Force-collapses the card so the next agent step doesn't reuse a previously
+   *  opened state (the user complained: reasoning would stay open after the
+   *  model finished thinking). User can still click to expand the finished
+   *  reasoning explicitly. */
+  private finalizeReasoningLabel(ui: MsgUI, m: ChatMessage) {
+    if (!ui.reasoningCard) return;
+    const content = m.reasoningContent ?? '';
+    if (!content) {
+      ui.reasoningCard.style.display = 'none';
+      return;
+    }
+    const sum = ui.reasoningCard.querySelector('.nc-thinking-summary span') as HTMLElement | null;
+    if (sum) sum.textContent = `🧠 Reasoning (${content.length.toLocaleString()} chars)`;
+    // Collapse once thinking ends. Users want the finished thoughts out of the
+    // way unless they explicitly request to read them.
+    ui.reasoningCard.removeAttribute('open');
+  }
+
+  /** A "preamble" message is a short assistant text immediately followed by tool calls.
+   *  We mute its styling so it reads like the codex-style intent statement before the action. */
+  private applyPreambleStyle(ui: MsgUI, m: ChatMessage) {
+    const text = (m.content ?? '').trim();
+    const hasTools = (m.toolEvents?.length ?? 0) > 0;
+    // Heuristic: short (<= 220 chars), single short paragraph, ends naturally, tools follow.
+    const isShort = text.length > 0 && text.length <= 220 && !text.includes('\n\n');
+    if (hasTools && isShort) ui.wrap.classList.add('preamble');
+    else ui.wrap.classList.remove('preamble');
+    // Intermediate messages (any assistant message that ran tools) shouldn't show their
+    // own action row — those actions disrupt the visual flow between turns. They're only
+    // meaningful on a real final answer.
+    if (hasTools) ui.wrap.classList.add('has-tools');
+    else ui.wrap.classList.remove('has-tools');
+  }
+
+  private cancelStream() {
+    this.abortCtl?.abort();
+  }
+
+  /** Mirrors upstream Claude Code's two-zone system prompt:
+   *  [STATIC cacheable head]  +  SYSTEM_PROMPT_DYNAMIC_BOUNDARY  +  [DYNAMIC tail]
+   *
+   *  The boundary is a literal marker the provider layer scans for to split the prompt
+   *  into two cache_control blocks (ephemeral on the head only). Even providers that
+   *  don't honour the split still receive a syntactically valid single prompt. */
+  private async buildSystemPrompt(): Promise<string> {
+    const af = this.app.workspace.getActiveFile();
+    const folderOverride = af && this.plugin.settings.customPrompts.find(p =>
+      p.folderScope && af.path.startsWith(p.folderScope));
+
+    // ----- STATIC (cacheable) -----
+    // Persona + invariant instructions. NO date, NO mode toggle, NO project context here —
+    // those are volatile per-turn / per-session and would invalidate the cache.
+    const staticHead = folderOverride?.systemPrompt ||
+      `You are Glossa, an AI assistant embedded in the user's Obsidian vault. ` +
+      `Be precise and concise. When the user has attached <context>...</context>, treat it as authoritative. ` +
+      `Preserve markdown structure. Keep formulas, code, and proper nouns intact when translating.`;
+
+    // ----- DYNAMIC tail -----
+    const dyn: string[] = [];
+    dyn.push(`# Environment\nToday: ${new Date().toISOString().slice(0, 10)}\nVault: "${this.app.vault.getName()}"`);
+
+    if (this.plugin.settings.runMode === 'plan') {
+      dyn.push(`# Mode: PLAN\nYou are in **Plan mode** — discuss the user's task and propose what you would do, but DO NOT call any write/edit/delete tools. You may still call read/search tools to investigate. Wait for the user to switch to Act mode before making changes.`);
+    } else {
+      dyn.push(`# Mode: ACT\nYou are in **Act mode** — full agent capability. Call tools to read, search, AND modify files as needed to complete the user's task.`);
+    }
+
+    const lvl = this.plugin.settings.permissionLevel;
+    if (lvl === 'read-only') dyn.push(`# Permission: read-only\nWrite/edit/delete tools are disabled at this permission level. Only read-side tools are available.`);
+    else if (lvl === 'workspace-write') dyn.push(`# Permission: workspace-write\nYou may modify files inside this vault. Each write requires user approval.`);
+
+    if (this.plugin.settings.loadProjectContext) {
+      const proj = await loadProjectContext(this.app);
+      if (proj) dyn.push('# Project instructions\n\n' + proj);
+    }
+
+    return staticHead + '\n\n<<<SYSTEM_PROMPT_DYNAMIC_BOUNDARY>>>\n\n' + dyn.join('\n\n');
+  }
+
+  /* ============================================================
+     Cost bar
+     ============================================================ */
+  private renderCostBar() {
+    const hasUsage = this.sessionInputTokens > 0 || this.sessionOutputTokens > 0 || this.sessionCostUSD > 0;
+    const ctxTokens = this.ctx.totalTokens();
+    // Show the REAL model context window when we can infer it from the active
+    // model id — that's what users compare against (Codex's own UI displays
+    // 256k for codex-cli, not the plugin's 1M soft cap). Fall back to the
+    // settings maximum when the model is unknown.
+    const settingsMax = this.plugin.settings.maxContextTokens;
+    const active = this.activeEndpoint();
+    const inferred = modelContextWindow(active?.model);
+    const maxCtx = inferred ?? settingsMax;
+    const hardCap = Math.floor(maxCtx * 0.92);
+
+    // Session/history contribution
+    let sessionCtxTokens = 0;
+    try {
+      // lightweight estimate of in-session messages
+      const { estimateSessionTokens } = require('../agent/compact');
+      sessionCtxTokens = estimateSessionTokens(this.session);
+    } catch { sessionCtxTokens = 0; }
+    const totalPromptTokens = ctxTokens + sessionCtxTokens;
+    const showBudget = totalPromptTokens > 0 && maxCtx > 0;
+
+    if (!this.plugin.settings.showCostBar || (!hasUsage && !showBudget)) {
+      this.costBar.style.display = 'none'; return;
+    }
+    this.costBar.style.display = '';
+    clear(this.costBar);
+
+    if (showBudget) {
+      const pct = Math.min(100, (totalPromptTokens / maxCtx) * 100);
+      const overHard = totalPromptTokens > hardCap;
+      const tooltip = [
+        `Context bar: ${formatTokenCount(ctxTokens)}`,
+        `History: ${formatTokenCount(sessionCtxTokens)}`,
+        `Total: ${formatTokenCount(totalPromptTokens)} / ${formatTokenCount(maxCtx)} (${pct.toFixed(0)}%)`,
+        `Hard cap: ${formatTokenCount(hardCap)} — items get force-dropped beyond this`,
+      ].join('\n');
+      const bar = el('div', { className: 'nc-budget-bar', parent: this.costBar, title: tooltip });
+      // Sub-segments to show ctx vs. history split
+      if (ctxTokens > 0) {
+        const ctxFill = el('div', { className: 'nc-budget-fill nc-budget-ctx', parent: bar });
+        ctxFill.style.width = Math.min(100, (ctxTokens / maxCtx) * 100).toFixed(1) + '%';
+      }
+      if (sessionCtxTokens > 0) {
+        const hist = el('div', { className: 'nc-budget-fill nc-budget-history', parent: bar });
+        hist.style.left = Math.min(100, (ctxTokens / maxCtx) * 100).toFixed(1) + '%';
+        hist.style.width = Math.min(100, (sessionCtxTokens / maxCtx) * 100).toFixed(1) + '%';
+      }
+      if (pct > 85 || overHard) bar.classList.add('danger');
+      else if (pct > 60) bar.classList.add('warn');
+      // Hard-cap marker
+      if (hardCap < maxCtx) {
+        const marker = el('div', { className: 'nc-budget-hard-cap', parent: bar });
+        marker.style.left = ((hardCap / maxCtx) * 100).toFixed(1) + '%';
+      }
+      const label = `${formatTokenCount(totalPromptTokens)} / ${formatTokenCount(maxCtx)}`;
+      const lbl = el('span', { className: 'nc-budget-label' + (overHard ? ' over' : ''), text: label, parent: this.costBar });
+      lbl.title = tooltip;
+    }
+    if (hasUsage) {
+      el('span', { text: `in ${formatTokenCount(this.sessionInputTokens)}`, parent: this.costBar });
+      el('span', { text: `out ${formatTokenCount(this.sessionOutputTokens)}`, parent: this.costBar });
+      if (this.sessionCostUSD > 0) el('span', { text: `$${this.sessionCostUSD.toFixed(4)}`, parent: this.costBar });
+    }
+  }
+
+  /* ============================================================
+     Helpers / actions
+     ============================================================ */
+  private activeEndpoint(): Endpoint | undefined {
+    const id = this.plugin.settings.activeEndpointId;
+    return this.plugin.settings.endpoints.find(e => e.id === id);
+  }
+
+  private newSession(): ChatSession {
+    return {
+      id: uid(), title: 'New chat',
+      createdAt: Date.now(), updatedAt: Date.now(),
+      mode: this.plugin.settings.mode,
+      endpointId: this.plugin.settings.activeEndpointId,
+      messages: [],
+      plan: [],
+    };
+  }
+
+  startNewSession() {
+    if (this.streaming) this.cancelStream();
+    this.persistSession();
+    // Bump session token so in-flight chunks from the cancelled stream get
+    // dropped by the gates in submit() / on* callbacks.
+    this.sessionToken++;
+    this.session = this.newSession();
+    this.sessionCostUSD = 0; this.sessionInputTokens = 0; this.sessionOutputTokens = 0;
+    this.msgUIs.clear();
+    clear(this.messagesEl);
+    this.renderPlanBoard();   // empty since session.plan is undefined
+    this.renderEmpty();
+    this.renderCostBar();
+  }
+
+  private async loadSession(id: string) {
+    const s = this.plugin.store.getSession(id);
+    if (!s) return;
+    if (this.streaming) this.cancelStream();
+    await this.flushPersistNow();
+    // Bump BEFORE swapping session so any chunk callback that was queued
+    // mid-await reads the new token and aborts. (The await above creates
+    // a microtask window where late chunks can fire — without the bump
+    // they'd write into `this.session.messages` AFTER the swap on the
+    // next line and corrupt the loaded session.)
+    this.sessionToken++;
+    this.session = s;
+    this.msgUIs.clear();
+    clear(this.messagesEl);
+    if (this.session.messages.length === 0) {
+      this.renderEmpty();
+    } else {
+      // Batch load: suppress per-message arrival animation (N simultaneous
+      // fade-ins reads as a chaotic ripple AND spikes CPU). Removed on the
+      // next animation frame so subsequent live-stream additions animate
+      // normally again.
+      this.messagesEl.classList.add('no-anim');
+      for (const m of this.session.messages) this.renderMessage(m);
+      requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
+    }
+    this.rebuildPlanFromSession();
+  }
+
+  /** Debounced save. Long agent runs call this from every onText/onTool tick.
+   *  Without coalescing, chats.json is rewritten 10-20×/turn (~5MB each) which
+   *  thrashes SSDs and makes iCloud/Dropbox loud. flushPersistNow() forces an
+   *  immediate write at terminal points (stream end, view close, snapshot). */
+  private _persistTimer: any = null;
+  private persistSession() {
+    if (this._persistTimer) return;
+    this._persistTimer = setTimeout(() => {
+      this._persistTimer = null;
+      this.plugin.store.saveSession(this.session);
+    }, 1000);
+  }
+  /** Force-write the current session now (bypasses debounce). Use at stream
+   *  end, before navigation, or before destructive operations like compact. */
+  private async flushPersistNow() {
+    if (this._persistTimer) { clearTimeout(this._persistTimer); this._persistTimer = null; }
+    await this.plugin.store.saveSession(this.session);
+  }
+
+  private async exportChatToNote() {
+    if (this.session.messages.length === 0) { quickNotice('No messages.'); return; }
+    const folder = this.plugin.settings.chatsFolder || 'Chats';
+    try { await this.app.vault.createFolder(folder); } catch {}
+    const safeTitle = (this.session.title || 'chat').replace(/[\\/:*?"<>|]/g, '-').slice(0, 60);
+    const path = `${folder}/${new Date().toISOString().slice(0,10)}_${safeTitle}.md`;
+
+    const renderMessage = (m: typeof this.session.messages[number]): string => {
+      const parts: string[] = [];
+      const heading = m.compactSummary
+        ? `## Compacted summary (replaces ${m.summaryOfCount ?? '?'} earlier messages)`
+        : `## ${m.role === 'assistant' ? 'Glossa' : m.role === 'user' ? 'You' : m.role}`;
+      parts.push(heading, '');
+      // Reasoning (from API reasoning_content) — folded as a markdown callout so it
+      // round-trips with the visible thinking. Obsidian renders [!note]- as collapsed.
+      if (m.reasoningContent && m.reasoningContent.trim()) {
+        parts.push('> [!note]- Reasoning');
+        for (const line of m.reasoningContent.split('\n')) parts.push('> ' + line);
+        parts.push('');
+      }
+      if (m.content && m.content.trim()) {
+        parts.push(m.content.trim(), '');
+      }
+      // Tool calls + their results
+      if (m.toolEvents?.length) {
+        parts.push('> [!info]- Tool calls (' + m.toolEvents.length + ')');
+        for (const ev of m.toolEvents) {
+          const argStr = JSON.stringify(ev.args ?? {}, null, 2);
+          parts.push('> ');
+          parts.push(`> **${ev.name}** · ${ev.status}` + (ev.endedAt ? ` · ${ev.endedAt - ev.startedAt}ms` : ''));
+          parts.push('> ```json');
+          for (const line of argStr.split('\n')) parts.push('> ' + line);
+          parts.push('> ```');
+          if (ev.result) {
+            parts.push('> ');
+            parts.push('> Result:');
+            parts.push('> ```');
+            for (const line of String(ev.result).slice(0, 4000).split('\n')) parts.push('> ' + line);
+            parts.push('> ```');
+          }
+        }
+        parts.push('');
+      }
+      return parts.join('\n');
+    };
+
+    const body = [
+      `---`,
+      `tags: [chat]`,
+      `date: ${new Date().toISOString()}`,
+      `mode: ${this.session.mode}`,
+      `messages: ${this.session.messages.length}`,
+      `---`,
+      '',
+      `# ${this.session.title}`,
+      '',
+      ...this.session.messages.map(renderMessage),
+    ].join('\n');
+    try {
+      await this.app.vault.create(path, body);
+    } catch (e) {
+      quickNotice('Could not write file (already exists?).');
+      return;
+    }
+    quickNotice(`Saved to ${path}`);
+    const f = this.app.vault.getAbstractFileByPath(path);
+    if (f instanceof TFile) this.app.workspace.getLeaf(true).openFile(f);
+  }
+
+  private async saveResponseAsNote(m: ChatMessage) {
+    const folder = this.plugin.settings.chatsFolder || 'Chats';
+    try { await this.app.vault.createFolder(folder); } catch {}
+    const path = `${folder}/${new Date().toISOString().replace(/[:.]/g,'-')}_assistant.md`;
+    await this.app.vault.create(path, m.content);
+    const f = this.app.vault.getAbstractFileByPath(path);
+    if (f instanceof TFile) this.app.workspace.getLeaf(true).openFile(f);
+    quickNotice(`Saved to ${path}`);
+  }
+
+  private insertAtCursor(text: string) {
+    const md = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!md?.editor) { quickNotice('No active markdown editor.'); return; }
+    md.editor.replaceSelection(text);
+  }
+
+  private applyEdit(text: string) {
+    const md = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!md?.editor) { quickNotice('No active markdown editor.'); return; }
+    if (md.editor.getSelection()) md.editor.replaceSelection(text);
+    else md.editor.replaceRange(text + '\n\n', md.editor.getCursor());
+  }
+
+  private async regenerateLast() {
+    if (this.streaming) return;
+    while (this.session.messages.length && this.session.messages[this.session.messages.length - 1].role !== 'user') {
+      this.session.messages.pop();
+    }
+    const lastUser = this.session.messages.pop();
+    if (!lastUser) return;
+    this.msgUIs.clear();
+    clear(this.messagesEl);
+    if (this.session.messages.length === 0) this.renderEmpty();
+    else {
+      this.messagesEl.classList.add('no-anim');
+      for (const m of this.session.messages) this.renderMessage(m);
+      requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
+    }
+    // Persist the trimmed history before re-submit. Without this, an Obsidian
+    // crash / quick reload between "regenerate" and the new turn finishing
+    // leaves the on-disk session out of sync with what's in the bubble.
+    await this.flushPersistNow();
+    this.inputEl.value = lastUser.content;
+    this.recomputeInputHeight();
+    this.submit();
+  }
+}
+
+function extractThinking(src: string): { visible: string; thinking: string } {
+  if (!src) return { visible: '', thinking: '' };
+  const re = /<(?:thinking|reasoning)>([\s\S]*?)<\/(?:thinking|reasoning)>/gi;
+  let thinking = '';
+  const visible = src.replace(re, (_, inner) => { thinking += (thinking ? '\n\n---\n\n' : '') + inner.trim(); return ''; }).trim();
+  return { visible, thinking };
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000); const s = Math.floor((ms % 60_000) / 1000);
+  return `${m}m${s}s`;
+}
+
+function pillIcon(it: ContextItem): string {
+  switch (it.kind) {
+    case 'file':       return ICON.file;
+    case 'folder':     return ICON.folder;
+    case 'tag':        return ICON.tag;
+    case 'selection':  return ICON.selection;
+    case 'web':        return ICON.globe;
+    case 'clipboard':  return ICON.clipboard;
+    case 'image':      return ICON.image;
+    default:           return ICON.file;
+  }
+}

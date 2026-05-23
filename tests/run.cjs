@@ -1,0 +1,88 @@
+#!/usr/bin/env node
+/* Minimal in-tree test runner — no jest/vitest dependency.
+ *
+ * Each test file is a CJS module that imports the source via inline esbuild bundle.
+ * It calls `t.eq(actual, expected, label)` / `t.ok(cond, label)` / `t.throws(fn, label)`.
+ * The runner aggregates pass/fail counts and exits non-zero on any failure.
+ */
+const path = require('path');
+const fs = require('fs');
+const esbuild = require('esbuild');
+
+let passed = 0, failed = 0;
+const failures = [];
+
+function makeT(file) {
+  return {
+    eq(actual, expected, label) {
+      const a = typeof actual === 'object' ? JSON.stringify(actual) : String(actual);
+      const e = typeof expected === 'object' ? JSON.stringify(expected) : String(expected);
+      if (a === e) { passed++; process.stdout.write('.'); }
+      else { failed++; failures.push(`${file} :: ${label}\n  expected: ${e}\n  actual:   ${a}`); process.stdout.write('F'); }
+    },
+    ok(cond, label) {
+      if (cond) { passed++; process.stdout.write('.'); }
+      else { failed++; failures.push(`${file} :: ${label}\n  condition false`); process.stdout.write('F'); }
+    },
+    throws(fn, label) {
+      try { fn(); failed++; failures.push(`${file} :: ${label}\n  expected throw, none happened`); process.stdout.write('F'); }
+      catch { passed++; process.stdout.write('.'); }
+    },
+  };
+}
+
+/** Bundle a TS source file into a CJS module and require it. */
+async function loadModule(srcPath) {
+  const r = await esbuild.build({
+    entryPoints: [srcPath],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'es2020',
+    write: false,
+    sourcemap: false,
+    external: ['obsidian'],          // we shim obsidian below
+  });
+  const code = r.outputFiles[0].text;
+  // Provide a fake "obsidian" module so imports don't blow up
+  const Module = require('module');
+  const orig = Module.prototype.require;
+  Module.prototype.require = function(req) {
+    if (req === 'obsidian') return {
+      TFile: class TFile {}, TFolder: class TFolder {},
+      getAllTags: () => [], prepareSimpleSearch: () => null,
+      requestUrl: () => ({ status: 200, text: '[]', json: [] }),
+    };
+    return orig.apply(this, arguments);
+  };
+  try {
+    const wrap = `(function(module){${code}return module.exports;})({exports:{}})`;
+    return eval(wrap);
+  } finally {
+    Module.prototype.require = orig;
+  }
+}
+
+async function main() {
+  const testsDir = path.resolve(__dirname);
+  const files = fs.readdirSync(testsDir).filter(f => f.endsWith('.test.cjs')).sort();
+  console.log(`Running ${files.length} test file${files.length === 1 ? '' : 's'}…\n`);
+  for (const f of files) {
+    const mod = require(path.join(testsDir, f));
+    if (typeof mod.run !== 'function') {
+      console.warn(`! ${f} has no run() export, skipping`);
+      continue;
+    }
+    const t = makeT(f);
+    try { await mod.run(t, loadModule); }
+    catch (e) { failed++; failures.push(`${f} :: threw: ${e.stack ?? e}`); process.stdout.write('!'); }
+  }
+  console.log('\n');
+  if (failures.length) {
+    console.log('\nFailures:\n');
+    for (const f of failures) console.log('  - ' + f + '\n');
+  }
+  console.log(`Result: ${passed} passed, ${failed} failed`);
+  process.exit(failed === 0 ? 0 : 1);
+}
+main().catch(e => { console.error(e); process.exit(1); });

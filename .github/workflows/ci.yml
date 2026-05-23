@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: typecheck + unit tests + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Run unit tests (in-tree runner)
+        run: npm test
+
+      - name: Production build (esbuild)
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          test -f main.js || (echo "main.js missing" && exit 1)
+          test -f manifest.json || (echo "manifest.json missing" && exit 1)
+          test -f styles.css || (echo "styles.css missing" && exit 1)
+          ls -lh main.js manifest.json styles.css
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: glossa-build-${{ github.sha }}
+          path: |
+            main.js
+            manifest.json
+            styles.css
+          retention-days: 7
+
+  stress-tests:
+    name: stress test suite (A B C E)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install glossa deps
+        run: npm ci
+
+      - name: Set up stress-test deps
+        working-directory: tests
+        run: npm install --no-audit --no-fund
+
+      - name: Run stress tests (A B C E)
+        working-directory: tests
+        run: node run.cjs A B C E
+        env:
+          GLOSSA_SRC_ROOT: ${{ github.workspace }}

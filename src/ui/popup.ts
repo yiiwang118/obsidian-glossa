@@ -1,0 +1,202 @@
+import { el, clear } from '../utils/dom';
+
+export interface PopupItem {
+  label: string;
+  hint?: string;
+  iconSvg?: string;
+  section?: string;
+  /** Show a small ✓ before the label — used by the composer pickers
+   *  (model / permission / reasoning) to indicate the current value. */
+  checked?: boolean;
+  /** Paint the row in danger colour for destructive actions. */
+  danger?: boolean;
+  onSelect: () => void | Promise<void>;
+}
+
+export class Popup {
+  private el: HTMLElement;
+  private itemEls: HTMLElement[] = [];
+  private selectedIdx = 0;
+  private items: PopupItem[] = [];
+  private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
+  private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private anchor: HTMLElement | null = null;
+
+  constructor() {
+    this.el = el('div', { className: 'nc-popup' });
+    this.el.style.display = 'none';
+    document.body.appendChild(this.el);
+    this.el.addEventListener('mousedown', (e) => e.stopPropagation());
+    // When the cursor leaves the popup, drop the mouse-induced `.selected`
+    // highlight from every row. `.checked` (the row marking the current
+    // setting) is intentionally NOT touched — that's a persistent
+    // indicator, not a hover residue. Keyboard navigation still works:
+    // ArrowDown/Up rebuilds `.selected` via render() so the cursor
+    // resumes naturally from wherever it was.
+    this.el.addEventListener('mouseleave', () => {
+      for (const item of this.itemEls) item.classList.remove('selected');
+    });
+  }
+
+  destroy() {
+    this.removeOutsideHandler();
+    this.removeKeyHandler();
+    this.el.remove();
+  }
+
+  show(anchor: HTMLElement, items: PopupItem[]) {
+    this.items = items;
+    this.anchor = anchor;
+    this.selectedIdx = 0;
+    this.render();
+    this.el.style.display = 'block';
+
+    requestAnimationFrame(() => {
+      const r = anchor.getBoundingClientRect();
+      const rect = this.el.getBoundingClientRect();
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const popupH = Math.min(rect.height, 320);
+      const popupW = Math.min(rect.width, 360);
+
+      // Prefer ABOVE the anchor; fall back BELOW when there's no room.
+      const spaceAbove = r.top;
+      const spaceBelow = vh - r.bottom;
+      let top: number;
+      if (spaceAbove >= popupH + 8 || spaceAbove >= spaceBelow) {
+        top = r.top - popupH - 6;
+      } else {
+        top = r.bottom + 6;
+      }
+      top = Math.max(6, Math.min(vh - popupH - 6, top));
+
+      let left = r.left;
+      left = Math.max(6, Math.min(vw - popupW - 6, left));
+
+      this.el.style.left = left + 'px';
+      this.el.style.top  = top  + 'px';
+    });
+
+    this.scrollSelectedIntoView();
+    this.installOutsideHandler();
+    this.installKeyHandler();
+  }
+
+  hide() {
+    this.el.style.display = 'none';
+    this.items = [];
+    this.itemEls = [];
+    this.removeOutsideHandler();
+    this.removeKeyHandler();
+  }
+
+  isOpen() { return this.el.style.display !== 'none'; }
+  /** The DOM element this popup is currently anchored to (set on show()).
+   *  Callers compare it via identity to implement click-the-same-trigger-to-
+   *  toggle semantics: if the anchor matches, hide; otherwise show with
+   *  the new anchor. */
+  currentAnchor(): HTMLElement | null { return this.anchor; }
+
+  onKey(e: KeyboardEvent): boolean {
+    if (!this.isOpen()) return false;
+    if (e.key === 'ArrowDown') { this.selectedIdx = Math.min(this.items.length - 1, this.selectedIdx + 1); this.render(); this.scrollSelectedIntoView(); return true; }
+    if (e.key === 'ArrowUp')   { this.selectedIdx = Math.max(0, this.selectedIdx - 1); this.render(); this.scrollSelectedIntoView(); return true; }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      const it = this.items[this.selectedIdx];
+      if (it) { it.onSelect(); this.hide(); }
+      return true;
+    }
+    if (e.key === 'Escape') { this.hide(); return true; }
+    return false;
+  }
+
+  /** Document-level key handler so the popup responds to ↑/↓/Enter/Esc when
+   *  the user opens it from a pill button (the textarea isn't focused in that
+   *  case, so the textarea's keydown bridge to onKey() wouldn't fire). Capture
+   *  phase + stopPropagation prevents the textarea from also consuming the
+   *  same arrow key for caret movement. */
+  private installKeyHandler() {
+    this.removeKeyHandler();
+    this.keyHandler = (e: KeyboardEvent) => {
+      if (!this.isOpen()) return;
+      // IME composition — let the input method handle Enter / arrows.
+      if ((e as any).isComposing || (e as any).keyCode === 229) return;
+      if (this.onKey(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener('keydown', this.keyHandler, true);
+  }
+  private removeKeyHandler() {
+    if (this.keyHandler) {
+      document.removeEventListener('keydown', this.keyHandler, true);
+      this.keyHandler = null;
+    }
+  }
+
+  private installOutsideHandler() {
+    this.removeOutsideHandler();
+    this.outsideClickHandler = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (this.el.contains(t)) return;
+      if (this.anchor && this.anchor.contains(t)) return;
+      this.hide();
+    };
+    setTimeout(() => document.addEventListener('mousedown', this.outsideClickHandler!), 0);
+  }
+  private removeOutsideHandler() {
+    if (this.outsideClickHandler) {
+      document.removeEventListener('mousedown', this.outsideClickHandler);
+      this.outsideClickHandler = null;
+    }
+  }
+
+  private scrollSelectedIntoView() {
+    const target = this.itemEls[this.selectedIdx];
+    if (target) target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  private render() {
+    clear(this.el);
+    this.itemEls = [];
+    let lastSection: string | undefined;
+    this.items.forEach((it, i) => {
+      if (it.section && it.section !== lastSection) {
+        el('div', { className: 'nc-popup-section', text: it.section, parent: this.el });
+        lastSection = it.section;
+      }
+      const row = el('div', {
+        className: 'nc-popup-item'
+          + (i === this.selectedIdx ? ' selected' : '')
+          + (it.checked ? ' checked' : '')
+          + (it.danger ? ' danger' : ''),
+        parent: this.el,
+      });
+      row.addEventListener('mousemove', () => {
+        if (this.selectedIdx === i) return;
+        this.selectedIdx = i;
+        for (let k = 0; k < this.itemEls.length; k++) this.itemEls[k].classList.toggle('selected', k === i);
+      });
+      row.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const res = it.onSelect();
+        this.hide();
+        // If async, swallow so a thrown rejection doesn't surface as an unhandled promise.
+        if (res && typeof (res as any).then === 'function') (res as any).catch(() => {});
+      });
+
+      // Leading column: ✓ when checked, else icon (if provided), else spacer.
+      const lead = el('span', { className: 'nc-popup-icon', parent: row });
+      if (it.checked) {
+        lead.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+        lead.classList.add('nc-popup-check');
+      } else if (it.iconSvg) {
+        lead.innerHTML = it.iconSvg;
+      }
+      el('span', { className: 'nc-popup-label', text: it.label, parent: row });
+      if (it.hint) el('span', { className: 'nc-popup-hint', text: it.hint, parent: row });
+      this.itemEls.push(row);
+    });
+  }
+}

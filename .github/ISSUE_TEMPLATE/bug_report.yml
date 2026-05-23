@@ -1,0 +1,97 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Most reports get triaged within a few days.
+
+        **Before submitting**, please:
+        - Search [open & closed issues](https://github.com/yiiwang118/obsidian-glossa/issues?q=is%3Aissue) to avoid duplicates
+        - Try disabling other community plugins to isolate the cause
+        - Update Glossa to the latest version
+
+  - type: input
+    id: version
+    attributes:
+      label: Glossa version
+      description: Settings → About, or check `.obsidian/plugins/glossa/manifest.json`
+      placeholder: e.g. 0.4.0
+    validations:
+      required: true
+
+  - type: input
+    id: host-version
+    attributes:
+      label: Host app version
+      description: Settings → About → Current version (the desktop knowledge-base app Glossa runs in)
+      placeholder: e.g. 1.6.7
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: LLM provider where the bug occurred
+      options:
+        - OpenAI
+        - Anthropic
+        - OpenAI-compatible gateway (DeepSeek / GLM / Qwen / …)
+        - Codex CLI (legacy exec --json)
+        - Codex App-Server (stdio JSON-RPC)
+        - Claude Code CLI
+        - Not provider-related
+        - Multiple
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Concrete behavior. Screenshots welcome. If there's a stack trace from devtools console, paste it.
+      placeholder: |
+        I clicked X, expected Y, but got Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal sequence that reproduces. Use a fresh vault if the issue is data-dependent.
+      placeholder: |
+        1. Open sidebar
+        2. Add an OpenAI endpoint
+        3. Type "@foo.md hello" and press Enter
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console logs
+      description: Open devtools (Cmd/Ctrl+Shift+I) → Console → filter on `[glossa]` or `[plugin]`. Paste relevant lines.
+      render: text
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I have redacted any API keys, personal data, or proprietary vault content from this report.
+          required: true

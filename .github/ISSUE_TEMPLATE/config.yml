@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/yiiwang118/obsidian-glossa/security/advisories/new
+    about: Report a security issue privately via GitHub Security Advisories. Do NOT file as a public issue.
+  - name: Question / how-to / discussion
+    url: https://github.com/yiiwang118/obsidian-glossa/discussions
+    about: For configuration help, ideas, or "is this supposed to work like X?" — use Discussions, not Issues.

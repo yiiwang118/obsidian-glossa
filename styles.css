@@ -1,0 +1,3483 @@
+/* Custom property registration — needed for animating conic-gradient
+   `from <angle>` values smoothly. Without @property, browsers treat the
+   variable as a string and snap rather than interpolate. Lives at top
+   level (cannot be nested inside a selector). */
+@property --aurora-ang {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes aurora-rotate {
+  to { --aurora-ang: 360deg; }
+}
+
+/* ============================================================
+   Aurora tokens at :root scope (v0.4 fix)
+   ------------------------------------------------------------
+   These need to resolve OUTSIDE `.glossa-view` because popups
+   (`.nc-popup`, `.nc-history-popover`, `.nc-send-flyout`) are
+   appended to document.body — they're siblings of the workspace,
+   not descendants of the plugin view. Without these :root copies,
+   `var(--aurora-tint-14)` would resolve to invalid in popup CSS
+   and the whole `background: linear-gradient(…)` rule would be
+   discarded as a parse error.
+   The same values are still re-declared inside `.glossa-view` (no
+   harm, they win at higher specificity for in-view descendants);
+   this block just makes them available everywhere else.
+   ============================================================ */
+:root {
+  --aurora-violet:  #8b5cf6;
+  --aurora-purple:  #a855f7;
+  --aurora-fuchsia: #d946ef;
+  --aurora-indigo:  #6366f1;
+  --aurora-cyan:    #22d3ee;
+
+  --aurora-gradient: linear-gradient(
+    120deg,
+    #8b5cf6 0%,
+    #a855f7 28%,
+    #d946ef 50%,
+    #6366f1 78%,
+    #8b5cf6 100%
+  );
+
+  --aurora-tint-04: rgba(139, 92, 246, 0.04);
+  --aurora-tint-08: rgba(139, 92, 246, 0.08);
+  --aurora-tint-14: rgba(139, 92, 246, 0.14);
+  --aurora-tint-22: rgba(139, 92, 246, 0.22);
+
+  /* Motion & sizing tokens that body-level popups also reference. */
+  --ease-spring:    cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo:  cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-loop:      cubic-bezier(0.65, 0, 0.35, 1);
+
+  --dur-micro:  120ms;
+  --dur-fast:   220ms;
+  --dur-normal: 320ms;
+
+  --g-radius-sm:  8px;
+  --g-radius-md: 12px;
+  --g-text-sm: 11px;
+  --g-text-md: 13px;
+}
+
+/* ============================================================
+   Glossa — sidebar styles (v0.4 "Aurora")
+   ============================================================
+   Design language: glassy premium AI sidebar with Aurora identity.
+   - Fixed Glossa-purple palette (not theme accent) for brand continuity
+   - Animated conic-gradient borders on focus + streaming
+   - Multi-easing motion: spring overshoot for hover/press, ease-out-quart
+     for transitions, ease-loop for breathing/shimmer
+   - 4/8/12/16/24 spacing; 8/12/18/24 radius; 11/13/15 font sizes
+   - Type weights: 400 body / 500 emphasis / 600 labels / 700 hero
+   ------------------------------------------------------------
+   Back-compat: all v0.3 `--nc-*` tokens are preserved verbatim so older
+   selectors and any community themes targeting them keep working.
+   New Aurora tokens live alongside as `--aurora-*` and `--glossa-*`.
+   ============================================================ */
+
+.glossa-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* Anchor for the history drawer's position: absolute inset. */
+  position: relative;
+  /* `--nc-base-font` is set per-view by applyCssVars() — bound to the
+     Settings → Font size slider so users can scale the whole plugin from
+     12px (compact) to 18px (large) in one knob. Default 14 hits the sweet
+     spot for most retina + sub-retina displays; the previous 12-13px from
+     Obsidian's --font-ui-small read as cramped at native zoom. */
+  font-size: var(--nc-base-font, 14px);
+
+  /* ----- shape ----- */
+  --nc-radius: 12px;
+  --nc-radius-sm: 8px;
+  --nc-radius-xs: 5px;
+  --nc-radius-pill: 999px;
+
+  /* ----- spacing scale (multiples of 4) ----- */
+  --nc-pad: 12px;
+  --nc-gap-1: 2px;
+  --nc-gap-2: 4px;
+  --nc-gap-3: 8px;
+  --nc-gap-4: 12px;
+  --nc-gap-5: 16px;
+  --nc-gap-6: 24px;
+
+  /* ----- surfaces ----- */
+  --nc-bg-hard: var(--background-primary);
+  --nc-bg-soft: var(--background-secondary);
+  --nc-bg-soft-hover: var(--background-modifier-hover);
+  --nc-border: var(--background-modifier-border);
+  --nc-border-strong: color-mix(in srgb, var(--nc-border) 70%, var(--text-faint));
+
+  /* ----- ink ----- */
+  --nc-accent: var(--interactive-accent);
+  --nc-accent-soft: color-mix(in srgb, var(--nc-accent) 14%, transparent);
+  --nc-accent-strong: color-mix(in srgb, var(--nc-accent) 28%, transparent);
+  --nc-muted: var(--text-muted);
+
+  /* ----- semantic colors (only the three we actually need) ----- */
+  --nc-success: #3fb950;
+  --nc-danger: #f85149;
+  --nc-warn: #d4a72c;
+
+  /* ----- elevation ----- */
+  --nc-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --nc-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.06);
+  --nc-shadow-3: 0 8px 24px rgba(0, 0, 0, 0.10);
+
+  /* ----- motion ----- */
+  --nc-ease: cubic-bezier(0.2, 0, 0, 1);
+  --nc-dur-1: 120ms;
+  --nc-dur-2: 180ms;
+  --nc-dur-3: 240ms;
+
+  /* ============================================================
+     Aurora tokens (v0.4)
+     ------------------------------------------------------------
+     Fixed brand palette — does NOT follow Obsidian's
+     --interactive-accent. This is a deliberate identity choice:
+     Glossa is always violet, regardless of user theme.
+     ============================================================ */
+
+  /* ----- Aurora spectrum (5 anchors) ----- */
+  --aurora-violet:  #8b5cf6;   /* primary brand purple */
+  --aurora-purple:  #a855f7;   /* warm-side mid */
+  --aurora-fuchsia: #d946ef;   /* hot accent */
+  --aurora-indigo:  #6366f1;   /* cool ballast */
+  --aurora-cyan:    #22d3ee;   /* success-state ping only */
+
+  /* Composite gradient — drives wordmark, orb halo,
+     conic-border base. Use background-size:240% + flow animation
+     for the cycling-aurora effect on text/surfaces. */
+  --aurora-gradient: linear-gradient(
+    120deg,
+    var(--aurora-violet)  0%,
+    var(--aurora-purple)  28%,
+    var(--aurora-fuchsia) 50%,
+    var(--aurora-indigo)  78%,
+    var(--aurora-violet)  100%
+  );
+
+  /* Common rgba helpers for glow / wash overlays */
+  --aurora-tint-04: rgba(139, 92, 246, 0.04);
+  --aurora-tint-08: rgba(139, 92, 246, 0.08);
+  --aurora-tint-14: rgba(139, 92, 246, 0.14);
+  --aurora-tint-22: rgba(139, 92, 246, 0.22);
+
+  /* ----- Glossa scales — fresh, locked steps -----
+     Spacing keeps the existing 4/8/12/16/24 rhythm; radii get a
+     new 18px tier for the composer card. */
+  --g-space-1: 4px;
+  --g-space-2: 8px;
+  --g-space-3: 12px;
+  --g-space-4: 16px;
+  --g-space-5: 24px;
+
+  --g-radius-sm:   8px;
+  --g-radius-md:  12px;
+  --g-radius-lg:  18px;   /* composer card */
+  --g-radius-xl:  24px;   /* modals / popovers */
+  --g-radius-pill: 999px;
+
+  /* Three-tier font ladder. Components opt in by referencing these
+     rather than free-form 10/11.5/12/13/14 values. */
+  --g-text-sm: 11px;
+  --g-text-md: 13px;
+  --g-text-lg: 15px;
+
+  /* ----- Aurora motion system ----- */
+  /* Spring overshoot — hover lifts, press release. */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Smooth ramp — fades, slides, layout transitions. */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  /* Hard arrival — large panels entering. */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Soft symmetric — breathing, shimmer loops. */
+  --ease-loop: cubic-bezier(0.65, 0, 0.35, 1);
+
+  --dur-micro:     120ms;  /* color, opacity flicks */
+  --dur-fast:      220ms;  /* hover lift, popup show */
+  --dur-normal:    320ms;  /* panel entrance */
+  --dur-slow:     4000ms;  /* orb breath, wordmark flow */
+  --dur-ring:     6000ms;  /* conic stream rotation */
+
+  /* ----- Glass surfaces (light) -----
+     Tunable per-theme override below. */
+  --glass-bg:        rgba(255, 255, 255, 0.62);
+  --glass-bg-tile:   rgba(255, 255, 255, 0.50);
+  --glass-bg-hover:  rgba(255, 255, 255, 0.78);
+  --glass-blur:      blur(18px) saturate(180%);
+  --glass-blur-tile: blur(14px) saturate(170%);
+
+  /* Aurora glow shells — focus, streaming, hover lift */
+  --aurora-glow-soft: 0 0 0 4px var(--aurora-tint-14),
+                      0 0 24px var(--aurora-tint-14);
+  --aurora-glow-hard: 0 0 0 4px var(--aurora-tint-22),
+                      0 0 32px var(--aurora-tint-22);
+  --aurora-lift: 0 4px 16px rgba(0, 0, 0, 0.08),
+                 0 1px 2px  rgba(0, 0, 0, 0.06);
+}
+
+.theme-dark .glossa-view {
+  --nc-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.18);
+  --nc-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.22);
+  --nc-shadow-3: 0 8px 24px rgba(0, 0, 0, 0.32);
+
+  /* Glass surfaces tuned for dark canvases — slightly lower
+     opacity + cooler tint so blurred content underneath still
+     reads, while the glass remains visibly a surface. */
+  --glass-bg:        rgba(38, 36, 52, 0.55);
+  --glass-bg-tile:   rgba(48, 46, 68, 0.48);
+  --glass-bg-hover:  rgba(60, 58, 84, 0.66);
+
+  --aurora-lift: 0 4px 18px rgba(0, 0, 0, 0.32),
+                 0 1px 2px  rgba(0, 0, 0, 0.22);
+}
+
+/* Reduced-transparency: macOS/iOS users (and some Windows accessibility
+   modes) flag a system preference to avoid blurred glass surfaces
+   because it can interfere with readability or motion sensitivity.
+   Fall back to solid backgrounds and drop backdrop-filter entirely. */
+@media (prefers-reduced-transparency: reduce) {
+  .glossa-view {
+    --glass-bg:        var(--nc-bg-soft);
+    --glass-bg-tile:   var(--nc-bg-soft);
+    --glass-bg-hover:  var(--nc-bg-soft-hover);
+    --glass-blur:      none;
+    --glass-blur-tile: none;
+  }
+}
+
+/* Tabular-nums everywhere a count or time can change — prevents the visual
+   jitter you get when proportional digits resize between values. */
+.nc-msg-elapsed,
+.nc-tool-event-elapsed,
+.nc-msg-time,
+.nc-token-badge,
+.nc-budget-label,
+.nc-history-modal-count,
+.nc-cost-bar { font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .nc-fade-in { animation: nc-fade-in var(--nc-dur-2) var(--nc-ease); }
+}
+@keyframes nc-fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .glossa-view *,
+  .glossa-view *::before,
+  .glossa-view *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* ============================================================
+   Header
+   ============================================================ */
+.nc-header {
+  display: flex; align-items: center; gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--nc-border);
+  flex-shrink: 0;
+  height: 34px;
+  background: var(--nc-bg-hard);
+  position: sticky; top: 0; z-index: 2;
+}
+
+/* Mode pill — borderless at rest, faint hover. The colored dot is the only
+   constant visual; the bg appears only on interaction so the header reads as
+   "text + icons" rather than a row of chips. */
+/* ============================================================
+   Plan / Act segmented control (Aurora v0.4 polish, v2 geometry)
+   ------------------------------------------------------------
+   Inline-grid container with 1fr 1fr columns — guaranteed strict
+   50/50 button widths regardless of label length. The knob (::before
+   for Plan, ::after for Act) is `calc(50% - 4px)` wide and slides
+   between (left:2px) and (left:2px + 100% + 4px) so its centre always
+   lands exactly on the centre of its column.
+   Buttons defeat Obsidian's global button rules with !important on
+   height / padding / line-height — without those overrides the
+   default 32px input height pushed the labels off the knob.
+   ============================================================ */
+.nc-mode-seg {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  height: 26px;
+  background: var(--nc-bg-soft);
+  border-radius: var(--nc-radius-pill);
+  user-select: none;
+  isolation: isolate;
+}
+.nc-mode-seg::before,
+.nc-mode-seg::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 4px);
+  border-radius: var(--nc-radius-pill);
+  transition:
+    transform var(--dur-normal) var(--ease-spring),
+    opacity var(--dur-fast) var(--ease-out-quart);
+  z-index: 0;
+  pointer-events: none;
+}
+.nc-mode-seg::before {
+  background: var(--aurora-gradient);
+  background-size: 200% 100%;
+  box-shadow: 0 1px 3px rgba(139, 92, 246, 0.32);
+}
+.nc-mode-seg::after {
+  background: linear-gradient(135deg, #3fb950 0%, #2ea043 100%);
+  box-shadow:
+    0 1px 3px rgba(63, 185, 80, 0.32),
+    0 0 0 0 rgba(63, 185, 80, 0.42);
+  opacity: 0;
+}
+/* Knob positions: 100% of the knob's OWN width = column width minus
+   the 4px gap, so adding +4px lands the knob exactly on the right
+   column's 2px inset. Both pseudos share this translation so they
+   visually cross-fade in place without any apparent slide of the
+   transparent one. */
+.nc-mode-seg[data-mode="plan"]::before { transform: translateX(0); opacity: 1; }
+.nc-mode-seg[data-mode="plan"]::after  { transform: translateX(0); opacity: 0; }
+.nc-mode-seg[data-mode="act"]::before  { transform: translateX(calc(100% + 4px)); opacity: 0; }
+.nc-mode-seg[data-mode="act"]::after   {
+  transform: translateX(calc(100% + 4px));
+  opacity: 1;
+}
+/* Pulse only while a stream is in flight. Without this scoping the green
+   knob pulsed permanently in act mode — visually implied "always working"
+   and burned a slow CPU/GPU cycle in the laptop's compositor even when
+   the sidebar was idle in the background. `.glossa-streaming` is toggled
+   on the view root by view.ts whenever this.streaming is true. */
+.glossa-streaming .nc-mode-seg[data-mode="act"]::after {
+  animation: nc-act-pulse 2.6s var(--ease-loop) infinite;
+}
+@keyframes nc-act-pulse {
+  0%, 100% { box-shadow: 0 1px 3px rgba(63, 185, 80, 0.32), 0 0 0 0 rgba(63, 185, 80, 0.42); }
+  60%      { box-shadow: 0 1px 3px rgba(63, 185, 80, 0.32), 0 0 0 5px rgba(63, 185, 80, 0); }
+}
+/* Buttons: fill the grid cell exactly, no extra padding / height
+   from Obsidian's button base rules. The `!important` on height,
+   min-height, padding, and line-height defeats every selector
+   Obsidian uses; without them the label would sit too tall and
+   appear vertically off-centre against the knob. */
+.nc-mode-seg-opt {
+  position: relative;
+  z-index: 1;
+  height: 100% !important;
+  min-height: 0 !important;
+  width: 100%;
+  padding: 0 !important;
+  margin: 0;
+  font-size: var(--g-text-sm);
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.1px;
+  line-height: 1 !important;
+  transition: color var(--dur-fast) var(--ease-out-quart);
+  min-width: 0;
+  text-align: center;
+}
+.nc-mode-seg[data-mode="plan"] .nc-mode-seg-opt[data-opt="plan"],
+.nc-mode-seg[data-mode="act"]  .nc-mode-seg-opt[data-opt="act"] {
+  color: #ffffff;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.18);
+}
+.nc-mode-seg-opt:hover { color: var(--text-normal); }
+.nc-mode-seg[data-mode="plan"] .nc-mode-seg-opt[data-opt="plan"]:hover,
+.nc-mode-seg[data-mode="act"]  .nc-mode-seg-opt[data-opt="act"]:hover {
+  color: #ffffff;
+}
+/* Force the segment to actually have visible width — without an
+   intrinsic minimum the grid would collapse to its 1fr children's
+   min-content (0 after our min-width:0), and the whole control could
+   visually shrink to nothing. 72px fits Plan and Act comfortably at
+   our 11px font weight 600. */
+.nc-mode-seg { min-width: 72px; }
+
+/* Token badge — same restraint: text only, no chip background. */
+.nc-token-badge {
+  display: inline-flex; align-items: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--nc-muted);
+  padding: 3px 6px;
+  border-radius: var(--nc-radius-pill);
+  background: transparent;
+  cursor: default;
+}
+.nc-token-badge.warn { color: var(--nc-warn); }
+
+.nc-header-spacer { flex: 1; }
+
+/* Icon buttons — flat at rest, spring lift on hover. */
+.nc-icon-btn {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 7px;
+  color: var(--nc-muted);
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) linear,
+    color var(--dur-micro) linear,
+    transform var(--dur-fast) var(--ease-spring);
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  outline: 0 !important;
+}
+.nc-icon-btn:hover {
+  background: var(--nc-bg-soft-hover) !important;
+  color: var(--text-normal);
+  transform: scale(1.06);
+}
+.nc-icon-btn:active {
+  background: color-mix(in srgb, var(--nc-bg-soft-hover) 80%, var(--nc-border)) !important;
+  transform: scale(0.94);
+  transition-duration: 80ms;
+}
+.nc-icon-btn svg { width: 15px; height: 15px; }
+.nc-icon-btn.active { color: var(--aurora-violet); }
+
+/* ============================================================
+   Messages area
+   ============================================================ */
+.nc-messages {
+  flex: 1;
+  overflow-y: auto;
+  /* Reserve scrollbar gutter at all times. This prevents the classic hover
+     flicker where a tooltip / absolutely-positioned hover element nudged the
+     content height, the scrollbar appeared, content width shrank, hover was
+     lost, scrollbar disappeared, … and the page oscillated. With a stable
+     gutter the column width is constant regardless of whether the bar is
+     actually drawn this frame. */
+  scrollbar-gutter: stable;
+  /* Don't auto-scroll-anchor on layout changes triggered by hover; that was
+     part of the same flicker symptom. */
+  overflow-anchor: none;
+  padding: 10px 14px 6px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.nc-msg {
+  display: flex; flex-direction: column;
+  gap: 2px;
+  /* Aurora v0.4: longer ramp + smoother easing on message entrance.
+     Combined with the conic ring on the composer, send → first paint
+     now reads as a single coordinated arrival instead of an abrupt flick. */
+  animation: nc-msg-arrive var(--dur-normal) var(--ease-out-quart);
+  max-width: 92%;
+}
+/* During batch loads (loadSession, history restore, session swap), the
+   arrival animation would fire 200x in parallel — visually a chaotic
+   "ripple" of fade-ins and a real CPU spike. .no-anim on the messages
+   container suppresses the animation for the duration of the batch. */
+.nc-messages.no-anim .nc-msg-wrap { animation: none; }
+@keyframes nc-msg-arrive {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* Unified inter-card spacing. Body → tool stack gets some air (7px) so prose
+   doesn't bump against the action cards. Card → card stays tight (3px). */
+.nc-msg > .nc-thinking-card,
+.nc-msg > .nc-selection-echo,
+.nc-msg > .nc-tool-events-stack {
+  margin-top: 0;
+}
+.nc-msg > .nc-thinking-card + .nc-thinking-card,
+.nc-msg > .nc-thinking-card + .nc-tool-events-stack,
+.nc-msg > .nc-tool-events-stack + .nc-thinking-card { margin-top: 3px; }
+.nc-msg > .nc-msg-body + .nc-tool-events-stack,
+.nc-msg > .nc-msg-body + .nc-thinking-card { margin-top: 7px; }
+/* User messages: stretched band tinted with the aurora identity. The
+   colour swap from neutral grey to aurora-violet at 8% threads the
+   brand purple through the entire transcript — every user prompt
+   reads as "yours" and visually echoes the composer it came from. */
+.nc-msg.user {
+  align-self: stretch;
+  max-width: 100%;
+  /* Deeper than the surrounding canvas so the bubble reads as "yours" — the
+     prior 8% violet was hardly visible against the page bg. 16% / 22% are
+     the thresholds that consistently read as a clear card both in light and
+     dark themes without being shouty. */
+  background: rgba(139, 92, 246, 0.16);
+  border-radius: var(--nc-radius-sm);
+  padding: 7px 12px 6px;
+  transition: background var(--dur-fast) var(--ease-out-quart);
+}
+.theme-dark .nc-msg.user { background: rgba(139, 92, 246, 0.22); }
+.nc-msg.user:hover { background: rgba(139, 92, 246, 0.22); }
+.theme-dark .nc-msg.user:hover { background: rgba(139, 92, 246, 0.30); }
+.nc-msg.user > .nc-msg-role.hidden-role { display: none !important; }
+.nc-msg.user > .nc-msg-body {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--text-normal);
+}
+.nc-msg.user > .nc-msg-body p { margin: 0; }
+.nc-msg.user > .nc-msg-body p + p { margin-top: 3px; }
+.nc-msg.user > .nc-selection-echo { background: transparent; border: 0; margin-top: 3px; padding: 0; }
+
+/* Assistant messages: flat (no bubble), left-aligned, small icon row */
+.nc-msg.assistant {
+  align-self: stretch;
+  max-width: 100%;
+  /* min-width: 0 lets the flex child shrink below natural content width so
+     long bash strings / tables don't force horizontal scrolling at the
+     message level. Combined with word-break on pre/code descendants this
+     keeps things wrapping. */
+  min-width: 0;
+  /* CRITICAL: do NOT set `overflow-x: hidden` here. CSS Overflow Module 3
+     spec dictates that if either axis is hidden and the other is visible,
+     the visible axis is forced to `auto` — which gives every assistant
+     message its OWN vertical scrollbar, defeating the single-scroll-column
+     layout the user expects. Wide content is handled by pre/code wrapping
+     and table { overflow-x: auto } in .nc-msg-body. */
+}
+/* Continuation segments share the same turnId as the preceding assistant
+   message. They visually belong to the same answer, so hide the role badge,
+   footer (timestamp + action icons) and tighten vertical spacing. Only the
+   FIRST segment of the turn shows the role; only the LAST segment shows the
+   footer. The last-segment selector uses :has(+ .nc-asst-continuation) so we
+   don't need extra JS to tag the final segment explicitly.
+   margin-top:0 + parent gap:6px → segments sit immediately under each other
+   regardless of whether `gap` or margins win the layout race. */
+.nc-msg.assistant.nc-asst-continuation {
+  margin-top: 0;
+}
+.nc-msg.assistant.nc-asst-continuation > .nc-msg-role { display: none; }
+/* Pull each continuation flush against the prior segment so a long codex turn
+   reads as one continuous reply. The parent's `gap` would otherwise add a
+   visible step between every tool/text segment. */
+.nc-msg.assistant + .nc-msg.assistant.nc-asst-continuation { margin-top: -6px; }
+/* Hide footer on any non-final continuation. The final segment doesn't carry
+   .nc-asst-continuation OR is followed by no further continuation, so we use
+   :has() to detect "has another continuation right after me" → hide footer. */
+.nc-msg.assistant:has(+ .nc-msg.assistant.nc-asst-continuation) > .nc-msg-footer {
+  display: none;
+}
+.nc-msg-role {
+  display: flex; align-items: center; gap: 7px;
+  font-size: var(--nc-font-sm, 11px);
+  font-weight: 600;
+  color: var(--nc-muted);
+  /* Slight top breathing room separating the role label from the prior
+     bubble. Bottom margin handled by .nc-msg gap. */
+  margin-top: 4px;
+}
+.nc-msg-role .nc-role-icon {
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+/* Glossa mark is rendered with a baked-in gradient, so do NOT inherit
+   currentColor here. opacity:1 keeps the gradient saturation crisp. */
+.nc-msg-role .nc-role-icon svg { width: 100%; height: 100%; opacity: 1; }
+.nc-msg.assistant .nc-msg-role { color: var(--nc-accent); }
+.nc-msg.assistant .nc-msg-role .nc-role-name {
+  letter-spacing: 0.1px;
+  text-transform: none;
+  font-weight: 600;
+  font-size: calc(var(--nc-base-font, 13px) - 1px);
+}
+/* The per-message elapsed-time counter is hidden by default — users found it
+   busy. A single overall token/budget bar at the bottom of the input still
+   indicates session-level progress. Streaming is now signalled only by the
+   subtle accent-shimmer on the "Glossa" role label. */
+.nc-msg-elapsed { display: none !important; }
+
+/* Preamble: a short assistant intent statement right before a tool batch. We KEEP
+   the typography normal (no italic, no fade) — the user-visible difference is just
+   tighter spacing and a hidden role badge so it reads as flowing prose rather than
+   "a new turn started". */
+.nc-msg.assistant.preamble { margin-top: -2px; gap: 2px; }
+.nc-msg.assistant.preamble > .nc-msg-role { display: none; }
+.nc-msg.assistant.preamble > .nc-msg-actions { display: none; }
+
+/* While streaming, an assistant message may have an EMPTY body (only reasoning
+   or tool cards). When everything is empty (no body, no reasoning, no tool —
+   model hasn't responded yet), show a subtle "Thinking…" pulse so the user
+   knows something is happening. */
+.nc-msg.assistant.streaming > .nc-msg-body:empty {
+  display: block;
+  min-height: 14px;
+  padding: 0;
+  margin: 0;
+}
+.nc-msg.assistant.streaming > .nc-msg-body:empty::before {
+  content: 'Thinking…';
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  padding: 2px 0;
+  animation: nc-pulse 1.4s ease-in-out infinite;
+}
+/* Hide the placeholder once anything else (reasoning card / tool card) is present */
+.nc-msg.assistant.streaming:has(.nc-tool-events-stack:not(:empty)) > .nc-msg-body:empty::before,
+.nc-msg.assistant.streaming:has(.nc-thinking-card:not([style*='display: none'])) > .nc-msg-body:empty::before { content: none; }
+/* And collapse the body entirely when sibling content already speaks for itself,
+   so the assistant card doesn't show a phantom empty line above the cards. */
+.nc-msg.assistant.streaming:has(.nc-tool-events-stack:not(:empty)) > .nc-msg-body:empty,
+.nc-msg.assistant.streaming:has(.nc-thinking-card:not([style*='display: none'])) > .nc-msg-body:empty { display: none; }
+/* Don't show edit/copy/regen actions on a message that's still being produced. */
+.nc-msg.assistant.streaming > .nc-msg-actions { display: none !important; }
+/* When two assistant bubbles share a turn but neither is the explicit
+   .nc-asst-continuation (legacy state on older sessions), still tighten them. */
+.nc-msg.assistant + .nc-msg.assistant > .nc-msg-body:empty { display: none; }
+
+/* ============================================================
+   Compacted-summary message — neutral, in-band, collapsible
+   ============================================================ */
+.nc-msg.compact-summary {
+  margin: 10px 0 8px;
+  padding: 6px 12px 7px;
+  background: var(--nc-bg-soft);
+  border-left: 2px solid var(--nc-border-strong);
+  border-radius: 0 var(--nc-radius-sm) var(--nc-radius-sm) 0;
+  position: relative;
+  transition: padding var(--nc-dur-2) var(--nc-ease);
+}
+.nc-msg.compact-summary::before {
+  content: '';
+  position: absolute;
+  left: -14px; right: 0; top: -10px;
+  height: 1px;
+  background: var(--nc-border);
+}
+.nc-msg.compact-summary > .nc-msg-role {
+  color: var(--text-muted);
+  font-size: 9.5px;
+  letter-spacing: 0.8px;
+  margin-bottom: 0;
+  cursor: pointer;
+  user-select: none;
+  display: flex; align-items: center;
+  gap: 6px;
+}
+.nc-msg.compact-summary > .nc-msg-role:hover { color: var(--text-normal); }
+.nc-msg.compact-summary > .nc-msg-role .nc-role-icon { width: 13px; height: 13px; opacity: 0.85; }
+.nc-msg.compact-summary > .nc-msg-role .nc-compact-tag {
+  text-transform: none;
+  letter-spacing: 0.3px;
+  font-weight: 600;
+}
+.nc-compact-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.nc-compact-actions button {
+  border: 1px solid transparent;
+  background: var(--nc-bg-hard);
+  color: var(--text-muted);
+  padding: 2px 7px;
+  border-radius: var(--nc-radius-xs);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  transition: background var(--nc-dur-1) var(--nc-ease),
+              border-color var(--nc-dur-1) var(--nc-ease),
+              color var(--nc-dur-1) var(--nc-ease);
+}
+.nc-compact-actions button:hover {
+  background: var(--nc-bg-soft-hover);
+  border-color: var(--nc-border);
+  color: var(--text-normal);
+}
+.nc-compact-actions .nc-compact-toggle { padding: 2px 5px; }
+.nc-compact-actions .nc-compact-toggle svg { transition: transform 0.18s; }
+.nc-msg.compact-summary.collapsed .nc-compact-toggle svg { transform: rotate(-90deg); }
+.nc-compact-actions .nc-compact-undo span { font-size: 9.5px; }
+
+.nc-msg.compact-summary > .nc-msg-body {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin-top: 6px;
+  max-height: 1200px;
+  overflow: hidden;
+  transition: max-height 0.22s ease, margin-top 0.22s ease, opacity 0.18s ease;
+}
+.nc-msg.compact-summary.collapsed > .nc-msg-body {
+  max-height: 0;
+  margin-top: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.nc-msg.compact-summary > .nc-msg-body h3 {
+  font-size: 11px;
+  margin: 6px 0 2px;
+  color: var(--text-normal);
+  letter-spacing: 0.3px;
+}
+.nc-msg.compact-summary > .nc-msg-actions { display: none; }
+.nc-msg.compact-summary > .nc-tool-events-stack,
+.nc-msg.compact-summary > .nc-thinking-card { display: none; }
+
+/* Transient loading card while compaction is in flight */
+.nc-compact-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  background: rgba(182, 108, 240, 0.08);
+  border: 1px dashed rgba(182, 108, 240, 0.35);
+  border-radius: var(--nc-radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+  animation: nc-fade-in 0.18s ease-out;
+}
+.nc-compact-loading-spinner {
+  width: 14px; height: 14px;
+  animation: nc-spin 0.9s linear infinite;
+  display: inline-flex; align-items: center;
+}
+.nc-compact-loading-spinner svg { stroke-dasharray: 50 20; }
+@keyframes nc-spin {
+  to { transform: rotate(360deg); }
+}
+.nc-compact-loading-text { letter-spacing: 0.2px; }
+
+.nc-msg-body {
+  /* Inherit `--nc-base-font` from .glossa-view so the slider scales prose. */
+  font-size: var(--nc-base-font, 14px);
+  line-height: 1.55;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  /* Defensive: no message-internal vertical scrollbar, ever. The entire
+     conversation lives in one scrollable column (.nc-messages). */
+  max-height: none;
+  overflow-y: visible;
+  /* Same defensive treatment on the horizontal axis — set BOTH explicitly to
+     visible so neither one forces the other to `auto`. */
+  overflow-x: visible;
+  /* Make all rendered message content selectable / copyable. Without this,
+     some Obsidian workspace ancestors set user-select:none and the user
+     can't drag-select assistant text. */
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+.nc-msg-body *,
+.nc-thinking-body,
+.nc-thinking-body *,
+.nc-tool-result,
+.nc-tool-result *,
+.nc-selection-echo-body {
+  user-select: text;
+  -webkit-user-select: text;
+}
+/* Wrap inline + block code so a very long URL / hash / bash invocation
+   cannot push the column wider than its parent (which would either show a
+   horizontal scrollbar OR — worse — silently force overflow-y:auto on the
+   ancestor, producing the per-message scrollbar bug). */
+.nc-msg-body pre,
+.nc-msg-body code {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.nc-msg-body pre { overflow-x: auto; max-width: 100%; }
+
+.nc-msg-body p { margin: 3px 0; line-height: 1.5; }
+.nc-msg-body p:first-child { margin-top: 0; }
+.nc-msg-body p:last-child  { margin-bottom: 0; }
+.nc-msg-body h1, .nc-msg-body h2, .nc-msg-body h3 { margin: 6px 0 3px; line-height: 1.3; }
+.nc-msg-body ul, .nc-msg-body ol { padding-left: 18px; margin: 3px 0; }
+.nc-msg-body li { margin: 1px 0; line-height: 1.5; }
+.nc-msg-body li > p { margin: 0; }
+.nc-msg-body pre { margin: 5px 0; }
+.nc-msg-body blockquote {
+  margin: 4px 0;
+  padding: 3px 10px;
+  border-left: 2px solid var(--nc-border);
+  color: var(--nc-muted);
+}
+/* Wide markdown tables — in a narrow sidebar a 5-col table would smash each
+   cell to single-character vertical wrapping. Let the table scroll horizontally
+   instead, the way GitHub renders it. */
+.nc-msg-body table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 6px 0;
+  font-size: calc(var(--nc-base-font, 13px) - 1px);
+}
+.nc-msg-body table th,
+.nc-msg-body table td {
+  padding: 4px 8px;
+  border: 1px solid var(--nc-border);
+  white-space: nowrap;
+  vertical-align: top;
+}
+.nc-msg-body table th {
+  background: var(--nc-bg-soft);
+  font-weight: 600;
+  text-align: left;
+}
+/* Unified card aesthetic — flat, hairline border, no accent stripe.
+   The reasoning / tool / selection cards all share this shell. */
+/* Reasoning card — Claude-Code-style minimalism. Closed state is a single
+   12px muted line (no border, no background). Opened state gets a subtle
+   left bar so the content reads as quoted. */
+.nc-thinking-card, .nc-selection-echo {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  font-size: 12px;
+  overflow: hidden;
+  transition: background 0.12s;
+}
+/* Aurora-tinted left rail when expanded. Border-image draws a vertical
+   gradient down the rail (violet → fuchsia) so reasoning prose feels
+   visually anchored to the brand identity. The 1-slice value stretches
+   the gradient along the full rail height. */
+.nc-thinking-card[open] .nc-thinking-body,
+.nc-selection-echo[open] .nc-selection-echo-body {
+  border-left: 2px solid transparent;
+  border-image: linear-gradient(
+    180deg,
+    var(--aurora-violet) 0%,
+    var(--aurora-fuchsia) 100%
+  ) 1;
+  margin-left: 4px;
+  padding-left: 10px;
+  margin-top: 4px;
+}
+.nc-thinking-card:hover .nc-thinking-summary,
+.nc-selection-echo:hover .nc-selection-echo-summary {
+  color: var(--text-normal);
+}
+/* (The "·" leading bullet for reasoning was removed — readers found it
+   ambiguous: a single dot could read as a stray punctuation mark next to
+   the brain emoji. The 🧠 icon is enough on its own.) */
+
+.nc-thinking-summary, .nc-selection-echo-summary {
+  padding: 2px 0;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  display: flex; align-items: center; gap: 6px;
+  list-style: none;
+}
+.nc-thinking-summary::-webkit-details-marker,
+.nc-selection-echo-summary::-webkit-details-marker { display: none; }
+.nc-thinking-summary::before, .nc-selection-echo-summary::before {
+  content: '';
+  display: inline-block;
+  width: 0; height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  margin-right: 2px;
+  opacity: 0.55;
+  transition: transform 0.15s;
+}
+details[open] > .nc-thinking-summary::before,
+details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
+.nc-thinking-summary:hover, .nc-selection-echo-summary:hover { color: var(--text-normal); }
+/* ============================================================
+   History modal — compact list
+   ============================================================ */
+/* History modal — Raycast-style command palette
+   (compact rows, generous search bar, hover reveals actions) */
+/* ============================================================
+   History popover — Cursor/Raycast task list. NO backdrop, NO h3,
+   NO back button, NO count. Just search + tight list + ⋯ overflow.
+   ============================================================ */
+.nc-history-popover {
+  position: fixed;
+  z-index: 9999;
+  /* Solid background so chat content can't bleed through the popover even
+     when the theme's --background-primary is translucent. */
+  background-color: var(--background-primary, #ffffff);
+  background-image: linear-gradient(var(--background-primary, #ffffff), var(--background-primary, #ffffff));
+  border: 1px solid var(--nc-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16), 0 0 0 0.5px var(--nc-border);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  animation: nc-pop-in var(--nc-dur-2) var(--nc-ease);
+  font-size: var(--nc-base-font, 13px);
+}
+.theme-dark .nc-history-popover {
+  background-color: var(--background-primary, #1e1e1e);
+  background-image: linear-gradient(var(--background-primary, #1e1e1e), var(--background-primary, #1e1e1e));
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45), 0 0 0 0.5px var(--nc-border);
+}
+.nc-history-popover.closing {
+  animation: nc-pop-out var(--nc-dur-1) var(--nc-ease) forwards;
+  pointer-events: none;
+}
+@keyframes nc-pop-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+@keyframes nc-pop-out {
+  to { opacity: 0; transform: translateY(-4px) scale(0.98); }
+}
+
+/* ---- top bar: search input + ⋯ overflow button ---- */
+.nc-history-pop-top {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 6px 4px;
+  border-bottom: 1px solid var(--nc-border);
+}
+.nc-history-pop-search {
+  flex: 1;
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 8px;
+  background: var(--nc-bg-soft);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  transition: border-color var(--nc-dur-1) var(--nc-ease),
+              background var(--nc-dur-1) var(--nc-ease);
+}
+.nc-history-pop-search:focus-within {
+  background: var(--background-primary);
+  border-color: var(--nc-border);
+}
+.nc-history-pop-search-icon {
+  width: 12px; height: 12px; display: inline-flex; color: var(--text-faint);
+  flex-shrink: 0;
+}
+.nc-history-pop-search-icon svg { width: 100%; height: 100%; }
+/* Obsidian's global `input[type="text"]` / `button` selectors have higher
+   specificity than our class selectors, so without !important they paint a
+   second nested border around the input and a white background on the button.
+   Defeating them locally keeps the popover visually clean. */
+.nc-history-pop-search-input {
+  flex: 1 !important;
+  border: 0 !important;
+  outline: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-normal) !important;
+  font-size: calc(var(--nc-base-font, 13px) - 1px);
+  padding: 2px 0 !important;
+  min-width: 0;
+  height: auto !important;
+  line-height: 1.4;
+}
+.nc-history-pop-search-input::placeholder {
+  color: var(--text-faint);
+  opacity: 0.7;
+}
+.nc-history-pop-more {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-muted);
+  border-radius: 5px;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0 !important;
+  transition: background var(--nc-dur-1) var(--nc-ease), color var(--nc-dur-1) var(--nc-ease);
+}
+.nc-history-pop-more:hover {
+  background: var(--nc-bg-soft-hover) !important;
+  color: var(--text-normal);
+}
+.nc-history-pop-more svg { width: 14px; height: 14px; display: block; }
+
+/* ---- list ---- */
+.nc-history-pop-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.nc-history-pop-list::-webkit-scrollbar { width: 6px; }
+.nc-history-pop-list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-faint) 40%, transparent);
+  border-radius: 3px;
+}
+.nc-history-pop-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background var(--dur-micro) linear, color var(--dur-micro) linear;
+  min-height: 28px;
+  position: relative;
+  /* Resting tint so the list reads as a stack of distinct cards rather than
+     bare rows. Matches the user-msg bubble brand so 历史 records sit in the
+     same visual family. Hover/keyboard then jumps to a clearly stronger
+     tint (see below). */
+  background: rgba(139, 92, 246, 0.06);
+}
+.theme-dark .nc-history-pop-row { background: rgba(139, 92, 246, 0.10); }
+/* Same highlight pattern as .nc-popup-item: hover (instant CSS) and the
+   keyboard cursor (.kbd-selected, set by HistoryPopover.setKbdIdx) paint
+   identically so the two states are visually consistent. Aurora gradient
+   so the highlight reads as a brand-coloured selection band. */
+.nc-history-pop-row:hover,
+.nc-history-pop-row.kbd-selected {
+  background: linear-gradient(
+    90deg,
+    rgba(139, 92, 246, 0.26) 0%,
+    rgba(139, 92, 246, 0.10) 100%
+  );
+}
+.theme-dark .nc-history-pop-row:hover,
+.theme-dark .nc-history-pop-row.kbd-selected {
+  background: linear-gradient(
+    90deg,
+    rgba(139, 92, 246, 0.36) 0%,
+    rgba(139, 92, 246, 0.14) 100%
+  );
+}
+.nc-history-pop-row:hover::before,
+.nc-history-pop-row.kbd-selected::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 6px; bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--aurora-gradient);
+  background-size: 200% 100%;
+  box-shadow: 0 0 6px var(--aurora-tint-22);
+}
+.nc-history-pop-row:hover .nc-history-pop-row-title,
+.nc-history-pop-row.kbd-selected .nc-history-pop-row-title { color: var(--text-normal); }
+.nc-history-pop-row-title {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-normal);
+  font-size: calc(var(--nc-base-font, 13px) - 1px);
+  font-weight: 500;
+}
+.nc-history-pop-row-ago {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: calc(var(--nc-base-font, 13px) - 3px);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+.nc-history-pop-row.renaming { padding: 2px 6px; }
+.nc-history-pop-rename {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: calc(var(--nc-base-font, 13px) - 1px);
+  border-radius: 4px;
+  border: 1px solid var(--nc-accent);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  outline: none;
+}
+.nc-history-pop-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-faint);
+}
+.nc-history-pop-empty-title {
+  font-size: calc(var(--nc-base-font, 13px) - 1px);
+  color: var(--text-muted);
+}
+
+/* Trailing relative-time pill on each row */
+.nc-history-row-ago {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-faint);
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: var(--nc-radius-pill);
+  background: var(--nc-bg-soft);
+}
+
+.nc-history-modal { width: 440px; max-width: 95vw; }
+.nc-history-modal-header {
+  display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px;
+}
+.nc-history-modal-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+.nc-history-modal-count {
+  font-size: 10.5px; color: var(--text-faint);
+  font-weight: 500;
+}
+.nc-history-search-wrap {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 11px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--nc-radius-sm);
+  background: var(--background-primary);
+  margin-bottom: 8px;
+  transition: border-color var(--nc-dur-1) var(--nc-ease),
+              box-shadow var(--nc-dur-1) var(--nc-ease);
+}
+.nc-history-search-wrap:focus-within {
+  border-color: var(--nc-accent);
+  box-shadow: 0 0 0 3px var(--nc-accent-soft);
+}
+.nc-history-search-icon {
+  width: 13px; height: 13px;
+  color: var(--text-faint);
+  display: inline-flex;
+}
+.nc-history-search-icon svg { width: 100%; height: 100%; }
+.nc-history-search {
+  flex: 1;
+  background: transparent;
+  border: 0; outline: none;
+  font-size: 12.5px;
+  color: var(--text-normal);
+  padding: 2px 0;
+}
+.nc-history-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding-right: 2px;
+  display: flex; flex-direction: column;
+  gap: 0;
+}
+.nc-history-row {
+  display: flex; gap: 8px; align-items: center;
+  padding: 7px 10px;
+  border-radius: var(--nc-radius-xs);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background var(--nc-dur-1) var(--nc-ease);
+  position: relative;
+  min-height: 32px;
+}
+.nc-history-row:hover {
+  background: var(--background-modifier-hover);
+}
+.nc-history-row-left { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.nc-history-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-normal);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0;
+}
+.nc-history-meta {
+  display: flex; gap: 4px;
+  font-size: 10px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.nc-history-row-actions {
+  display: none;
+  gap: 1px;
+  align-self: center;
+  flex-shrink: 0;
+}
+.nc-history-row:hover .nc-history-row-actions { display: flex; }
+.nc-history-row-actions button {
+  width: 20px; height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  color: var(--text-faint);
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background 0.1s, color 0.1s;
+}
+.nc-history-row-actions button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.nc-history-row-actions button.nc-history-del:hover { color: var(--nc-danger); }
+.nc-history-row.renaming { padding: 3px 6px; }
+.nc-history-rename-input {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--interactive-accent);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+.nc-history-empty {
+  text-align: center;
+  padding: 28px 16px;
+  color: var(--text-muted);
+}
+.nc-history-empty-title { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+.nc-history-empty-sub { font-size: 11.5px; color: var(--text-faint); }
+.nc-history-modal-footer {
+  display: flex; gap: 4px; align-items: center;
+  padding-top: 8px; margin-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.nc-history-modal-footer button {
+  padding: 3px 8px;
+  font-size: 10.5px;
+  border-radius: 4px;
+}
+
+.nc-thinking-body, .nc-selection-echo-body {
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--nc-border);
+  background: var(--background-primary);
+  font-family: var(--font-text);
+  font-size: var(--nc-reasoning-font, 12px);
+  line-height: 1.55;
+  color: var(--text-muted);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  /* NO per-card scroll — the entire .nc-messages list is the single scroll
+     surface. Explicitly visible on BOTH axes so CSS spec can't auto-promote
+     one to scroll because the other is hidden. */
+  max-height: none;
+  overflow-x: visible;
+  overflow-y: visible;
+}
+.nc-selection-echo-body {
+  /* <pre> styling for selection echo — wrap, don't scroll. */
+  white-space: pre-wrap;
+}
+.nc-thinking-body p { font-size: var(--nc-reasoning-font, 12px); margin: 3px 0; }
+.nc-thinking-body ul,
+.nc-thinking-body ol { padding-left: 18px; margin: 3px 0; }
+.nc-thinking-body li {
+  font-size: var(--nc-reasoning-font, 12px);
+  margin: 1px 0;
+  line-height: 1.55;
+}
+/* Models often emit `- [ ] item` task lists inside reasoning. Obsidian wraps each in
+   a checkbox input + nested <p>. The default rendering is HUGE and breaks the rhythm.
+   Strip the checkbox entirely (we don't want interactive todo widgets inside reasoning
+   text) and collapse the nested paragraph. */
+.nc-thinking-body input[type='checkbox'],
+.nc-thinking-body .task-list-item-checkbox {
+  display: none !important;
+}
+.nc-thinking-body .task-list-item,
+.nc-thinking-body li.task-list-item {
+  list-style: '· ';      /* a thin middle dot bullet instead of a bare disc */
+  margin-left: 0;
+  padding-left: 2px;
+}
+.nc-thinking-body li > p {
+  margin: 0;            /* kill the implicit <p> margin nested-list models love to emit */
+  display: inline;      /* keep first paragraph inline with the bullet */
+}
+.nc-thinking-body li > p + p {
+  display: block;
+  margin-top: 2px;
+}
+.nc-thinking-body code { font-size: 0.9em; padding: 1px 4px; background: var(--nc-bg-soft); border-radius: 3px; }
+.nc-thinking-body pre { font-size: 11px; padding: 8px 10px; margin: 6px 0; }
+.nc-thinking-body strong { color: var(--text-normal); font-weight: 600; }
+/* Some Obsidian themes draw a dark left-edge marker on details/summary inside
+   custom containers — kill it explicitly to avoid leaks. */
+.nc-thinking-body details > summary::marker { content: ''; }
+.nc-thinking-body details summary {
+  list-style: none;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.nc-msg-body pre {
+  position: relative;
+  background: var(--nc-bg-soft);
+  border-radius: var(--nc-radius-sm);
+  padding: 10px 12px;
+  font-size: 12px;
+  overflow-x: auto;
+  margin: 10px 0;
+  border: 1px solid var(--nc-border);
+}
+.nc-msg-body code {
+  background: var(--nc-bg-soft);
+  padding: 1px 4px; border-radius: 3px;
+  font-size: 90%;
+}
+.nc-msg-body pre code { background: none; padding: 0; }
+.nc-code-actions {
+  position: absolute; top: 6px; right: 6px;
+  display: flex; gap: 3px;
+  opacity: 0; transition: opacity 0.15s;
+}
+.nc-msg-body pre:hover .nc-code-actions { opacity: 1; }
+.nc-code-actions button {
+  background: var(--nc-bg-hard);
+  border: 1px solid var(--nc-border);
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 2px 7px;
+  cursor: pointer;
+  color: var(--nc-muted);
+  transition: all 0.15s;
+}
+.nc-code-actions button:hover { color: var(--text-normal); background: var(--nc-bg-soft-hover); }
+
+/* Streaming indicator: a soft accent-tinted shimmer on the "Glossa" role
+   label. Subtle by design — competes with the prose less than a trailing
+   caret would. After streaming ends the `.streaming` class is removed and
+   the label returns to its static accent color. */
+.nc-msg.assistant.streaming > .nc-msg-role .nc-role-name {
+  background: linear-gradient(
+    90deg,
+    var(--nc-accent) 0%,
+    var(--nc-accent) 40%,
+    color-mix(in srgb, var(--nc-accent) 55%, var(--text-normal)) 50%,
+    var(--nc-accent) 60%,
+    var(--nc-accent) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: nc-shimmer 2.4s linear infinite;
+}
+@keyframes nc-shimmer {
+  0%   { background-position: 220% 0; }
+  100% { background-position: -220% 0; }
+}
+@keyframes nc-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.25; }
+}
+
+/* Informational hint shown inside an endpoint card (e.g. codex streaming limitation). */
+.nc-info-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(125, 125, 145, 0.06);
+  border-left: 3px solid var(--nc-border);
+  padding: 6px 10px;
+  margin: 6px 0;
+  border-radius: 4px;
+  line-height: 1.45;
+}
+.nc-info-hint strong { color: var(--text-normal); }
+
+/* Message footer — timestamp on the left, action icons on the right edge.
+   Full message-width so the icons reach the right side of the card. */
+.nc-msg-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.nc-msg-time {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.nc-msg-actions {
+  display: flex;
+  gap: 0px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+/* Hide footer ONLY while streaming or on preamble (intermediate) messages.
+   Previously we also hid it on `.has-tools`, but codex CLI messages almost
+   always have tool cards — that suppressed copy / regenerate / etc icons
+   for the entire codex workflow. Final assistant messages now keep the
+   footer regardless of whether they have tool cards. */
+.nc-msg.assistant.streaming > .nc-msg-footer,
+.nc-msg.assistant.preamble  > .nc-msg-footer { display: none; }
+.nc-msg-actions button.nc-icon-action {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  cursor: pointer;
+  color: var(--text-muted);
+  width: 22px; height: 22px;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 4px;
+  transition: color 0.12s, opacity 0.12s;
+  position: relative;
+  opacity: 0.78;
+}
+.nc-msg-actions button.nc-icon-action svg { width: 14px; height: 14px; }
+.nc-msg-actions button.nc-icon-action:focus,
+.nc-msg-actions button.nc-icon-action:focus-visible {
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+.nc-msg-actions button.nc-icon-action:hover {
+  opacity: 1;
+  color: var(--text-normal);
+  background: transparent !important;
+  color: var(--nc-accent);
+}
+.nc-msg-actions button.nc-icon-action svg { width: 14px; height: 14px; }
+/* The CSS-positioned tooltip used to live here — removed 0.3.1 because it was
+   the source of a chronic hover-scroll bug: the absolutely-positioned ::after
+   extended below the last message into the .nc-messages overflow region, which
+   bumped scrollHeight, forced a scrollbar to appear, shrank the content width,
+   pulled the cursor off the button, removed the tooltip, and oscillated. The
+   browser's native `title` attribute tooltip is sufficient and doesn't affect
+   layout. Do NOT reintroduce a CSS-absolute tooltip inside a scrollable
+   container without checking this. */
+
+/* Inline approval — feels like part of the sidebar, never modal.
+   Header is a compact one-liner; diff and rule selector expand below.
+   Keyboard-first: Enter approves, Esc denies, A → always-allow. */
+.nc-inline-approval {
+  margin-top: 6px;
+  border: 1px solid var(--nc-border);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--nc-accent) 4%, var(--nc-bg-soft)),
+    var(--nc-bg-soft));
+  border-radius: 8px;
+  padding: 6px 10px 8px;
+  display: flex; flex-direction: column; gap: 5px;
+  animation: nc-fade-in 0.18s ease-out;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.nc-inline-approval-hdr {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11.5px; font-weight: 500;
+  min-height: 22px;
+}
+.nc-inline-approval-icon { color: var(--interactive-accent); display: inline-flex; }
+.nc-inline-approval-icon svg { width: 14px; height: 14px; }
+.nc-inline-approval-title { color: var(--text-normal); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nc-inline-approval-file {
+  font-family: var(--font-monospace); font-size: 11px; color: var(--text-muted);
+}
+.nc-inline-approval-diff-summary {
+  font-size: 11px; color: var(--text-muted); cursor: pointer; padding: 2px 0;
+}
+.nc-inline-diff-box {
+  max-height: 200px; overflow: auto; margin-top: 4px;
+}
+.nc-inline-approval-actions {
+  display: flex; gap: 6px; justify-content: flex-end; align-items: center;
+  margin-top: 2px;
+}
+.nc-inline-approval-hints {
+  flex: 1;
+  font-size: 10px;
+  color: var(--text-faint);
+  letter-spacing: 0.1px;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.nc-inline-approval-hints kbd {
+  display: inline-block;
+  padding: 0 4px;
+  margin: 0 2px;
+  border: 1px solid var(--nc-border);
+  border-radius: 3px;
+  background: var(--nc-bg-hard);
+  font-family: var(--font-monospace);
+  font-size: 9.5px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.nc-inline-approval-actions button {
+  height: 24px;
+  min-width: 36px;
+  padding: 0 10px;
+  border-radius: 5px;
+  border: 1px solid var(--nc-border);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.08s ease, box-shadow 0.14s ease;
+  background: var(--nc-bg-hard);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.nc-inline-approval-actions .nc-inline-kbd {
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-right: 4px;
+  font-family: var(--font-monospace);
+}
+.nc-inline-deny {
+  background: transparent;
+  color: var(--text-muted);
+}
+.nc-inline-deny:hover {
+  background: rgba(248, 81, 73, 0.10);
+  border-color: rgba(248, 81, 73, 0.45);
+  color: var(--nc-danger);
+}
+.nc-inline-approve {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--nc-accent) 25%, transparent);
+}
+.nc-inline-approve:hover {
+  filter: brightness(1.05);
+  transform: translateY(-0.5px);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--nc-accent) 30%, transparent);
+}
+.nc-inline-approve:active { transform: translateY(0); filter: brightness(0.95); }
+
+/* Tool events stack */
+.nc-tool-events-stack {
+  display: flex; flex-direction: column; gap: 3px;
+  margin-top: 3px;
+  position: relative;
+}
+/* Hide tool cards that are pending. They become visible only when the result
+   is available. For long-running 'running' cards we reveal after 1.5s so the
+   user knows the agent is alive (without flashing a card per quick call). */
+.nc-tool-events-stack > [data-tool-id]:has(.nc-tool-event-status.pending) { display: none; }
+@keyframes nc-running-reveal { to { opacity: 1; visibility: visible; } }
+.nc-tool-events-stack > [data-tool-id]:has(.nc-tool-event-status.running) {
+  opacity: 0; visibility: hidden;
+  animation: nc-running-reveal 0s linear 1.5s forwards;
+}
+/* Aurora ribbon — collapsed multi-tool summary. Reads as a single
+   "🔧 N actions" pill that expands to reveal each tool when clicked.
+   The subtle aurora-tinted background ties it to the rest of the v0.4
+   visual identity; tactile pill geometry matches composer pills. */
+.nc-tool-stack-summary {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: var(--g-text-sm);
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--aurora-tint-04);
+  border: 1px solid var(--aurora-tint-14);
+  border-radius: var(--g-radius-pill);
+  cursor: pointer;
+  padding: 4px 11px 4px 9px;
+  font-family: inherit;
+  transition:
+    background var(--dur-micro) linear,
+    border-color var(--dur-micro) linear,
+    color var(--dur-micro) linear,
+    transform var(--dur-fast) var(--ease-spring);
+}
+.nc-tool-stack-summary:hover {
+  color: var(--text-normal);
+  background: var(--aurora-tint-08);
+  border-color: var(--aurora-tint-22);
+  transform: translateY(-1px);
+}
+.nc-tool-stack-summary-icon {
+  opacity: 0.95;
+  font-size: 12px;
+  /* Replace the bare wrench emoji with an aurora-painted dot */
+  width: 8px; height: 8px;
+  background: var(--aurora-gradient);
+  background-size: 200% 100%;
+  border-radius: 50%;
+  display: inline-block;
+  text-indent: -9999px;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px var(--aurora-tint-22);
+}
+.nc-tool-stack-summary-ok {
+  color: var(--aurora-violet);
+  font-weight: 600;
+  opacity: 0.9;
+}
+.nc-tool-stack-summary-chev {
+  opacity: 0.55;
+  font-size: 9px;
+  margin-left: 2px;
+  transition: transform var(--dur-micro) linear;
+}
+.nc-tool-stack-summary:hover .nc-tool-stack-summary-chev { transform: translateX(2px); }
+.nc-tool-events-stack > [data-tool-id].hidden { display: none; }
+/* When truncated, fade the LAST visible card. The fade is visual ONLY — we DON'T
+   pull the next element up with negative margin (that caused the reasoning card
+   below to slide into the faded area). */
+.nc-tool-events-stack.truncated > [data-tool-id]:nth-of-type(3) {
+  -webkit-mask-image: linear-gradient(180deg, #000 40%, transparent 100%);
+          mask-image: linear-gradient(180deg, #000 40%, transparent 100%);
+  pointer-events: none;
+}
+/* Show-more / collapse — bare triangle below the stack. No negative margins so
+   surrounding content stays in its own layout. */
+.nc-tool-stack-more {
+  align-self: center;
+  margin-top: -2px;
+  width: 14px; height: 10px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+  color: var(--text-faint);
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity 0.15s, color 0.15s;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.nc-tool-stack-more:hover { opacity: 0.95; color: var(--text-normal); }
+.nc-tool-stack-more::before {
+  content: '';
+  display: block;
+  width: 0; height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 4px solid currentColor;
+}
+.nc-tool-stack-more.nc-tool-stack-collapse::before {
+  border-top: 0;
+  border-bottom: 4px solid currentColor;
+}
+.nc-tool-stack-more > .nc-tool-stack-more-label {
+  position: absolute; left: -9999px;
+}
+/* Tool event card — flat hairline border, NO accent stripe. Status pill carries the only
+   color signal. Matches the reasoning/selection card aesthetic. */
+.nc-tool-event {
+  background: transparent;
+  border: 1px solid var(--nc-border);
+  border-radius: 7px;
+  overflow: hidden;
+  font-size: 11.5px;
+  animation: nc-fade-in 0.16s ease-out;
+  transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.nc-tool-event:hover {
+  background: var(--nc-bg-soft);
+  border-color: var(--background-modifier-border-hover, var(--nc-border));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.nc-tool-event-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 10px;
+  cursor: pointer;
+  user-select: none;
+  min-height: 24px;
+}
+.nc-tool-icon {
+  width: 13px; height: 13px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--tool-color, var(--text-muted));
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.nc-tool-icon svg { width: 100%; height: 100%; }
+.nc-tool-event-name {
+  font-weight: 600; color: var(--text-normal);
+  flex-shrink: 0;
+  font-size: 11.5px;
+  letter-spacing: 0.05px;
+}
+.nc-tool-event-args {
+  color: var(--text-muted);
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+}
+.nc-tool-event-elapsed {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.nc-tool-event-status {
+  font-size: 10px;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 700;
+  line-height: 1;
+}
+/* Aurora-aware status dots. Success transitions through a brief cyan
+   ping (Phase 8 polish hooks in) before settling to muted; running uses
+   the violet half of the aurora spectrum to thread brand colour through
+   the long-running phase. */
+.nc-tool-event-status.success { background: rgba(34,211,238,0.12); color: var(--aurora-cyan); }
+.nc-tool-event-status.error   { background: rgba(251,113,133,0.16); color: #fb7185; }
+.nc-tool-event-status.running {
+  background: var(--aurora-tint-14);
+  color: var(--aurora-violet);
+  animation: nc-pulse 1.4s var(--ease-loop) infinite;
+}
+.nc-tool-event-status.pending {
+  background: rgba(255,170,40,0.14);
+  color: #ffaa28;
+  animation: nc-pulse 1.4s var(--ease-loop) infinite;
+}
+.nc-tool-event-status.denied  { background: rgba(180,180,180,0.14); color: var(--text-muted); }
+.nc-tool-event-body {
+  padding: 6px 10px 10px;
+  border-top: 1px solid var(--nc-border);
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  background: var(--nc-bg-hard);
+}
+.nc-tool-event-body details { margin-top: 4px; }
+.nc-tool-event-body summary { cursor: pointer; color: var(--nc-muted); font-size: 10px; }
+.nc-tool-event-body pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  background: var(--nc-bg-soft);
+  border-radius: 4px;
+  /* No internal vertical scrollbar — the .nc-messages list is the single
+     scroll surface. Wide content (bash strings, JSON) wraps via pre-wrap +
+     overflow-wrap so it never pushes the message wider than the column. */
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.nc-tool-event.collapsed .nc-tool-event-body { display: none; }
+.nc-tool-event .nc-tool-event-chev {
+  display: inline-flex; width: 10px; height: 10px;
+  transition: transform 0.18s;
+  color: var(--nc-muted);
+}
+.nc-tool-event:not(.collapsed) .nc-tool-event-chev { transform: rotate(90deg); }
+.nc-tool-event .nc-tool-event-chev svg { width: 100%; height: 100%; }
+
+/* ============================================================
+   Empty state — invitation, not a manual
+   ============================================================ */
+.nc-empty {
+  margin: auto;
+  text-align: center;
+  color: var(--nc-muted);
+  padding: 32px 20px;
+  max-width: 320px;
+  animation: nc-fade-in var(--nc-dur-3) var(--nc-ease);
+}
+.nc-empty-icon {
+  /* Bumped to 104 (was 88) — the new orb features the actual brand
+     mark inside the halo, which has more visual detail than the prior
+     solid sphere and reads small at 88. Halo + mark + halo's soft
+     blur extend slightly beyond the SVG viewBox bounds, so we let
+     overflow be visible. */
+  width: 104px; height: 104px;
+  margin: 0 auto 14px;
+  display: flex; align-items: center; justify-content: center;
+  overflow: visible;
+}
+.nc-empty-icon svg { width: 104px; height: 104px; opacity: 1; overflow: visible; }
+
+/* Aurora orb (v2) — two breathing layers driven by CSS animations:
+   • halo: opacity + scale pulse, soft cyan→blue→purple radial gradient
+     under a heavy blur. Slowly drifts in/out so the brand mark above
+     reads as a glowing source of light, not a static glyph.
+   • mark: very gentle scale breath, offset phase from the halo so the
+     two cycles never align — keeps motion organic instead of robotic.
+   The wrappers `.g-orb-halo-wrap` and `.g-orb-mark-wrap` exist purely
+   so CSS can animate their `transform` without overwriting the inner
+   `<g class="g-orb-mark" transform="translate-scale-translate">` that
+   positions the brand mark inside the 128×128 viewBox. */
+.nc-empty-orb .g-orb-halo-wrap {
+  transform-origin: 64px 64px;
+  animation: nc-orb-halo 5s var(--ease-loop) infinite;
+}
+.nc-empty-orb .g-orb-mark-wrap {
+  transform-origin: 64px 64px;
+  animation: nc-orb-mark 4s var(--ease-loop) infinite;
+}
+@keyframes nc-orb-halo {
+  0%, 100% { transform: scale(1);    opacity: 0.82; }
+  50%      { transform: scale(1.08); opacity: 1; }
+}
+@keyframes nc-orb-mark {
+  0%, 100% { transform: scale(1);     }
+  50%      { transform: scale(1.025); }
+}
+/* Glossa wordmark — auto-cycling purple gradient. Three stops cycle through
+   the violet → magenta → indigo arc; background-clip:text projects it onto
+   the glyphs. Slow (8s) so it reads as ambient, not flashy. */
+.nc-empty-title {
+  font-size: calc(var(--nc-base-font, 13px) + 6px);
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  margin-bottom: 18px;
+  background: linear-gradient(
+    90deg,
+    #8b5cf6 0%,    /* violet 500 */
+    #a855f7 25%,   /* purple 500 */
+    #d946ef 50%,   /* fuchsia 500 */
+    #a855f7 75%,
+    #8b5cf6 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: nc-empty-purple 8s linear infinite;
+}
+@keyframes nc-empty-purple {
+  0%   { background-position:  220% 0; }
+  100% { background-position: -220% 0; }
+}
+.nc-example-chips {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 4px;
+}
+/* Glass suggestion tiles. Stagger entrance via inline --g-stagger:
+   each tile fades up + scales from 0.97 → 1 with its own delay.
+   Aurora highlight ring appears only on hover via the ::after layer,
+   so the rest state stays calm and the hover state has clear feedback. */
+.nc-example-chip {
+  position: relative;
+  padding: 9px 12px;
+  background: var(--glass-bg-tile);
+  backdrop-filter: var(--glass-blur-tile);
+  -webkit-backdrop-filter: var(--glass-blur-tile);
+  border: 1px solid var(--nc-border);
+  border-radius: var(--g-radius-md);
+  cursor: pointer;
+  font-size: var(--g-text-md);
+  text-align: left;
+  transition:
+    background var(--dur-fast) var(--ease-out-quart),
+    border-color var(--dur-fast) var(--ease-out-quart),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-out-quart);
+  color: var(--text-normal);
+  display: flex; align-items: center; gap: 10px;
+  opacity: 0;
+  transform: translateY(6px) scale(0.97);
+  animation: nc-tile-in var(--dur-normal) var(--ease-out-expo) forwards;
+  animation-delay: var(--g-stagger, 0ms);
+}
+@keyframes nc-tile-in {
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.nc-example-chip:hover {
+  background: var(--glass-bg-hover);
+  border-color: transparent;
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: var(--aurora-lift),
+              0 0 0 1px var(--aurora-tint-22),
+              0 0 18px var(--aurora-tint-14);
+}
+.nc-example-chip:active {
+  transform: translateY(0) scale(0.99);
+  transition-duration: 80ms;
+}
+.nc-example-chip-cmd {
+  font-family: var(--font-monospace);
+  font-size: var(--g-text-sm);
+  font-weight: 600;
+  flex-shrink: 0;
+  /* Cmd glyph painted with the aurora gradient — anchors the brand
+     identity at every tile, complementing the orb above. */
+  background: var(--aurora-gradient);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.nc-example-chip-text {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nc-example-chip-arrow {
+  width: 14px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-faint);
+  opacity: 0;
+  transform: translateX(-3px);
+  transition:
+    opacity var(--dur-fast) var(--ease-out-quart),
+    transform var(--dur-fast) var(--ease-spring),
+    color var(--dur-micro) linear;
+  flex-shrink: 0;
+}
+.nc-example-chip-arrow svg { width: 12px; height: 12px; }
+.nc-example-chip:hover .nc-example-chip-arrow {
+  opacity: 1;
+  transform: translateX(0);
+  color: var(--aurora-violet);
+}
+
+/* ============================================================
+   Input area — Cursor-composer feel: subtle border, focus glow,
+   compact context bar above
+   ============================================================ */
+.nc-input-wrap {
+  /* Aurora composer (v0.4) — glassy card with an animated conic-gradient
+     ring that appears on focus or while streaming. The static 1px border
+     stays at rest as a hairline boundary; the ring overlays it on activity.
+     Position must be relative for the ::before ring to anchor. */
+  position: relative;
+  margin: 8px 10px 10px;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--nc-border);
+  border-radius: var(--g-radius-lg);
+  flex-shrink: 0;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  display: flex; flex-direction: column; gap: 6px;
+  transition: border-color var(--dur-fast) var(--ease-out-quart),
+              box-shadow var(--dur-fast) var(--ease-out-quart),
+              background var(--dur-fast) var(--ease-out-quart);
+  /* Container query context so pills can collapse to icons when this
+     composer specifically gets narrow, regardless of the rest of the
+     window. The fallback @media query at the bottom of this file mirrors
+     the same breakpoint for environments without container-query support. */
+  container-type: inline-size;
+  container-name: glossa-composer;
+}
+/* Aurora ring — sits exactly over the static border position so the
+   visible card edge never shifts on focus. Painted via a conic-gradient
+   masked to a 1px frame; opaque, so when it fades in it visually
+   replaces the grey hairline rather than adding to it.
+   `inset: -1px` extends the pseudo by 1px on every side, putting it
+   at the parent's border-box edge. The radius is bumped by 1px to
+   match the larger outer curve. `--aurora-ang` animates 0→360deg
+   continuously thanks to the @property registration above. The
+   animation is paused at rest to save CPU; resumes on focus/streaming.
+   pointer-events:none so it never blocks clicks on the textarea. */
+.nc-input-wrap::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: calc(var(--g-radius-lg) + 1px);
+  padding: 1px;
+  background: conic-gradient(
+    from var(--aurora-ang),
+    var(--aurora-violet),
+    var(--aurora-fuchsia),
+    var(--aurora-indigo),
+    var(--aurora-purple),
+    var(--aurora-violet)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out-quart);
+  animation: aurora-rotate var(--dur-ring) linear infinite paused;
+}
+@container glossa-composer (max-width: 360px) {
+  .nc-composer-pill .nc-pill-text { display: none; }
+  .nc-model-chip .nc-model-label { display: none; }
+}
+/* Focus or streaming → reveal the rotating aurora ring + outer glow.
+   The static grey border underneath stays in place; the opaque aurora
+   ring fully covers it while visible, so the boundary just *recolors*
+   from grey to aurora rather than moving. Animation play-state runs
+   only while the ring is visible. */
+.nc-input-wrap:focus-within,
+.nc-input-wrap.streaming {
+  box-shadow: var(--aurora-glow-soft);
+}
+.nc-input-wrap:focus-within::before,
+.nc-input-wrap.streaming::before {
+  opacity: 1;
+  animation-play-state: running;
+}
+
+/* Send flyout — the ghost copy that drifts up when the user submits.
+   Lives at document.body so it can escape the composer's clip / blur.
+   Aurora-tinted background keeps continuity with the user message
+   bubble it transitions toward. */
+.nc-send-flyout {
+  background: var(--aurora-tint-22);
+  color: var(--text-normal);
+  padding: 7px 12px;
+  border-radius: var(--nc-radius-sm);
+  font-size: var(--g-text-md);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.92;
+  transform: translateY(0) scale(1);
+  transition:
+    transform 420ms var(--ease-out-quart),
+    opacity 420ms var(--ease-out-quart);
+  z-index: 99998;   /* below popovers but above page */
+  box-shadow: 0 4px 16px var(--aurora-tint-22);
+}
+.nc-send-flyout.flying {
+  transform: translateY(-46px) scale(0.96);
+  opacity: 0;
+}
+
+/* "Just finished" cyan ping — applied for 900ms after streaming ends.
+   The cyan halo briefly overrides the violet focus glow as the visual
+   "answer complete" cue, then fades to nothing. Pairs naturally with
+   the violet aurora ring rotating during streaming. */
+.nc-input-wrap.streamed {
+  animation: nc-streamed-ping 900ms var(--ease-out-quart);
+}
+@keyframes nc-streamed-ping {
+  0%   {
+    box-shadow:
+      0 0 0 4px rgba(34, 211, 238, 0.36),
+      0 0 32px rgba(34, 211, 238, 0.32);
+  }
+  60%  {
+    box-shadow:
+      0 0 0 4px rgba(34, 211, 238, 0.16),
+      0 0 28px rgba(34, 211, 238, 0.14);
+  }
+  100% {
+    box-shadow:
+      0 0 0 4px rgba(34, 211, 238, 0),
+      0 0 32px rgba(34, 211, 238, 0);
+  }
+}
+
+/* Model chip — sits in the composer footer, between the permission pill and
+   the right-side spacer. Compact pill matching the other composer pills'
+   geometry so the whole row reads as one toolbar strip. */
+.nc-model-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  font-size: var(--nc-font-sm, 11px);
+  font-weight: 500;
+  color: var(--text-muted);
+  /* `!important` on background/border/box-shadow/outline matches the
+     .nc-composer-pill fix — Obsidian's global button rules add a soft
+     input-shadow that read as a ghost outline around the chip. */
+  background: transparent !important;
+  border: none !important;
+  border-radius: var(--nc-radius-pill);
+  box-shadow: none !important;
+  outline: 0 !important;
+  cursor: pointer;
+  user-select: none;
+  max-width: 200px;
+  transition:
+    background var(--dur-micro) linear,
+    color var(--dur-micro) linear,
+    transform var(--dur-fast) var(--ease-spring);
+}
+.nc-model-chip:hover {
+  background: var(--nc-bg-soft-hover) !important;
+  color: var(--text-normal);
+  transform: translateY(-0.5px);
+}
+.nc-model-chip:active { transform: translateY(0) scale(0.97); transition-duration: 80ms; }
+.nc-model-chip:focus,
+.nc-model-chip:focus-visible {
+  background: var(--nc-bg-soft-hover) !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+.nc-model-chip .nc-arrow { opacity: 0.55; width: 8px; height: 8px; display: inline-flex; }
+.nc-model-chip .nc-arrow svg { width: 100%; height: 100%; }
+.nc-model-chip .nc-model-label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px;
+}
+
+/* Context pills (Notion / Linear flavour: a tag chip, not a bordered button) */
+.nc-context-bar {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.nc-context-bar:empty { display: none; }
+.nc-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 6px 2px 4px;
+  background: var(--nc-bg-soft);
+  border: 1px solid transparent;
+  border-radius: var(--nc-radius-pill);
+  font-size: 11px;
+  max-width: 260px;
+  cursor: pointer;
+  transition: background var(--nc-dur-1) var(--nc-ease), border-color var(--nc-dur-1) var(--nc-ease);
+  animation: nc-fade-in var(--nc-dur-2) var(--nc-ease);
+}
+.nc-pill:hover {
+  background: var(--nc-bg-soft-hover);
+  border-color: var(--nc-border);
+}
+.nc-pill .nc-pill-icon {
+  width: 12px; height: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--nc-muted);
+  flex-shrink: 0;
+}
+.nc-pill:hover .nc-pill-icon { color: var(--text-normal); }
+.nc-pill .nc-pill-icon svg { width: 100%; height: 100%; }
+.nc-pill .nc-pill-label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 160px;
+  color: var(--text-normal);
+  font-weight: 500;
+}
+.nc-pill .nc-pill-meta {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--nc-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.nc-pill .nc-pill-close {
+  cursor: pointer; opacity: 0.45;
+  width: 12px; height: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  transition: opacity var(--nc-dur-1) var(--nc-ease), background var(--nc-dur-1) var(--nc-ease);
+}
+.nc-pill .nc-pill-close:hover { opacity: 1; background: var(--nc-bg-soft-hover); }
+.nc-pill .nc-pill-close svg { width: 8px; height: 8px; }
+/* Aurora-tinted context pill states. Pinned items get a deeper wash +
+   aurora-coloured icon so the user can scan the bar and find pinned
+   docs at a glance. The current-file pill gets a lighter wash so it
+   feels present-but-not-emphasised next to its pinned neighbours. */
+.nc-pill.pinned {
+  background: var(--aurora-tint-08);
+}
+.nc-pill.pinned .nc-pill-icon { color: var(--aurora-violet); }
+.nc-pill.current {
+  background: var(--aurora-tint-04);
+}
+.nc-pill.current .nc-pill-icon { color: var(--aurora-purple); opacity: 0.85; }
+
+/* Selection preview — distinctly darker background than the composer so
+   the quoted snippet reads as a quote, not part of the input. 8% earlier
+   was too subtle; 22% is the threshold where the contrast is unmistakable
+   in both light and dark themes. */
+/* Selection preview (Aurora v0.4 polish)
+   ------------------------------------------------------------
+   Previously used color-mix(text-normal, bg-soft) which produced a
+   muddy gray-purple unrelated to anywhere else in the UI — and a
+   dark-grey "MARKDOWN" source badge on top of it that read as a
+   separate visual family. Reworked to thread the same aurora-tint
+   palette used by user-msg bubbles and popup highlights, plus a
+   gradient left rail matching the popup hover state. */
+.nc-selection-preview {
+  position: relative;
+  display: flex; gap: 9px;
+  padding: 7px 11px 7px 13px;
+  background: rgba(139, 92, 246, 0.07);
+  border: 1px solid rgba(139, 92, 246, 0.14);
+  border-radius: var(--g-radius-md, 12px);
+  font-size: 11.5px;
+  animation: nc-fade-in var(--dur-fast, 220ms) var(--ease-out-quart, ease-out);
+  transition: background var(--dur-micro, 120ms) linear,
+              border-color var(--dur-micro, 120ms) linear;
+}
+.theme-dark .nc-selection-preview {
+  background: rgba(139, 92, 246, 0.11);
+  border-color: rgba(139, 92, 246, 0.22);
+}
+.nc-selection-preview:hover {
+  background: rgba(139, 92, 246, 0.10);
+  border-color: rgba(139, 92, 246, 0.22);
+}
+.theme-dark .nc-selection-preview:hover {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139, 92, 246, 0.30);
+}
+/* Aurora gradient left rail — same recipe as popup-item / history rail. */
+.nc-selection-preview::before {
+  content: '';
+  position: absolute;
+  left: 4px; top: 8px; bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--aurora-gradient,
+    linear-gradient(180deg, #8b5cf6 0%, #d946ef 100%));
+  box-shadow: 0 0 6px rgba(139, 92, 246, 0.32);
+}
+.nc-selection-preview-icon {
+  flex-shrink: 0;
+  color: var(--aurora-violet, #8b5cf6);
+  width: 14px; height: 14px;
+  display: inline-flex;
+  margin-top: 2px;
+}
+.nc-selection-preview-icon svg { width: 100%; height: 100%; }
+.nc-selection-preview-body {
+  flex: 1; min-width: 0;
+}
+.nc-selection-preview-text {
+  color: var(--text-normal);
+  line-height: 1.45;
+  max-height: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.nc-selection-preview-meta {
+  margin-top: 5px;
+  font-size: 10px;
+  color: var(--text-muted);
+  display: flex; gap: 7px; align-items: center;
+  overflow: hidden;
+  min-width: 0;
+}
+/* Source tag (e.g. "MARKDOWN") — aurora-tinted pill instead of dark
+   grey. Caps + tracking still read as a tag, just on-brand now. */
+.nc-selection-preview-source {
+  padding: 1px 7px;
+  background: rgba(139, 92, 246, 0.14);
+  color: var(--aurora-violet, #8b5cf6);
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+  font-size: 9px;
+  flex-shrink: 0;
+}
+.theme-dark .nc-selection-preview-source {
+  background: rgba(139, 92, 246, 0.22);
+  color: #c4b5fd;
+}
+.nc-selection-preview-file {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-muted);
+}
+.nc-selection-preview-chars {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.nc-selection-preview-close {
+  cursor: pointer;
+  opacity: 0.5;
+  flex-shrink: 0;
+  align-self: flex-start;
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  color: var(--text-muted);
+  transition: opacity var(--dur-micro, 120ms) linear,
+              background var(--dur-micro, 120ms) linear,
+              color var(--dur-micro, 120ms) linear;
+}
+.nc-selection-preview-close:hover {
+  opacity: 1;
+  background: rgba(139, 92, 246, 0.14);
+  color: var(--aurora-violet, #8b5cf6);
+}
+.nc-selection-preview-close svg { width: 10px; height: 10px; }
+
+/* Input textarea + footer */
+/* Textarea lives INSIDE the rounded composer card — no border of its own;
+   the outer card supplies the visual frame. Obsidian's global `textarea`
+   selector has higher specificity than this class, so without !important
+   on border / outline / box-shadow / background, you'd see a nested border
+   painted INSIDE the composer card. Defeat that locally. */
+.nc-input {
+  width: 100%;
+  min-height: 52px;
+  max-height: 240px;
+  padding: 6px 8px 4px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font: inherit;
+  font-size: var(--nc-base-font, 13px);
+  line-height: 1.5;
+  resize: none;
+  outline: none !important;
+  color: var(--text-normal);
+  transition: background var(--nc-dur-2) var(--nc-ease);
+  box-sizing: border-box;
+}
+.nc-input::placeholder { color: var(--nc-muted); opacity: 0.55; }
+
+.nc-input-footer {
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 2px;
+  /* Allow pills to shrink + ellipsis their labels when the sidebar is
+     dragged narrow. min-width:0 on the flex container lets children honour
+     their own min-width:0 so text-overflow:ellipsis can engage. */
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.nc-input-footer-spacer { flex: 1 1 0; min-width: 0; }
+
+/* Composer icon button (left-side [+] and similar single-glyph controls). */
+.nc-composer-icon-btn {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--nc-radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--nc-dur-1) var(--nc-ease), color var(--nc-dur-1) var(--nc-ease);
+}
+.nc-composer-icon-btn:hover { background: var(--nc-bg-soft-hover); color: var(--text-normal); }
+.nc-composer-icon-btn svg { width: 16px; height: 16px; }
+
+/* Composer pill (permission + reasoning) — Cursor's "Default permissions ▾". */
+.nc-composer-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  font-size: var(--nc-font-sm, 11px);
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent !important;
+  /* `!important` defeats Obsidian's global
+     `button { background, box-shadow, outline }` rules — without them
+     each pill picked up the default input-style soft shadow which read
+     as a ghost outline ringing the pill. Same fix as .nc-icon-btn. */
+  border: 1px solid transparent !important;
+  border-radius: var(--nc-radius-pill);
+  box-shadow: none !important;
+  outline: 0 !important;
+  cursor: pointer;
+  user-select: none;
+  /* Allow shrinking with text ellipsis when the sidebar is narrow. */
+  min-width: 0;
+  flex-shrink: 1;
+  max-width: 100%;
+  transition:
+    background var(--dur-micro) linear,
+    border-color var(--dur-micro) linear,
+    color var(--dur-micro) linear,
+    transform var(--dur-fast) var(--ease-spring);
+}
+.nc-composer-pill:hover {
+  background: var(--nc-bg-soft-hover) !important;
+  color: var(--text-normal);
+  transform: translateY(-0.5px);
+}
+.nc-composer-pill:active { transform: translateY(0) scale(0.97); transition-duration: 80ms; }
+.nc-composer-pill:focus,
+.nc-composer-pill:focus-visible {
+  background: var(--nc-bg-soft-hover) !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+/* Label text inside composer pills — ellipsis when squeezed. */
+.nc-composer-pill .nc-pill-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* Below ~280px sidebar, drop the textual labels — keep just the glyphs,
+   subscript level and caret. The full label is still in the title tooltip. */
+@media (max-width: 360px) {
+  .nc-composer-pill .nc-pill-text { display: none; }
+  .nc-model-chip .nc-model-label { display: none; }
+}
+.nc-composer-pill .nc-pill-glyph {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.nc-composer-pill .nc-pill-glyph svg { width: 14px; height: 14px; }
+.nc-composer-pill .nc-pill-caret {
+  font-size: 8.5px;
+  opacity: 0.5;
+  margin-left: 1px;
+}
+.nc-composer-pill .nc-pill-sub {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  background: var(--nc-bg-soft);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 13px;
+  color: var(--nc-accent);
+}
+.nc-composer-pill.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+/* Aurora send button (v0.4) — 32×32 circle with a fixed aurora-gradient
+   fill. Spring physics on hover/press: lifts -1px with overshoot, presses
+   to 0.94 with a snappy curve. The glow grows on hover, signalling that
+   pressing this is the "main action" of the entire sidebar. */
+.nc-submit-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0;
+  width: 32px; height: 32px;
+  font-size: 12px;
+  /* Linear (not conic) so the gradient stays static while the button
+     sits idle — the rotating motion belongs to the composer ring, not
+     to every gradient in the UI. */
+  background: linear-gradient(
+    135deg,
+    var(--aurora-violet) 0%,
+    var(--aurora-purple) 50%,
+    var(--aurora-fuchsia) 100%
+  );
+  color: #ffffff;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  font-weight: 600;
+  /* Two-curve transition: scale uses --ease-spring for the overshoot,
+     box-shadow uses --ease-out-quart so the glow doesn't bounce. */
+  transition:
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-out-quart),
+    filter var(--dur-micro) linear;
+  box-shadow: 0 1px 3px rgba(139, 92, 246, 0.28),
+              0 0 0 0 rgba(139, 92, 246, 0);
+  /* Position relative so future ripple pseudo-element (Phase 3) has
+     an anchor without breaking flex centering. */
+  position: relative;
+  overflow: hidden;
+}
+.nc-submit-btn .nc-btn-icon { display: inline-flex; position: relative; z-index: 1; }
+.nc-submit-btn .nc-btn-icon svg { width: 14px; height: 14px; }
+.nc-input.nc-flash {
+  animation: nc-input-flash 0.36s ease-out;
+}
+@keyframes nc-input-flash {
+  0%   { box-shadow: 0 0 0 0  var(--aurora-tint-22); }
+  50%  { box-shadow: 0 0 0 6px var(--aurora-tint-14); }
+  100% { box-shadow: 0 0 0 0  rgba(139, 92, 246, 0); }
+}
+.nc-submit-btn:hover {
+  transform: translateY(-1px) scale(1.06);
+  filter: brightness(1.04);
+  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.40),
+              0 0 0 4px rgba(139, 92, 246, 0.14);
+}
+.nc-submit-btn:active {
+  transform: translateY(0) scale(0.94);
+  filter: brightness(0.95);
+  transition-duration: 80ms;
+}
+.nc-submit-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  filter: grayscale(0.6);
+  box-shadow: none;
+}
+/* Stop variant — warm coral gradient + breathing ring so a "running"
+   button reads as actively in motion. The ring is a separate
+   ::after element to keep the icon untouched. */
+.nc-submit-btn.stop {
+  background: linear-gradient(
+    135deg,
+    #fb7185 0%,
+    #f97316 100%
+  );
+  box-shadow: 0 1px 3px rgba(251, 113, 133, 0.32);
+}
+.nc-submit-btn.stop::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid rgba(251, 113, 133, 0.55);
+  pointer-events: none;
+  animation: nc-stop-pulse 1.6s var(--ease-loop) infinite;
+}
+@keyframes nc-stop-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 0; transform: scale(1.18); }
+}
+.nc-submit-btn.stop:hover {
+  transform: translateY(-1px) scale(1.06);
+  box-shadow: 0 4px 14px rgba(251, 113, 133, 0.45);
+}
+
+/* ============================================================
+   Popup (mention / slash)
+   ============================================================ */
+.nc-popup {
+  position: fixed;
+  /* Solid layered background — same defensive double-paint we use on the
+     history popover, so themes with translucent --background-primary
+     don't bleed chat content through the popup. */
+  background-color: var(--background-primary, #ffffff);
+  background-image: linear-gradient(var(--background-primary, #ffffff), var(--background-primary, #ffffff));
+  border: 1px solid var(--nc-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16), 0 0 0 0.5px var(--nc-border);
+  max-width: 360px;
+  min-width: 220px;
+  max-height: 360px;
+  overflow-y: auto;
+  z-index: 99999;
+  /* Inherit the user-scaled body font so popup items match prose size. */
+  font-size: calc(var(--nc-base-font, 13px) - 1px);
+  padding: 4px;
+  animation: nc-pop-in var(--nc-dur-2) var(--nc-ease);
+}
+.theme-dark .nc-popup {
+  background-color: var(--background-primary, #1e1e1e);
+  background-image: linear-gradient(var(--background-primary, #1e1e1e), var(--background-primary, #1e1e1e));
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45), 0 0 0 0.5px var(--nc-border);
+}
+/* Tighter scrollbar inside the popup so a 10+ item list doesn't waste width. */
+.nc-popup::-webkit-scrollbar { width: 6px; }
+.nc-popup::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-faint) 40%, transparent);
+  border-radius: 3px;
+}
+.nc-popup-item {
+  position: relative;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background var(--dur-micro) linear, color var(--dur-micro) linear;
+  user-select: none;
+  /* Each row is one line, ellipsis if title is too long. */
+  min-height: 28px;
+}
+/* Aurora highlight — fired in three cases:
+   • :hover         (mouse over the row)
+   • .selected      (keyboard ArrowUp/Down cursor)
+   • .checked       (the option that is currently the active setting,
+                     e.g. "Workspace write" in the permission menu —
+                     we want the user to see at a glance which row IS
+                     the current value, not just an isolated ✓ glyph)
+   All three share the same gradient + 2px aurora left-rail, identical
+   to the history popover rows (.nc-history-pop-row:hover). The rail
+   sits in ::before so it doesn't shift label text.
+   We use EXPLICIT rgba (not var(--aurora-tint-*)) here to (a) match
+   history's intensity 26→10% exactly and (b) belt-and-suspenders so
+   the rule never silently drops if the cascade misses an aurora token
+   the way the v0.4 popup originally regressed. */
+.nc-popup-item:hover,
+.nc-popup-item.selected,
+.nc-popup-item.checked {
+  background: linear-gradient(
+    90deg,
+    rgba(139, 92, 246, 0.26) 0%,
+    rgba(139, 92, 246, 0.10) 100%
+  );
+  color: var(--text-normal);
+}
+.theme-dark .nc-popup-item:hover,
+.theme-dark .nc-popup-item.selected,
+.theme-dark .nc-popup-item.checked {
+  background: linear-gradient(
+    90deg,
+    rgba(139, 92, 246, 0.36) 0%,
+    rgba(139, 92, 246, 0.14) 100%
+  );
+}
+.nc-popup-item:hover::before,
+.nc-popup-item.selected::before,
+.nc-popup-item.checked::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 6px; bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--aurora-gradient);
+  background-size: 200% 100%;
+  box-shadow: 0 0 6px var(--aurora-tint-22);
+}
+.nc-popup-item:hover .nc-popup-label,
+.nc-popup-item.selected .nc-popup-label,
+.nc-popup-item.checked .nc-popup-label { color: var(--text-normal); font-weight: 600; }
+.nc-popup-item:hover .nc-popup-hint,
+.nc-popup-item.selected .nc-popup-hint,
+.nc-popup-item.checked .nc-popup-hint   { color: var(--text-muted); }
+.nc-popup-item .nc-popup-check { color: var(--aurora-violet); }
+.nc-popup-item.danger .nc-popup-label { color: #fb7185; }
+.nc-popup-item.selected .nc-popup-icon,
+.nc-popup-item.checked  .nc-popup-icon { color: var(--aurora-violet); }
+.nc-popup-item .nc-popup-icon {
+  width: 14px; height: 14px;
+  color: var(--nc-muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.nc-popup-item .nc-popup-icon svg { width: 13px; height: 13px; }
+.nc-popup-item .nc-popup-label {
+  font-weight: 500;
+  color: var(--text-normal);
+  font-size: inherit;
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nc-popup-item .nc-popup-hint {
+  font-size: calc(var(--nc-base-font, 13px) - 3px);
+  color: var(--text-faint);
+  font-family: inherit;
+  font-weight: 500;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 8px;
+}
+.nc-popup-section {
+  padding: 8px 10px 3px;
+  font-size: calc(var(--nc-base-font, 13px) - 4px);
+  font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  user-select: none;
+}
+/* First section header doesn't need top padding — the popup already has its own. */
+.nc-popup > .nc-popup-section:first-child { padding-top: 4px; }
+
+/* ============================================================
+   Aurora cost line (v0.4)
+   ------------------------------------------------------------
+   Snaps flush against the composer's bottom margin and reads as
+   one continuous "context budget + spend" caption. The bar fill
+   uses the aurora gradient; warn/danger states slide warm. The
+   labels themselves are 10px caption-grade so the visual focus
+   stays on the gradient line.
+   ============================================================ */
+.nc-cost-bar {
+  font-size: 10px;
+  color: var(--nc-muted);
+  padding: 2px 14px 8px;
+  margin-top: -4px;          /* visually merge with composer base */
+  display: flex; gap: 8px; align-items: center;
+  border-top: 0;
+  font-variant-numeric: tabular-nums;
+}
+.nc-cost-bar .nc-cost-active { margin-left: auto; color: var(--text-normal); font-weight: 500; }
+.nc-budget-bar {
+  flex: 1; max-width: 220px;
+  height: 3px;
+  background: rgba(125, 125, 145, 0.16);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+.theme-dark .nc-budget-bar { background: rgba(255, 255, 255, 0.10); }
+.nc-budget-fill {
+  height: 100%;
+  background: var(--aurora-gradient);
+  background-size: 220% 100%;
+  transition: width var(--dur-normal) var(--ease-out-quart),
+              left var(--dur-normal) var(--ease-out-quart),
+              background var(--dur-fast) var(--ease-out-quart);
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: inherit;
+}
+.nc-budget-fill.nc-budget-ctx     { opacity: 1; }
+.nc-budget-fill.nc-budget-history {
+  background: linear-gradient(90deg,
+    var(--text-muted) 0%,
+    var(--aurora-indigo) 100%);
+  opacity: 0.55;
+}
+/* Warm shift for over-budget. Replacing the aurora gradient with a
+   coral→amber one so the danger state reads loud without changing
+   the bar geometry. */
+.nc-budget-bar.warn .nc-budget-fill {
+  background: linear-gradient(90deg, #f59e0b 0%, #f97316 100%);
+}
+.nc-budget-bar.danger .nc-budget-fill {
+  background: linear-gradient(90deg, #f97316 0%, #ef4444 100%);
+}
+.nc-budget-hard-cap {
+  position: absolute;
+  top: -2px; bottom: -2px;
+  width: 1px;
+  background: var(--text-faint);
+  opacity: 0.55;
+}
+.nc-budget-label { color: var(--nc-muted); }
+.nc-budget-label.over { color: #ef4444; font-weight: 600; }
+
+/* ============================================================
+   Modal — Add Endpoint
+   ============================================================ */
+.modal.nc-add-modal { max-width: 720px; }
+.nc-add-modal-header {
+  margin-bottom: 8px;
+}
+.nc-add-modal-header h2 { margin: 0 0 4px; }
+.nc-add-modal-header p { margin: 0; color: var(--nc-muted); font-size: 12px; }
+
+.nc-kind-tabs {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 14px 0 16px;
+}
+@media (max-width: 620px) {
+  .nc-kind-tabs { grid-template-columns: 1fr; }
+  .nc-add-form-row { grid-template-columns: 1fr !important; }
+  .nc-add-form-row label { color: var(--text-muted); font-size: 11px; padding-top: 4px; }
+}
+.nc-kind-card {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.16s;
+  text-align: left;
+}
+.nc-kind-card:hover {
+  background: var(--background-modifier-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--nc-shadow);
+}
+.nc-kind-card.selected {
+  border-color: var(--interactive-accent);
+  background: rgba(120,120,255,0.06);
+}
+.nc-kind-card .nc-kind-title {
+  font-weight: 600; font-size: 13px;
+  display: flex; align-items: center; gap: 6px;
+}
+.nc-kind-card .nc-kind-title-badge {
+  font-size: 9px;
+  padding: 1px 6px;
+  background: var(--background-modifier-hover);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.nc-kind-card .nc-kind-desc {
+  font-size: 11px; color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.nc-presets-section {
+  margin-top: 14px;
+}
+.nc-presets-section h3 {
+  margin: 0 0 8px;
+  font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--text-muted);
+}
+.nc-preset-grid {
+  display: grid; gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+}
+.nc-preset-chip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 10px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.nc-preset-chip:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+}
+.nc-preset-chip .nc-preset-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.nc-preset-chip .nc-preset-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 500;
+}
+
+.nc-add-form {
+  margin-top: 16px;
+  display: flex; flex-direction: column; gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.nc-add-form-row {
+  display: grid; grid-template-columns: 100px 1fr; gap: 8px; align-items: center;
+}
+.nc-add-form-row label { font-size: 12px; color: var(--text-muted); }
+.nc-add-form-row input, .nc-add-form-row select, .nc-add-form-row textarea {
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font: inherit; font-size: 12px;
+}
+.nc-add-form-row .nc-row-with-btn {
+  display: flex; gap: 6px;
+}
+.nc-add-form-row .nc-row-with-btn input { flex: 1; }
+.nc-add-form-row .nc-row-with-btn button {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.nc-add-form-row .nc-row-with-btn button:hover { background: var(--background-modifier-hover); }
+.nc-add-form-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  margin-top: 8px;
+}
+.nc-add-form .nc-detect-status {
+  font-size: 11px; color: var(--text-muted);
+  margin-left: 100px;
+}
+
+/* ============================================================
+   Settings — endpoint cards
+   ============================================================ */
+.nc-settings-tabs {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin: 14px 0 18px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 6px;
+}
+.nc-settings-tab {
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-bottom: 0;
+  user-select: none;
+  transition: all 0.12s;
+}
+.nc-settings-tab:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.nc-settings-tab.active {
+  color: var(--text-normal); font-weight: 600;
+  border-color: var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+.nc-settings .nc-endpoint-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: var(--background-secondary);
+}
+.nc-endpoint-card-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.nc-endpoint-card-header .nc-endpoint-kind-badge {
+  font-size: 9px;
+  padding: 2px 7px;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  border-radius: 8px;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin-left: 8px;
+}
+.nc-endpoint-card-header > div { display: flex; align-items: center; }
+.nc-endpoint-card .setting-item:last-child { border-bottom: none; }
+.nc-add-endpoint-btn {
+  padding: 8px 14px;
+  margin-bottom: 14px;
+}
+.nc-security-banner {
+  border: 1px solid #d4a72c;
+  background: rgba(212, 167, 44, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 10px 0 16px;
+}
+.nc-security-title { font-weight: 700; margin-bottom: 4px; color: #d4a72c; font-size: 12px; }
+.nc-security-body { font-size: 11.5px; color: var(--text-normal); line-height: 1.5; }
+
+/* ============================================================
+   Modal — diff approval
+   ============================================================ */
+.nc-approval { max-width: 760px; }
+.nc-approval-sub { color: var(--text-muted); font-size: 12px; margin: -4px 0 12px; }
+.nc-approval-diff {
+  background: var(--background-secondary);
+  border-radius: 6px;
+  padding: 10px;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.nc-approval-diff-wrap {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  margin-top: 8px;
+  overflow: hidden;
+}
+.nc-approval-file {
+  padding: 6px 10px;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--background-modifier-hover);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.nc-approval-stats {
+  padding: 4px 10px;
+  font-size: 11px; color: var(--text-muted);
+  font-family: var(--font-monospace);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.nc-approval-warning {
+  padding: 6px 10px;
+  font-size: 11.5px;
+  color: var(--text-warning, #d4a72c);
+  background: rgba(212, 167, 44, 0.10);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.nc-diff-box {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  max-height: 420px;
+  overflow: auto;
+  background: var(--background-primary);
+}
+.nc-diff-line {
+  padding: 1px 8px;
+  white-space: pre-wrap; word-break: break-word;
+  line-height: 1.4;
+}
+.nc-diff-line.add { background: rgba(46,160,67,0.14); color: #4ad06b; border-left: 2px solid var(--nc-success); }
+.nc-diff-line.del { background: rgba(248,81,73,0.14); color: #f08b85; border-left: 2px solid var(--nc-danger); }
+.nc-diff-line.eq  { color: var(--text-muted); border-left: 2px solid transparent; }
+.nc-diff-line input[type="checkbox"] {
+  vertical-align: middle;
+  margin-right: 4px;
+  cursor: pointer;
+  accent-color: var(--interactive-accent);
+}
+.nc-approval-actions {
+  display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end;
+}
+
+/* ============================================================
+   Drag-drop overlay + image pill
+   ============================================================ */
+.nc-drop-overlay {
+  position: absolute;
+  inset: 4px;
+  background: var(--nc-accent-soft);
+  border: 1.5px dashed var(--nc-accent);
+  border-radius: var(--nc-radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12.5px; font-weight: 600;
+  color: var(--nc-accent);
+  pointer-events: none;
+  z-index: 100;
+  animation: nc-fade-in var(--nc-dur-1) var(--nc-ease);
+  letter-spacing: 0.1px;
+}
+.nc-input-wrap { position: relative; }
+.nc-file-input { display: none; }
+
+.nc-pill.image {
+  padding: 2px 6px 2px 2px;
+  border-radius: 8px;
+}
+.nc-pill-thumb {
+  width: 22px; height: 22px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Plan board — Linear-style project checklist
+   ============================================================ */
+.nc-plan-board {
+  border-bottom: 1px solid var(--nc-border);
+  background: var(--nc-bg-hard);
+  padding: 6px 12px 7px;
+  font-size: 11.5px;
+  animation: nc-fade-in var(--nc-dur-2) var(--nc-ease);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.nc-plan-board.collapsed .nc-plan-list { display: none; }
+.nc-plan-board.collapsed { padding-bottom: 5px; }
+
+.nc-plan-header {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.6px;
+  font-size: 9.5px;
+  cursor: pointer;
+  user-select: none;
+  padding-bottom: 3px;
+}
+.nc-plan-title-wrap { display: flex; align-items: center; gap: 5px; }
+.nc-plan-title-icon { width: 11px; height: 11px; display: inline-flex; opacity: 0.7; }
+.nc-plan-title-icon svg { width: 100%; height: 100%; }
+.nc-plan-title { letter-spacing: 0.8px; }
+.nc-plan-progress {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--nc-accent);
+  background: var(--nc-accent-soft);
+  padding: 1px 7px;
+  border-radius: var(--nc-radius-pill);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+.nc-plan-toggle { color: var(--text-faint); font-size: 9px; opacity: 0.7; }
+
+.nc-plan-list { display: flex; flex-direction: column; gap: 1px; margin-top: 1px; }
+.nc-plan-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 3px 6px;
+  border-radius: var(--nc-radius-xs);
+  line-height: 1.45;
+  transition: background var(--nc-dur-1) var(--nc-ease);
+}
+.nc-plan-item:hover { background: var(--nc-bg-soft); }
+.nc-plan-item.pending     { color: var(--text-muted); }
+.nc-plan-item.in_progress {
+  color: var(--text-normal); font-weight: 500;
+  background: var(--nc-accent-soft);
+}
+.nc-plan-item.completed   {
+  color: var(--text-faint);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--text-faint) 60%, transparent);
+}
+.nc-plan-mark {
+  flex-shrink: 0;
+  font-family: monospace;
+  font-size: 11px;
+  width: 14px; text-align: center;
+}
+.nc-plan-item.in_progress .nc-plan-mark {
+  color: var(--nc-accent);
+  animation: nc-pulse 1.6s ease-in-out infinite;
+}
+.nc-plan-item.completed .nc-plan-mark { color: var(--nc-success); }
+.nc-plan-text { flex: 1; word-break: break-word; }
+
+/* ============================================================
+   MCP marketplace modal
+   ============================================================ */
+.nc-mcp-marketplace-modal { width: 720px; max-width: 95vw; }
+.nc-mcp-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 6px 0 12px;
+}
+.nc-mcp-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: transparent;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.nc-mcp-chip:hover { background: var(--background-modifier-hover); }
+.nc-mcp-chip.active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+.nc-mcp-search {
+  margin-left: auto;
+  flex: 0 0 200px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+.nc-mcp-list { display: flex; flex-direction: column; gap: 10px; max-height: 60vh; overflow-y: auto; padding-right: 4px; }
+.nc-mcp-row {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+.nc-mcp-left { flex: 1; min-width: 0; }
+.nc-mcp-row-top { display: flex; align-items: center; gap: 8px; }
+.nc-mcp-name { font-weight: 600; font-size: 13px; }
+.nc-mcp-cat {
+  font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  background: rgba(91, 155, 255, 0.12);
+  color: var(--nc-accent);
+  padding: 1px 7px;
+  border-radius: 8px;
+}
+.nc-mcp-desc { color: var(--text-muted); font-size: 12px; margin: 3px 0 6px; }
+.nc-mcp-cmd {
+  display: inline-block;
+  background: var(--background-primary);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+.nc-mcp-hints { font-size: 11px; color: var(--text-faint); margin-top: 4px; }
+.nc-mcp-right { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.nc-mcp-right a {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.nc-mcp-right a:hover { text-decoration: underline; }
+.nc-mcp-empty { color: var(--text-muted); padding: 24px; text-align: center; }
+
+/* Endpoint test connectivity — discreet pill button + small status text */
+.nc-endpoint-test-btn {
+  padding: 2px 11px;
+  margin-right: 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.nc-endpoint-test-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border-hover, var(--background-modifier-border));
+}
+.nc-endpoint-test-status {
+  margin-right: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 260px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.nc-endpoint-test-status::before {
+  content: '';
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex-shrink: 0;
+}
+.nc-endpoint-test-status.ok   { color: var(--text-muted); }
+.nc-endpoint-test-status.ok::before   { background: var(--nc-success); box-shadow: 0 0 4px rgba(63,185,80,0.6); }
+.nc-endpoint-test-status.fail { color: var(--nc-danger); }
+.nc-endpoint-test-status.fail::before { background: var(--nc-danger); }
+
+/* Codex diagnostic modal */
+.nc-codex-diag-modal { width: 720px; max-width: 96vw; }
+.nc-codex-diag-modal h2 { margin: 0 0 10px; }
+.nc-codex-diag-modal h4 { margin: 14px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
+.nc-codex-diag-verdict {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  margin-bottom: 12px;
+}
+.nc-codex-diag-verdict.ok   { background: rgba(63,185,80,0.10);  color: var(--nc-success); border: 1px solid rgba(63,185,80,0.25); }
+.nc-codex-diag-verdict.warn { background: rgba(255,170,40,0.10); color: #ffaa28; border: 1px solid rgba(255,170,40,0.25); }
+.nc-codex-diag-verdict.fail { background: rgba(248,81,73,0.10);  color: var(--nc-danger); border: 1px solid rgba(248,81,73,0.25); }
+.nc-codex-diag-summary {
+  display: grid; grid-template-columns: 1fr;
+  gap: 2px;
+  font-size: 11.5px;
+}
+.nc-codex-diag-row {
+  display: grid; grid-template-columns: 130px 1fr;
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--background-modifier-border);
+}
+.nc-codex-diag-k { color: var(--text-muted); }
+.nc-codex-diag-v { font-family: var(--font-monospace); word-break: break-all; }
+.nc-codex-diag-pre {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  padding: 8px 10px;
+  background: var(--nc-bg-hard);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+.nc-codex-diag-stream { background: var(--nc-bg-soft); }
+.nc-codex-diag-timeline {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  max-height: 200px;
+  overflow: auto;
+  background: var(--nc-bg-hard);
+}
+.nc-codex-diag-tl-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 2fr;
+  gap: 8px;
+  padding: 2px 8px;
+  border-bottom: 1px dashed var(--background-modifier-border);
+}
+.nc-codex-diag-tl-row:last-child { border-bottom: 0; }
+.nc-codex-diag-tl-time {
+  color: var(--text-faint);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.nc-codex-diag-tl-type {
+  color: var(--nc-accent);
+  font-weight: 600;
+}
+.nc-codex-diag-tl-payload {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nc-mcp-import-btn {
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+.nc-mcp-import-btn:hover { background: var(--background-modifier-hover); }
+.nc-mcp-urls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 0 0 8px;
+}
+.nc-mcp-urls-label {
+  font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+.nc-mcp-url-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  border: 1px dashed var(--background-modifier-border);
+  font-size: 10.5px;
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+}
+.nc-mcp-url-chip button {
+  width: 14px; height: 14px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 10px;
+}
+.nc-mcp-url-chip button:hover { color: var(--text-error); }
+.nc-mcp-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 0 6px;
+  min-height: 14px;
+}
+.nc-mcp-cat-ext {
+  background: rgba(182, 108, 240, 0.18) !important;
+  color: var(--text-muted) !important;
+}
+
+/* ============================================================
+   Envelope multi-file approval preview
+   ============================================================ */
+.nc-approval-file-section {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.nc-approval-file-section:first-of-type { border-top: 0; padding-top: 0; margin-top: 4px; }
+.nc-inline-file-section {
+  margin-top: 8px;
+  padding: 6px 0;
+  border-top: 1px dashed rgba(120,120,120,0.25);
+}
+.nc-inline-file-section:first-of-type { border-top: 0; }
+.nc-approval-op-pill {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.nc-approval-op-pill.add    { background: rgba(46,160,67,0.22);  color: var(--nc-success); }
+.nc-approval-op-pill.update { background: rgba(91,155,255,0.22); color: var(--nc-accent); }
+.nc-approval-op-pill.delete { background: rgba(248,81,73,0.22);  color: var(--nc-danger); }
+.nc-inline-approval-warning {
+  color: #ffaa28;
+  font-size: 11px;
+  padding: 2px 0;
+}
+.nc-inline-rule-row {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.nc-inline-rule-label { font-weight: 500; }
+.nc-inline-rule-select {
+  flex: 1;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+}
+.nc-permission-rule {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  background: var(--background-secondary);
+}
+.nc-permission-rule-meta { color: var(--text-muted); font-size: 10px; }
+.nc-permission-rule code { font-family: var(--font-monospace); font-size: 11px; }
+
+/* ============================================================
+   Premium polish — micro-interactions, scrollbars, focus rings
+   ============================================================ */
+
+/* Slim scrollbar for the messages list. Inherits theme but feels lighter than
+   the default Obsidian one. Webkit selector applies to Electron-based desktops
+   where this plugin actually runs (isDesktopOnly: true). */
+.glossa-view .nc-messages::-webkit-scrollbar { width: 8px; }
+.glossa-view .nc-messages::-webkit-scrollbar-track { background: transparent; }
+.glossa-view .nc-messages::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-faint) 35%, transparent);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.glossa-view .nc-messages:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-faint) 55%, transparent);
+  background-clip: content-box;
+}
+
+/* Hover lift for tool stack summary pill — feels alive without being loud. */
+.nc-tool-stack-summary:hover {
+  color: var(--text-normal);
+  transform: translateX(1px);
+  transition: color 0.16s ease, transform 0.16s ease;
+}
+
+/* Subtle layered header — translucent background so theme color bleeds through.
+   The sticky top:0 already makes it overlap scrolled content; the blur softens
+   the transition between scrolled rows and the chrome. */
+@supports (backdrop-filter: blur(8px)) {
+  .nc-header {
+    background: color-mix(in srgb, var(--nc-bg-hard) 88%, transparent);
+    backdrop-filter: saturate(140%) blur(10px);
+    -webkit-backdrop-filter: saturate(140%) blur(10px);
+  }
+}
+
+/* The "Glossa" role label sits at a slightly heavier weight when at rest,
+   so streaming → idle doesn't feel jarring (only the shimmer disappears). */
+.nc-msg.assistant:not(.streaming) > .nc-msg-role .nc-role-name {
+  color: var(--nc-accent);
+}
+
+/* Focus-visible ring for keyboard navigation — replaces the muddy default. */
+.glossa-view button:focus-visible,
+.glossa-view [tabindex]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--nc-accent) 55%, transparent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Smooth fade for action button presence — they appear only on finalised
+   assistant messages, but the transition should feel deliberate rather than
+   pop in suddenly the moment streaming ends. */
+.nc-msg.assistant .nc-msg-actions { transition: opacity 0.2s ease; }
+
+/* When the role label is hidden (continuation or user msg) we don't want the
+   gap from .nc-msg's `gap: 2px` adding phantom space above the body. */
+.nc-msg > .nc-msg-role.hidden-role,
+.nc-msg.assistant.nc-asst-continuation > .nc-msg-role { margin: 0; padding: 0; }
+
+/* Reasoning card — when collapsed, sit on a single 11.5px line; when open the
+   left bar guides the eye. The previous rules already do most of this; adding
+   a touch of vertical breathing room only when open so the body doesn't bump
+   against the next card. */
+.nc-thinking-card[open] { margin-bottom: 2px; }
+
+/* Discreet tool-card chevron rotation — pairs with .collapsed toggle. */
+.nc-tool-event:not(.collapsed) .nc-tool-event-header { border-bottom: 1px solid var(--nc-border); }
