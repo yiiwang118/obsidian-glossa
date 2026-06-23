@@ -1,4 +1,4 @@
-import { el, clear } from '../utils/dom';
+import { el, clear, setStyle, setTrustedSvg } from '../utils/dom';
 
 export interface PopupItem {
   label: string;
@@ -22,12 +22,13 @@ export class Popup {
   private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private anchor: HTMLElement | null = null;
+  private open = false;
 
   constructor() {
     Popup.instances.add(this);
     this.el = el('div', { className: 'nc-popup' });
-    this.el.style.display = 'none';
-    document.body.appendChild(this.el);
+    setStyle(this.el, { display: 'none' });
+    activeDocument.body.appendChild(this.el);
     this.el.addEventListener('mousedown', (e) => e.stopPropagation());
     // When the cursor leaves the popup, drop the mouse-induced `.selected`
     // highlight from every row. `.checked` (the row marking the current
@@ -54,9 +55,10 @@ export class Popup {
     this.anchor = anchor;
     this.selectedIdx = -1;
     this.render();
-    this.el.style.display = 'block';
+    this.open = true;
+    setStyle(this.el, { display: 'block' });
 
-    requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
       const r = anchor.getBoundingClientRect();
       const rect = this.el.getBoundingClientRect();
       const vw = window.innerWidth, vh = window.innerHeight;
@@ -77,15 +79,16 @@ export class Popup {
       let left = r.left;
       left = Math.max(6, Math.min(vw - popupW - 6, left));
 
-      this.el.style.left = left + 'px';
-      this.el.style.top  = top  + 'px';
+      setStyle(this.el, { left: left + 'px' });
+      setStyle(this.el, { top: top  + 'px' });
     });
     this.installOutsideHandler();
     this.installKeyHandler();
   }
 
   hide() {
-    this.el.style.display = 'none';
+    this.open = false;
+    setStyle(this.el, { display: 'none' });
     this.items = [];
     this.itemEls = [];
     this.removeOutsideHandler();
@@ -98,12 +101,12 @@ export class Popup {
     for (const popup of Popup.instances) {
       if (popup !== this) popup.hide();
     }
-    for (const node of Array.from(document.querySelectorAll<HTMLElement>('.nc-popup'))) {
-      if (node !== this.el) node.style.display = 'none';
+    for (const node of Array.from(activeDocument.querySelectorAll<HTMLElement>('.nc-popup'))) {
+      if (node !== this.el) setStyle(node, { display: 'none' });
     }
   }
 
-  isOpen() { return this.el.style.display !== 'none'; }
+  isOpen() { return this.open; }
   /** The DOM element this popup is currently anchored to (set on show()).
    *  Callers compare it via identity to implement click-the-same-trigger-to-
    *  toggle semantics: if the anchor matches, hide; otherwise show with
@@ -145,11 +148,11 @@ export class Popup {
         e.stopPropagation();
       }
     };
-    document.addEventListener('keydown', this.keyHandler, true);
+    activeDocument.addEventListener('keydown', this.keyHandler, true);
   }
   private removeKeyHandler() {
     if (this.keyHandler) {
-      document.removeEventListener('keydown', this.keyHandler, true);
+      activeDocument.removeEventListener('keydown', this.keyHandler, true);
       this.keyHandler = null;
     }
   }
@@ -162,11 +165,11 @@ export class Popup {
       if (this.anchor && this.anchor.contains(t)) return;
       this.hide();
     };
-    setTimeout(() => document.addEventListener('mousedown', this.outsideClickHandler!), 0);
+    window.setTimeout(() => activeDocument.addEventListener('mousedown', this.outsideClickHandler!), 0);
   }
   private removeOutsideHandler() {
     if (this.outsideClickHandler) {
-      document.removeEventListener('mousedown', this.outsideClickHandler);
+      activeDocument.removeEventListener('mousedown', this.outsideClickHandler);
       this.outsideClickHandler = null;
     }
   }
@@ -210,10 +213,10 @@ export class Popup {
       // Leading column: ✓ when checked, else icon (if provided), else spacer.
       const lead = el('span', { className: 'nc-popup-icon', parent: row });
       if (it.checked) {
-        lead.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+        setTrustedSvg(lead, `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`);
         lead.classList.add('nc-popup-check');
       } else if (it.iconSvg) {
-        lead.innerHTML = it.iconSvg;
+        setTrustedSvg(lead, it.iconSvg);
       }
       el('span', { className: 'nc-popup-label', text: it.label, parent: row });
       if (it.hint) el('span', { className: 'nc-popup-hint', text: it.hint, parent: row });

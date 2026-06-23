@@ -55,8 +55,6 @@ export class CustomApiProvider implements LLMProvider {
   async testConnect(): Promise<{ ok: boolean; message: string }> {
     if (!this.ep.baseUrl) return { ok: false, message: 'Base URL missing.' };
     if (!this.ep.apiKey)  return { ok: false, message: 'API key missing.' };
-    const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 6000);
     try {
       const style = this.ep.apiStyle ?? 'openai';
       const base = this.ep.baseUrl.replace(/\/$/, '');
@@ -65,27 +63,22 @@ export class CustomApiProvider implements LLMProvider {
       if (style === 'anthropic') {
         headers['x-api-key'] = this.ep.apiKey;
         headers['anthropic-version'] = '2023-06-01';
-        const r = await fetch(url, { method: 'POST', headers, signal: ctl.signal,
+        const r = await requestUrl({ url, method: 'POST', headers, throw: false,
           body: JSON.stringify({ model: this.ep.model ?? 'claude-sonnet-4-6', max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }) });
-        clearTimeout(t);
-        if (r.ok) return { ok: true, message: `HTTP 200 · ${this.ep.model ?? 'default model'}` };
-        const txt = await r.text().catch(() => '');
-        return { ok: false, message: `HTTP ${r.status}: ${redactErrorBody(txt).slice(0, 160)}` };
+        if (r.status < 400) return { ok: true, message: `HTTP 200 · ${this.ep.model ?? 'default model'}` };
+        return { ok: false, message: `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 160)}` };
       } else {
         headers['Authorization'] = `Bearer ${this.ep.apiKey}`;
-        const r = await fetch(url, { method: 'GET', headers, signal: ctl.signal });
-        clearTimeout(t);
-        if (r.ok) {
-          const j: any = await r.json().catch(() => null);
+        const r = await requestUrl({ url, method: 'GET', headers, throw: false });
+        if (r.status < 400) {
+          const j: any = r.json;
           const n = Array.isArray(j?.data) ? j.data.length : 0;
           return { ok: true, message: `HTTP 200 · ${n} models available` };
         }
-        const txt = await r.text().catch(() => '');
-        return { ok: false, message: `HTTP ${r.status}: ${redactErrorBody(txt).slice(0, 160)}` };
+        return { ok: false, message: `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 160)}` };
       }
     } catch (e: any) {
-      clearTimeout(t);
-      return { ok: false, message: e.name === 'AbortError' ? 'Timed out after 6s.' : (e.message ?? String(e)) };
+      return { ok: false, message: e.message ?? String(e) };
     }
   }
 
@@ -222,16 +215,9 @@ export class CustomApiProvider implements LLMProvider {
       ? { 'x-api-key': this.ep.apiKey, 'anthropic-version': '2023-06-01', ...(this.ep.headers ?? {}) }
       : { 'Authorization': `Bearer ${this.ep.apiKey}`, ...(this.ep.headers ?? {}) };
     try {
-      let j: any;
-      if (this.ep.useObsidianFetch) {
-        const r = await requestUrl({ url, method: 'GET', headers, throw: false });
-        if (r.status >= 400) return style === 'anthropic' ? ANTHROPIC_KNOWN_MODELS : [];
-        j = r.json;
-      } else {
-        const r = await fetch(url, { headers });
-        if (!r.ok) return style === 'anthropic' ? ANTHROPIC_KNOWN_MODELS : [];
-        j = await r.json();
-      }
+      const r = await requestUrl({ url, method: 'GET', headers, throw: false });
+      if (r.status >= 400) return style === 'anthropic' ? ANTHROPIC_KNOWN_MODELS : [];
+      const j: any = r.json;
       const ids = (j.data ?? []).map((m: any) => m.id ?? m.name).filter(Boolean);
       const sorted = [...new Set<string>(ids)].sort();
       if (sorted.length) return sorted;
@@ -335,11 +321,11 @@ export class CustomApiProvider implements LLMProvider {
     // sit there forever waiting on a silently-dropped TCP connection.
     let lastChunkAt = Date.now();
     let timedOut = false;
-    const watchdog = setInterval(() => {
+    const watchdog = window.setInterval(() => {
       if (Date.now() - lastChunkAt > 90_000) {
         timedOut = true;
-        try { reader.cancel('idle timeout (90s)'); } catch {}
-        clearInterval(watchdog);
+        try { reader.cancel('idle timeout (90s)'); } catch { /* ignore */ }
+        window.clearInterval(watchdog);
       }
     }, 5000);
 
@@ -394,7 +380,7 @@ export class CustomApiProvider implements LLMProvider {
       searchStart = buf.length;
     }
     } finally {
-      clearInterval(watchdog);
+      window.clearInterval(watchdog);
     }
     if (timedOut) {
       yield { type: 'error', error: 'No data from server for 90s — connection timed out. The model or proxy may have dropped the stream.' };
@@ -559,11 +545,11 @@ export class CustomApiProvider implements LLMProvider {
 
     let lastChunkAt = Date.now();
     let timedOut = false;
-    const watchdog = setInterval(() => {
+    const watchdog = window.setInterval(() => {
       if (Date.now() - lastChunkAt > 90_000) {
         timedOut = true;
-        try { reader.cancel('idle timeout (90s)'); } catch {}
-        clearInterval(watchdog);
+        try { reader.cancel('idle timeout (90s)'); } catch { /* ignore */ }
+        window.clearInterval(watchdog);
       }
     }, 5000);
 
@@ -604,7 +590,7 @@ export class CustomApiProvider implements LLMProvider {
       searchStart = buf.length;
     }
     } finally {
-      clearInterval(watchdog);
+      window.clearInterval(watchdog);
     }
     if (timedOut) {
       yield { type: 'error', error: 'No data from server for 90s — connection timed out. The model or proxy may have dropped the stream.' };

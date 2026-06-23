@@ -1,7 +1,8 @@
 import { App, Modal, Notice, TFile } from 'obsidian';
 import type { ToolImpl } from './tools';
-import { diffToHtml, lineDiff, applySelectedDiff } from '../utils/diff';
+import { diffStats, lineDiff, applySelectedDiff, renderDiffInto } from '../utils/diff';
 import { looksLikeEnvelope, previewEnvelope } from './patch_envelope';
+import { setStyle } from '../utils/dom';
 
 export interface ApprovalResult {
   ok: boolean;
@@ -162,10 +163,7 @@ class ApprovalModal extends Modal {
     for (const w of warnings) wrap.createEl('div', { cls: 'nc-approval-warning', text: w });
 
     // Stats line
-    const opsHtml = diffToHtml(oldText, newText);
-    const matches = opsHtml.match(/nc-diff-line (add|del|eq)/g) || [];
-    const adds = matches.filter(s => s.endsWith('add')).length;
-    const dels = matches.filter(s => s.endsWith('del')).length;
+    const { adds, dels } = diffStats(oldText, newText);
     wrap.createEl('div', {
       cls: 'nc-approval-stats',
       text: `+${adds} −${dels}  ·  ${(newText.length)} chars`,
@@ -190,14 +188,14 @@ class ApprovalModal extends Modal {
       if (!tooBigForPerLine && (op.type === 'add' || op.type === 'del')) {
         const cb = line.createEl('input', { type: 'checkbox' });
         (cb as HTMLInputElement).checked = true;
-        cb.style.marginRight = '6px';
+        setStyle(cb, { marginRight: '6px' });
         decisions.set(i, true);
         cb.onchange = () => decisions.set(i, (cb as HTMLInputElement).checked);
       }
       line.createEl('span', { text: op.type === 'add' ? '+' : op.type === 'del' ? '−' : ' ' });
       line.createEl('span', { text: ` ${op.text || ' '}` });
     });
-    if (ops.length === 0) wrap.createEl('div', { cls: 'nc-diff-line eq', text: '(no changes detected)' });
+    if (ops.length === 0) wrap.createEl('div', { cls: 'nc-diff-line eq', text: '(No changes detected)' });
     // Stash for decide() to rebuild content if user toggled lines.
     (this as any).__diff = { oldText, newText, decisions };
     return wrap;
@@ -208,12 +206,12 @@ class ApprovalModal extends Modal {
    *  Honors `__blockApprove`: when the preview detected a fatal warning
    *  (envelope parse error, non-unique match, etc.) we set a synchronous
    *  block flag. Approve attempts — including a fast Cmd+Enter that races
-   *  the old setTimeout(0) button-disable — are turned into ok:false here,
+   *  the old window.setTimeout(0) button-disable — are turned into ok:false here,
    *  so the loop sees a denial and won't proceed. */
   private buildResult(): ApprovalResult {
     const blockReason = (this as any).__blockApprove as string | undefined;
     if (blockReason) {
-      try { new Notice(`Approval blocked: ${blockReason}`, 5000); } catch {}
+      try { new Notice(`Approval blocked: ${blockReason}`, 5000); } catch { /* ignore */ }
       return { ok: false };
     }
     const d = (this as any).__diff as { oldText: string; newText: string; decisions: Map<number, boolean> } | undefined;
@@ -269,7 +267,7 @@ class ApprovalModal extends Modal {
       // Synchronously mark the modal as blocking-approve. The approve button
       // is rendered AFTER this preview (see onOpen ordering), so we set a
       // flag the buildResult / keydown paths check rather than relying on a
-      // setTimeout(0) that loses the race against a fast Enter press.
+      // window.setTimeout(0) that loses the race against a fast Enter press.
       (this as any).__blockApprove = 'Envelope invalid.';
       return wrap;
     }
@@ -300,10 +298,10 @@ class ApprovalModal extends Modal {
       }
       const a = fp.oldText, b = fp.newText ?? '';
       if (a === b) {
-        fileSec.createEl('div', { cls: 'nc-diff-line eq', text: '(no changes)' });
+        fileSec.createEl('div', { cls: 'nc-diff-line eq', text: '(No changes)' });
       } else {
         const box = fileSec.createEl('div', { cls: 'nc-diff-box' });
-        box.innerHTML = diffToHtml(a, b);
+        renderDiffInto(box, a, b);
       }
     }
 
@@ -312,7 +310,7 @@ class ApprovalModal extends Modal {
     if (blocking) {
       wrap.createEl('div', { cls: 'nc-approval-warning', text: 'Approve disabled while warnings are above — ask the model to retry.' });
       // Synchronous flag — see __blockApprove handling in decide()/keydown
-      // path. Replaces the racy setTimeout(0) DOM-button disable.
+      // path. Replaces the racy window.setTimeout(0) DOM-button disable.
       (this as any).__blockApprove = 'Envelope has unresolved warnings.';
     }
     // Envelope is approved as-a-batch — no per-line decisions stashed.
@@ -325,11 +323,11 @@ class ApprovalModal extends Modal {
     const wrap = contentEl.createEl('div', { cls: 'nc-approval-diff-wrap' });
     if (label) wrap.createEl('div', { cls: 'nc-approval-file', text: label });
     for (const w of warnings) wrap.createEl('div', { cls: 'nc-approval-warning', text: w });
-    wrap.createEl('div', {
+    const disabledMsg = wrap.createEl('div', {
       cls: 'nc-approval-warning',
-      text: 'Approve disabled — the LLM should retry with a different patch (more unique context). Click Deny.',
-      attr: { style: 'font-weight:700;' },
+      text: 'Approve disabled — the LLM should retry with a different patch (more unique context). Click ' + 'Deny.',
     });
+    setStyle(disabledMsg, { fontWeight: '700' });
     // Same synchronous-flag pattern — see __blockApprove in decide().
     (this as any).__blockApprove = 'Diff invalid — see warnings.';
     return wrap;

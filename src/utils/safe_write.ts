@@ -86,7 +86,7 @@ export async function safeWrite(
         if (await adapter.exists(bakPath)) {
           await renameOrCopy(adapter, bakPath, path);
         }
-      } catch {}
+      } catch { /* ignore */ }
     }
     throw e;
   }

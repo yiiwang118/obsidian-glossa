@@ -80,7 +80,7 @@ export const templaterRender: ToolImpl = buildTool({
         const raw = await app.vault.read(tplFile);
         const rendered = await t.parseTemplate?.(raw, tplFile) ?? raw;
         const folder = targetPath.includes('/') ? targetPath.slice(0, targetPath.lastIndexOf('/')) : '';
-        if (folder) try { await app.vault.createFolder(folder); } catch {}
+        if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
         await app.vault.create(targetPath, rendered);
         return `Rendered ${templatePath} → ${targetPath} (fallback path).`;
       } catch (e: any) {

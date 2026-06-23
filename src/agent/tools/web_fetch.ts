@@ -18,11 +18,11 @@ export const webFetch: ToolImpl = buildTool({
     try {
       parseHttpUrl(url);
       const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 10_000);
+      const timer = window.setTimeout(() => ctl.abort(), 10_000);
       // If the agent loop's signal aborts (user pressed Stop), propagate
       // to our internal controller so the in-flight fetch / redirect chain
       // cancels promptly instead of running the full 10s timeout.
-      const onParentAbort = () => { try { ctl.abort(); } catch {} };
+      const onParentAbort = () => { try { ctl.abort(); } catch { /* ignore */ } };
       if (ctx?.signal) {
         if (ctx.signal.aborted) ctl.abort();
         else ctx.signal.addEventListener('abort', onParentAbort, { once: true });
@@ -44,8 +44,8 @@ export const webFetch: ToolImpl = buildTool({
             total += value.byteLength;
             raw += decoder.decode(value, { stream: true });
             if (total > MAX_BYTES) {
-              try { await reader.cancel(); } catch {}
-              try { ctl.abort(); } catch {}
+              try { await reader.cancel(); } catch { /* ignore */ }
+              try { ctl.abort(); } catch { /* ignore */ }
               raw += '\n[response truncated at 4 MB cap]';
               break;
             }
@@ -56,7 +56,7 @@ export const webFetch: ToolImpl = buildTool({
           // still cap the final string slice.
           raw = await r.text();
         }
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         const text = raw
           .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
           .replace(/<[^>]+>/g, ' ')
@@ -64,7 +64,7 @@ export const webFetch: ToolImpl = buildTool({
           .trim();
         return text.length > 30_000 ? text.slice(0, 30_000) + '\n[truncated]' : text;
       } finally {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         if (ctx?.signal) ctx.signal.removeEventListener('abort', onParentAbort);
       }
     } catch (e: any) {

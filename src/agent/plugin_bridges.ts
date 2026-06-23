@@ -142,16 +142,16 @@ export function watchPluginBridges(app: App): () => void {
   };
   // These two are Obsidian internal events. Defensive try/catch — if a future
   // version renames them, we still degrade gracefully.
-  try { subscribe('plugins:plugin-enabled'); } catch {}
-  try { subscribe('plugins:plugin-disabled'); } catch {}
+  try { subscribe('plugins:plugin-enabled'); } catch { /* ignore */ }
+  try { subscribe('plugins:plugin-disabled'); } catch { /* ignore */ }
   // Re-probe on layout change too (some plugins finish init after layout).
   try {
     const h = (app as any).workspace.onLayoutReady?.(() => probeBridges(app));
     if (h) handlers.push(() => {});
-  } catch {}
+  } catch { /* ignore */ }
   return () => {
     for (const off of handlers) {
-      try { off(); } catch {}
+      try { off(); } catch { /* ignore */ }
     }
   };
 }

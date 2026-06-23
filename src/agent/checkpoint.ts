@@ -143,12 +143,13 @@ export class CheckpointManager {
 /** Returns the file paths a dangerous tool would touch — used to know what to snapshot. */
 export function pathsTouchedByTool(name: string, args: any): string[] {
   switch (name) {
+    // Single-file operations with a `path` arg, including phase 1 surgical
+    // tools.
     case 'write_note':
     case 'create_note':
     case 'append_to_note':
     case 'edit_section':
     case 'delete_note':
-    // Phase 1 surgical tools — single-file ops with a `path` arg.
     case 'patch_note':
     case 'manage_frontmatter':
     case 'manage_tags':

@@ -65,12 +65,12 @@ export class CodexCliProvider implements LLMProvider {
         env: makeChildEnv(), stdio: ['ignore', 'pipe', 'pipe'],
         cwd: this.ep.cwd && fs.existsSync(this.ep.cwd) ? this.ep.cwd : undefined,
       });
-      const timer = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {}; resolve({ ok: false, message: 'Timed out after 5s.' }); }, 5000);
+      const timer = window.setTimeout(() => { try { proc.kill('SIGTERM'); } catch { /* ignore */ }; resolve({ ok: false, message: 'Timed out after 5s.' }); }, 5000);
       proc.stdout.on('data', d => stdout += d.toString());
       proc.stderr.on('data', d => stderr += d.toString());
-      proc.on('error', e => { clearTimeout(timer); resolve({ ok: false, message: `spawn error: ${e.message}` }); });
+      proc.on('error', e => { window.clearTimeout(timer); resolve({ ok: false, message: `spawn error: ${e.message}` }); });
       proc.on('exit', code => {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         if (code === 0) resolve({ ok: true, message: (stdout || stderr).trim().split('\n')[0] || 'OK' });
         else resolve({ ok: false, message: `exit ${code}: ${(stderr || stdout).trim().slice(0, 200)}` });
       });
@@ -161,12 +161,12 @@ export class CodexCliProvider implements LLMProvider {
         resolve();
         return;
       }
-      const killer = setTimeout(() => {
-        try { proc.kill('SIGTERM'); } catch {}
+      const killer = window.setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch { /* ignore */ }
         stderr += `\n[diagnostic timeout ${(TIMEOUT/1000)|0}s]`;
       }, TIMEOUT);
       // Idle-watchdog: if the agent message arrives, stop early (no need to wait full timeout).
-      const earlyStop = () => { try { proc.kill('SIGTERM'); } catch {}; clearTimeout(killer); };
+      const earlyStop = () => { try { proc.kill('SIGTERM'); } catch { /* ignore */ }; window.clearTimeout(killer); };
 
       let lineBuf = '';
       proc.stdout?.on('data', d => {
@@ -195,17 +195,17 @@ export class CodexCliProvider implements LLMProvider {
             // New canonical shape: item.completed { item: { type:'agent_message', text:'…' } }
             if ((evType === 'item.completed' || evType === 'item.updated') && itemType === 'agent_message') {
               if (typeof ev.item.text === 'string') parsedText = ev.item.text;
-              if (evType === 'item.completed') { agentMessageReceived = true; setTimeout(earlyStop, 200); }
+              if (evType === 'item.completed') { agentMessageReceived = true; window.setTimeout(earlyStop, 200); }
             }
             // Legacy fallback
             const legacy = ev?.delta?.text ?? ev?.text ?? ev?.msg?.text ?? ev?.content;
             if (typeof legacy === 'string' && !itemType) parsedText += legacy;
-          } catch {}
+          } catch { /* ignore */ }
         }
       });
       proc.stderr?.on('data', d => stderr += d.toString());
       proc.on('error', e => { spawnErr = `Process error: ${e.message}`; });
-      proc.on('exit', c => { clearTimeout(killer); exitCode = c; resolve(); });
+      proc.on('exit', c => { window.clearTimeout(killer); exitCode = c; resolve(); });
       try {
         proc.stdin?.write('Reply with the single word: pong\n');
         proc.stdin?.end();
@@ -221,7 +221,7 @@ export class CodexCliProvider implements LLMProvider {
         const ev = JSON.parse(line);
         if (ev?.type === 'turn.failed' && ev?.error?.message) { turnFailMsg = ev.error.message; break; }
         if (ev?.type === 'error' && ev?.message)              { turnFailMsg = ev.message; break; }
-      } catch {}
+      } catch { /* ignore */ }
     }
     // Only filter purely informational lines. The `failed to refresh available
     // models` line is NOT safe to drop wholesale — it carries the real auth
@@ -433,7 +433,7 @@ export class CodexCliProvider implements LLMProvider {
     // end-of-stream. Without this, if the same AbortController is reused across
     // turns (consumer code can reasonably do this), listeners pile up and each
     // abort fires N kill() calls + N noisy errors in console.
-    const onAbort = () => { try { proc.kill('SIGTERM'); } catch {} };
+    const onAbort = () => { try { proc.kill('SIGTERM'); } catch { /* ignore */ } };
     req.signal?.addEventListener('abort', onAbort);
 
     // Per-request debug log gated by a settings flag — quiet by default, helpful
@@ -635,7 +635,7 @@ export class CodexCliProvider implements LLMProvider {
       }
     }
     // Close stdin now that the stream finished (fullAgent kept it open earlier).
-    try { if (!proc.stdin.destroyed) proc.stdin.end(); } catch {}
+    try { if (!proc.stdin.destroyed) proc.stdin.end(); } catch { /* ignore */ }
     const code = await new Promise<number>(res => proc.on('close', c => res(c ?? -1)));
     // Remove the abort listener and stream listeners now that we're done — keep
     // the AbortController reusable across turns without leaking handlers.
@@ -643,7 +643,7 @@ export class CodexCliProvider implements LLMProvider {
     proc.stdout?.removeAllListeners();
     proc.stderr?.removeAllListeners();
     // Cleanup temp images
-    for (const f of tempImageFiles) { try { fs.unlinkSync(f); } catch {} }
+    for (const f of tempImageFiles) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
     if (earlySpawnError) {
       yield { type: 'error', error: earlySpawnError + '\nHint: click the "Test" button on the endpoint card to verify the binary is reachable from Obsidian.' };
       return;

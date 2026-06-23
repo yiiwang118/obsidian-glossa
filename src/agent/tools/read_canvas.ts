@@ -6,6 +6,7 @@
  */
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, type ToolImpl } from './_shared';
+import { setStyle } from '../../utils/dom';
 
 interface CanvasNode {
   id: string;
@@ -60,27 +61,27 @@ export const readCanvas: ToolImpl = buildTool({
       // The result string starts with our summary line; pull just that for a
       // tighter UI presentation.
       const firstLine = result.split('\n').slice(0, 4).join('\n');
-      const el = document.createElement('div');
+      const el = activeDocument.createElement('div');
       el.className = 'nc-canvas-summary';
-      el.style.whiteSpace = 'pre-wrap';
-      el.style.padding = '6px 10px';
-      el.style.fontSize = '12px';
-      el.style.lineHeight = '1.5';
-      el.style.background = 'rgba(255,255,255,0.03)';
-      el.style.borderRadius = '4px';
+      setStyle(el, { whiteSpace: 'pre-wrap' });
+      setStyle(el, { padding: '6px 10px' });
+      setStyle(el, { fontSize: '12px' });
+      setStyle(el, { lineHeight: '1.5' });
+      setStyle(el, { background: 'rgba(255,255,255,0.03)' });
+      setStyle(el, { borderRadius: '4px' });
       el.textContent = firstLine;
       // Append a "show full" details below.
-      const det = document.createElement('details');
-      det.style.marginTop = '6px';
-      const sum = document.createElement('summary');
-      sum.textContent = 'full JSON';
-      sum.style.cursor = 'pointer';
-      sum.style.fontSize = '11px';
-      sum.style.opacity = '0.7';
+      const det = activeDocument.createElement('details');
+      setStyle(det, { marginTop: '6px' });
+      const sum = activeDocument.createElement('summary');
+      sum.textContent = 'Full JSON';
+      setStyle(sum, { cursor: 'pointer' });
+      setStyle(sum, { fontSize: '11px' });
+      setStyle(sum, { opacity: '0.7' });
       det.appendChild(sum);
-      const pre = document.createElement('pre');
-      pre.style.fontSize = '11px';
-      pre.style.margin = '4px 0 0 0';
+      const pre = activeDocument.createElement('pre');
+      setStyle(pre, { fontSize: '11px' });
+      setStyle(pre, { margin: '4px 0 0 0' });
       pre.textContent = result.slice(0, 8000);
       det.appendChild(pre);
       el.appendChild(det);

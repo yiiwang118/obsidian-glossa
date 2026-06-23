@@ -11,6 +11,7 @@
  * Esc cancels.
  */
 import { App, Modal } from 'obsidian';
+import { setStyle } from '../utils/dom';
 
 class ConfirmModal extends Modal {
   private decided = false;
@@ -28,16 +29,16 @@ class ConfirmModal extends Modal {
     // Preserve newlines / indentation in the body (most call sites use
     // multi-line text to show command + args + scope).
     const bodyEl = contentEl.createEl('div', { cls: 'nc-confirm-body' });
-    bodyEl.style.whiteSpace = 'pre-wrap';
-    bodyEl.style.fontSize = '13px';
-    bodyEl.style.lineHeight = '1.55';
-    bodyEl.style.padding = '6px 0 16px';
+    setStyle(bodyEl, { whiteSpace: 'pre-wrap' });
+    setStyle(bodyEl, { fontSize: '13px' });
+    setStyle(bodyEl, { lineHeight: '1.55' });
+    setStyle(bodyEl, { padding: '6px 0 16px' });
     bodyEl.textContent = this.opts.body;
 
     const row = contentEl.createEl('div', { cls: 'nc-confirm-actions' });
-    row.style.display = 'flex';
-    row.style.gap = '8px';
-    row.style.justifyContent = 'flex-end';
+    setStyle(row, { display: 'flex' });
+    setStyle(row, { gap: '8px' });
+    setStyle(row, { justifyContent: 'flex-end' });
 
     const cancelBtn = row.createEl('button', { text: this.opts.cancelText ?? 'Cancel' });
     cancelBtn.onclick = () => this.finish(false);
@@ -81,27 +82,27 @@ class PromptModal extends Modal {
     contentEl.createEl('h3', { text: this.opts.title });
     if (this.opts.body) {
       const bodyEl = contentEl.createEl('div', { cls: 'nc-prompt-body' });
-      bodyEl.style.whiteSpace = 'pre-wrap';
-      bodyEl.style.fontSize = '13px';
-      bodyEl.style.opacity = '0.85';
-      bodyEl.style.padding = '4px 0 10px';
+      setStyle(bodyEl, { whiteSpace: 'pre-wrap' });
+      setStyle(bodyEl, { fontSize: '13px' });
+      setStyle(bodyEl, { opacity: '0.85' });
+      setStyle(bodyEl, { padding: '4px 0 10px' });
       bodyEl.textContent = this.opts.body;
     }
     const inputEl = this.opts.multiline
       ? contentEl.createEl('textarea')
       : contentEl.createEl('input', { type: 'text' });
-    inputEl.style.width = '100%';
+    setStyle(inputEl, { width: '100%' });
     if (this.opts.multiline) (inputEl as HTMLTextAreaElement).rows = 4;
     if (this.opts.placeholder) inputEl.placeholder = this.opts.placeholder;
     if (this.opts.defaultValue != null) inputEl.value = this.opts.defaultValue;
-    setTimeout(() => inputEl.focus(), 0);
+    window.setTimeout(() => inputEl.focus(), 0);
     this.inputEl = inputEl;
 
     const row = contentEl.createEl('div', { cls: 'nc-prompt-actions' });
-    row.style.display = 'flex';
-    row.style.gap = '8px';
-    row.style.justifyContent = 'flex-end';
-    row.style.marginTop = '12px';
+    setStyle(row, { display: 'flex' });
+    setStyle(row, { gap: '8px' });
+    setStyle(row, { justifyContent: 'flex-end' });
+    setStyle(row, { marginTop: '12px' });
     const cancelBtn = row.createEl('button', { text: 'Cancel' });
     cancelBtn.onclick = () => this.finish(null);
     const okBtn = row.createEl('button', { text: 'OK', cls: 'mod-cta' });
@@ -122,7 +123,7 @@ class PromptModal extends Modal {
   onClose() { if (!this.decided) { this.decided = true; this.onDecide(null); } }
 }
 
-/** Promise-returning replacement for window.confirm(). */
+/** Promise-returning yes/no modal. */
 export function confirmModal(
   app: App,
   opts: { title: string; body: string; confirmText?: string; cancelText?: string; danger?: boolean },
@@ -130,7 +131,7 @@ export function confirmModal(
   return new Promise(resolve => new ConfirmModal(app, opts, resolve).open());
 }
 
-/** Promise-returning replacement for window.prompt(). Returns null on cancel. */
+/** Promise-returning text-entry modal. Returns null on cancel. */
 export function promptModal(
   app: App,
   opts: { title: string; body?: string; placeholder?: string; defaultValue?: string; multiline?: boolean },

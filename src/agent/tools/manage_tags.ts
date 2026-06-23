@@ -11,6 +11,7 @@
  */
 import { TFile, getAllTags } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
+import { setStyle } from '../../utils/dom';
 
 function normalizeTag(t: string): string {
   return t.replace(/^#+/, '').trim();
@@ -27,14 +28,14 @@ export const manageTags: ToolImpl = buildTool({
   // line-per-tag list, otherwise a one-line summary.
   renderToolResultMessage(result, args) {
     if (result.startsWith('Error') || result.startsWith('(')) return null;
-    const wrap = document.createElement('div');
-    wrap.style.padding = '6px 10px';
-    wrap.style.lineHeight = '1.5';
-    wrap.style.fontSize = '12px';
+    const wrap = activeDocument.createElement('div');
+    setStyle(wrap, { padding: '6px 10px' });
+    setStyle(wrap, { lineHeight: '1.5' });
+    setStyle(wrap, { fontSize: '12px' });
 
-    const header = document.createElement('div');
-    header.style.fontWeight = '600';
-    header.style.marginBottom = '6px';
+    const header = activeDocument.createElement('div');
+    setStyle(header, { fontWeight: '600' });
+    setStyle(header, { marginBottom: '6px' });
     header.textContent = `${(args?.op ?? 'tags').toUpperCase()}  ·  ${args?.path ?? ''}`;
     wrap.appendChild(header);
 
@@ -48,17 +49,17 @@ export const manageTags: ToolImpl = buildTool({
       if (m) tags = m[2].split(',').map(s => s.trim()).filter(Boolean);
     }
     if (tags.length === 0) {
-      const sub = document.createElement('div');
-      sub.style.opacity = '0.7';
+      const sub = activeDocument.createElement('div');
+      setStyle(sub, { opacity: '0.7' });
       sub.textContent = result;
       wrap.appendChild(sub);
       return wrap;
     }
 
-    const chipRow = document.createElement('div');
-    chipRow.style.display = 'flex';
-    chipRow.style.flexWrap = 'wrap';
-    chipRow.style.gap = '4px';
+    const chipRow = activeDocument.createElement('div');
+    setStyle(chipRow, { display: 'flex' });
+    setStyle(chipRow, { flexWrap: 'wrap' });
+    setStyle(chipRow, { gap: '4px' });
     const op = args?.op;
     const chipColor = op === 'add' ? '#3fb950'
                     : op === 'remove' ? '#f85149'
@@ -67,14 +68,14 @@ export const manageTags: ToolImpl = buildTool({
                  : op === 'remove' ? 'rgba(248, 81, 73, 0.15)'
                  : 'rgba(91, 155, 255, 0.15)';
     for (const t of tags) {
-      const chip = document.createElement('span');
+      const chip = activeDocument.createElement('span');
       chip.textContent = `#${t}`;
-      chip.style.padding = '2px 8px';
-      chip.style.fontSize = '11px';
-      chip.style.background = chipBg;
-      chip.style.color = chipColor;
-      chip.style.border = `1px solid ${chipColor}`;
-      chip.style.borderRadius = '10px';
+      setStyle(chip, { padding: '2px 8px' });
+      setStyle(chip, { fontSize: '11px' });
+      setStyle(chip, { background: chipBg });
+      setStyle(chip, { color: chipColor });
+      setStyle(chip, { border: `1px solid ${chipColor}` });
+      setStyle(chip, { borderRadius: '10px' });
       chipRow.appendChild(chip);
     }
     wrap.appendChild(chipRow);

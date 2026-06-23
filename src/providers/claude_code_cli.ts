@@ -37,12 +37,12 @@ export class ClaudeCodeCliProvider implements LLMProvider {
         env: makeChildEnv(), stdio: ['ignore', 'pipe', 'pipe'],
         cwd: this.ep.cwd && fs.existsSync(this.ep.cwd) ? this.ep.cwd : undefined,
       });
-      const timer = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {}; resolve({ ok: false, message: 'Timed out after 5s.' }); }, 5000);
+      const timer = window.setTimeout(() => { try { proc.kill('SIGTERM'); } catch { /* ignore */ }; resolve({ ok: false, message: 'Timed out after 5s.' }); }, 5000);
       proc.stdout.on('data', d => stdout += d.toString());
       proc.stderr.on('data', d => stderr += d.toString());
-      proc.on('error', e => { clearTimeout(timer); resolve({ ok: false, message: `spawn error: ${e.message}` }); });
+      proc.on('error', e => { window.clearTimeout(timer); resolve({ ok: false, message: `spawn error: ${e.message}` }); });
       proc.on('exit', code => {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         if (code === 0) resolve({ ok: true, message: (stdout || stderr).trim().split('\n')[0] || 'OK' });
         else resolve({ ok: false, message: `exit ${code}: ${(stderr || stdout).trim().slice(0, 200)}` });
       });
@@ -102,7 +102,7 @@ export class ClaudeCodeCliProvider implements LLMProvider {
       cwd: this.ep.cwd || (this as any).__fallbackCwd || process.env.HOME,
       env: makeChildEnv((this as any).__proxy),
     });
-    const onAbort = () => { try { proc.kill('SIGTERM'); } catch {} };
+    const onAbort = () => { try { proc.kill('SIGTERM'); } catch { /* ignore */ } };
     req.signal?.addEventListener('abort', onAbort);
 
     let buf = '';

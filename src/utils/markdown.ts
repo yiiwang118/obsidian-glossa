@@ -2,7 +2,7 @@ import { App, Component, MarkdownRenderer } from 'obsidian';
 
 /**
  * Markdown rendering — Obsidian-native everywhere.
- * No marked dependency, no innerHTML of untrusted strings.
+ * No marked dependency, no raw markup injection of untrusted strings.
  *
  * - `renderInto`  : safe async render into a target element. Used for both streaming chunks
  *                   and final messages. Throttled at call site.
@@ -79,7 +79,7 @@ export function escapeHtml(s: string): string {
 
 /** Decorated <pre> elements — kept in a WeakSet so GC handles cleanup
  *  when the containing message bubble is removed from the DOM. Skipping
- *  these in the per-call loop avoids both the redundant innerHTML check
+ *  these in the per-call loop avoids both the redundant markup check
  *  AND the no-op DOM walk that ran every time the streaming finalizer
  *  re-decorated a fully-decorated container. */
 const decoratedPres = new WeakSet<HTMLElement>();
@@ -102,22 +102,22 @@ export function decorateCodeBlocks(
     const codeEl = pre.querySelector('code');
     const code = codeEl?.textContent ?? '';
 
-    const bar = document.createElement('div');
+    const bar = activeDocument.createElement('div');
     bar.className = 'nc-code-actions';
 
-    const copyBtn = document.createElement('button');
+    const copyBtn = activeDocument.createElement('button');
     copyBtn.textContent = 'Copy';
-    copyBtn.onclick = (e) => { e.stopPropagation(); handlers.copy(code); copyBtn.textContent = '✓'; setTimeout(() => copyBtn.textContent = 'Copy', 1200); };
+    copyBtn.onclick = (e) => { e.stopPropagation(); handlers.copy(code); copyBtn.textContent = '✓'; window.setTimeout(() => copyBtn.textContent = 'Copy', 1200); };
     bar.appendChild(copyBtn);
 
     if (handlers.insert) {
-      const insertBtn = document.createElement('button');
-      insertBtn.textContent = '↳ Insert';
+      const insertBtn = activeDocument.createElement('button');
+      insertBtn.textContent = '↳ ' + 'Insert';
       insertBtn.onclick = (e) => { e.stopPropagation(); handlers.insert!(code); };
       bar.appendChild(insertBtn);
     }
     if (handlers.apply) {
-      const applyBtn = document.createElement('button');
+      const applyBtn = activeDocument.createElement('button');
       applyBtn.textContent = 'Apply';
       applyBtn.onclick = (e) => { e.stopPropagation(); handlers.apply!(code); };
       bar.appendChild(applyBtn);

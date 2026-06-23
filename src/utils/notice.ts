@@ -1,4 +1,5 @@
 import { Notice } from 'obsidian';
+import { setStyle } from './dom';
 
 /**
  * Drop-in for new Notice() with: shorter default timeout (1.6s) + a close × so users
@@ -8,14 +9,14 @@ export function quickNotice(text: string, timeoutMs = 1600): Notice {
   const n = new Notice(text, timeoutMs);
   // Add a close × on the right
   try {
-    const x = document.createElement('span');
+    const x = activeDocument.createElement('span');
     x.textContent = '✕';
-    x.style.marginLeft = '10px';
-    x.style.cursor = 'pointer';
-    x.style.opacity = '0.55';
-    x.style.fontSize = '11px';
+    setStyle(x, { marginLeft: '10px' });
+    setStyle(x, { cursor: 'pointer' });
+    setStyle(x, { opacity: '0.55' });
+    setStyle(x, { fontSize: '11px' });
     x.onclick = (e) => { e.stopPropagation(); n.hide(); };
     n.noticeEl.appendChild(x);
-  } catch {}
+  } catch { /* ignore */ }
   return n;
 }

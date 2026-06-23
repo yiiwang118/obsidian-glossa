@@ -54,6 +54,28 @@ export function diffToHtml(a: string, b: string): string {
   return html.join('');
 }
 
+export function diffStats(a: string, b: string): { adds: number; dels: number; ops: DiffOp[] } {
+  const ops = lineDiff(a, b);
+  let adds = 0;
+  let dels = 0;
+  for (const op of ops) {
+    if (op.type === 'add') adds++;
+    else if (op.type === 'del') dels++;
+  }
+  return { adds, dels, ops };
+}
+
+export function renderDiffInto(target: HTMLElement, a: string, b: string): DiffOp[] {
+  target.empty();
+  const ops = lineDiff(a, b);
+  for (const op of ops) {
+    const line = target.createEl('div', { cls: `nc-diff-line ${op.type}` });
+    line.createEl('span', { text: op.type === 'add' ? '+ ' : op.type === 'del' ? '- ' : '  ' });
+    line.createEl('span', { text: op.text || ' ' });
+  }
+  return ops;
+}
+
 /** Apply diff with per-line selection: accepted=true rebuilds the new content using only
  *  approved adds + rejected dels (rejected dels stay as eq). */
 export function applySelectedDiff(a: string, b: string, accepts: Map<number, boolean>): string {

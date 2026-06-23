@@ -10,12 +10,7 @@
  */
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
-
-/** Minimal HTML escape for safe injection of model-derived text into innerHTML.
- *  Keeps the renderToolResultMessage path tight without pulling in DOMPurify. */
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+import { setStyle } from '../../utils/dom';
 
 export const getBacklinks: ToolImpl = buildTool({
   isReadOnly: () => true,
@@ -28,13 +23,13 @@ export const getBacklinks: ToolImpl = buildTool({
   // model used with_context, otherwise a tighter "X × N" list.
   renderToolResultMessage(result, args) {
     if (result.startsWith('No backlinks') || result.startsWith('Error')) return null;
-    const wrap = document.createElement('div');
-    wrap.style.padding = '6px 10px';
-    wrap.style.fontSize = '12px';
-    wrap.style.lineHeight = '1.5';
-    const header = document.createElement('div');
-    header.style.fontWeight = '600';
-    header.style.marginBottom = '6px';
+    const wrap = activeDocument.createElement('div');
+    setStyle(wrap, { padding: '6px 10px' });
+    setStyle(wrap, { fontSize: '12px' });
+    setStyle(wrap, { lineHeight: '1.5' });
+    const header = activeDocument.createElement('div');
+    setStyle(header, { fontWeight: '600' });
+    setStyle(header, { marginBottom: '6px' });
     header.textContent = `↩  Backlinks of ${args?.path ?? ''}`;
     wrap.appendChild(header);
 
@@ -55,23 +50,27 @@ export const getBacklinks: ToolImpl = buildTool({
       }
       if (cur) sections.push(cur);
       for (const sec of sections) {
-        const card = document.createElement('div');
-        card.style.padding = '4px 0';
-        card.style.marginBottom = '6px';
-        card.style.borderLeft = '2px solid #5b9bff';
-        card.style.paddingLeft = '8px';
-        const srcEl = document.createElement('div');
-        srcEl.style.fontFamily = 'var(--font-monospace, monospace)';
-        srcEl.style.fontSize = '11px';
-        srcEl.style.opacity = '0.85';
+        const card = activeDocument.createElement('div');
+        setStyle(card, { padding: '4px 0' });
+        setStyle(card, { marginBottom: '6px' });
+        setStyle(card, { borderLeft: '2px solid #5b9bff' });
+        setStyle(card, { paddingLeft: '8px' });
+        const srcEl = activeDocument.createElement('div');
+        setStyle(srcEl, { fontFamily: 'var(--font-monospace, monospace)' });
+        setStyle(srcEl, { fontSize: '11px' });
+        setStyle(srcEl, { opacity: '0.85' });
         srcEl.textContent = sec.source;
         card.appendChild(srcEl);
         for (const r of sec.rows) {
-          const row = document.createElement('div');
-          row.style.fontSize = '11px';
-          row.style.opacity = '0.7';
-          row.style.marginTop = '2px';
-          row.innerHTML = `<span style="color:#888">L${r.line}</span>  ${escapeHtml(r.text.slice(0, 200))}`;
+          const row = activeDocument.createElement('div');
+          setStyle(row, { fontSize: '11px' });
+          setStyle(row, { opacity: '0.7' });
+          setStyle(row, { marginTop: '2px' });
+          const lineNo = activeDocument.createElement('span');
+          setStyle(lineNo, { color: '#888' });
+          lineNo.textContent = `L${r.line}`;
+          row.appendChild(lineNo);
+          row.appendChild(activeDocument.createTextNode(`  ${r.text.slice(0, 200)}`));
           card.appendChild(row);
         }
         wrap.appendChild(card);
@@ -81,21 +80,21 @@ export const getBacklinks: ToolImpl = buildTool({
       for (const line of result.split('\n')) {
         const m = line.match(/^-\s+(.+?)\s+\(×(\d+)\)\s*$/);
         if (!m) continue;
-        const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.justifyContent = 'space-between';
-        row.style.padding = '2px 0';
-        const src = document.createElement('span');
-        src.style.fontFamily = 'var(--font-monospace, monospace)';
-        src.style.fontSize = '11px';
+        const row = activeDocument.createElement('div');
+        setStyle(row, { display: 'flex' });
+        setStyle(row, { justifyContent: 'space-between' });
+        setStyle(row, { padding: '2px 0' });
+        const src = activeDocument.createElement('span');
+        setStyle(src, { fontFamily: 'var(--font-monospace, monospace)' });
+        setStyle(src, { fontSize: '11px' });
         src.textContent = m[1];
-        const badge = document.createElement('span');
+        const badge = activeDocument.createElement('span');
         badge.textContent = `×${m[2]}`;
-        badge.style.fontSize = '10px';
-        badge.style.padding = '1px 6px';
-        badge.style.borderRadius = '8px';
-        badge.style.background = 'rgba(91, 155, 255, 0.15)';
-        badge.style.color = '#5b9bff';
+        setStyle(badge, { fontSize: '10px' });
+        setStyle(badge, { padding: '1px 6px' });
+        setStyle(badge, { borderRadius: '8px' });
+        setStyle(badge, { background: 'rgba(91, 155, 255, 0.15)' });
+        setStyle(badge, { color: '#5b9bff' });
         row.appendChild(src);
         row.appendChild(badge);
         wrap.appendChild(row);

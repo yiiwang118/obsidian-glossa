@@ -156,7 +156,7 @@ export function normalizeForMatch(s: string): string {
     .replace(/[‘’‚‛]/g, "'")
     .replace(/[“”„‟]/g, '"')
     .replace(/[–—‐]/g, '-')
-    .replace(/[   　]/g, ' ');     // NBSP, figure space, narrow NBSP, ideographic space
+    .replace(/[\u0020\u00A0\u2007\u202F\u3000]/g, ' ');     // space variants
 }
 export function findWithQuoteNormalization(haystack: string, needle: string): string | null {
   if (haystack.includes(needle)) return needle;

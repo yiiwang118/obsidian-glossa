@@ -139,7 +139,7 @@ function asBoolean(v: unknown): boolean | undefined {
  *        - Papers/**
  *  block-style continues until the next non-indented line.
  *
- *  Tolerates a leading UTF-8 BOM (some editors silently add `﻿` to
+ *  Tolerates a leading UTF-8 BOM (some editors silently add one to
  *  saved files) and Windows CRLF line endings — both would otherwise cause
  *  the opening `---` not to match, and the entire SKILL.md would be treated
  *  as having no frontmatter. */
@@ -342,7 +342,7 @@ const nestedSkillDirs = new Set<string>();
 
 const NESTED_DIRS_PATH = '.glossa/nested_skill_dirs.json';
 let persistLoaded = false;
-let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let persistTimer: number | null = null;
 
 interface NestedDirsFile {
   version: 1;
@@ -369,8 +369,8 @@ export async function loadPersistedNestedSkillDirs(app: App): Promise<void> {
 }
 
 function schedulePersist(app: App): void {
-  if (persistTimer) clearTimeout(persistTimer);
-  persistTimer = setTimeout(() => {
+  if (persistTimer) window.clearTimeout(persistTimer);
+  persistTimer = window.setTimeout(() => {
     persistTimer = null;
     persistNow(app).catch(() => {});
   }, 750);
@@ -381,7 +381,7 @@ function schedulePersist(app: App): void {
  *  aren't lost. Idempotent (safe to call multiple times). */
 export async function flushPersistedNestedSkillDirs(app: App): Promise<void> {
   if (persistTimer) {
-    clearTimeout(persistTimer);
+    window.clearTimeout(persistTimer);
     persistTimer = null;
   }
   await persistNow(app);

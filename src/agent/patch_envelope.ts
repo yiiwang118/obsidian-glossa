@@ -146,7 +146,7 @@ export function seekSequence(source: string[], pattern: string[], start: number,
     if (ok) return i;
   }
   // 2. rstrip
-  const rs = (s: string) => s.replace(/[\s ]+$/, '');
+  const rs = (s: string) => s.replace(/[\s ]+$/, '');
   for (let i = searchStart; i <= source.length - pattern.length; i++) {
     let ok = true;
     for (let k = 0; k < pattern.length; k++) {
@@ -167,7 +167,7 @@ export function seekSequence(source: string[], pattern: string[], start: number,
   const norm = (s: string) => s.trim().replace(/[‐-―−]/g, '-')
                                      .replace(/[‘’‚‛]/g, "'")
                                      .replace(/[“”„‟]/g, '"')
-                                     .replace(/[  -   　]/g, ' ');
+                                     .replace(/[\u0020\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ');
   for (let i = searchStart; i <= source.length - pattern.length; i++) {
     let ok = true;
     for (let k = 0; k < pattern.length; k++) {

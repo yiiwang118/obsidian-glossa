@@ -12,7 +12,7 @@ import {
 import { BUILTIN_SLASH_COMMANDS, applySlashTemplate } from '../commands/slash';
 import { Popup, type PopupItem } from './popup';
 import { ICON, AURORA_ORB_SVG } from './icons';
-import { el, clear, uid, debounce } from '../utils/dom';
+import { el, clear, uid, debounce, setStyle, setVars, setTrustedSvg } from '../utils/dom';
 import { formatTokenCount } from '../utils/tokens';
 import { buildProvider } from '../providers/registry';
 import type { ChatMessage, ContextItem, ContextItemRef, ChatSession, Endpoint, ToolEvent, PlanItem } from '../types';
@@ -32,7 +32,7 @@ import {
 import { quickNotice } from '../utils/notice';
 import type { ToolImpl } from '../agent/tools';
 import type { ApprovalResult } from '../agent/approval';
-import { diffToHtml } from '../utils/diff';
+import { renderDiffInto } from '../utils/diff';
 import { renderInto, decorateCodeBlocks, trimIncompleteMath } from '../utils/markdown';
 import { t, bi, onLanguageChange } from '../utils/i18n';
 import { loadProjectContext } from '../context/project_context';
@@ -89,7 +89,6 @@ export class GlossaView extends ItemView {
    *  preview). Capped at 200 entries — older ones evict on insert. Reset
    *  is not needed across sessions because the key is content-addressed:
    *  identical content from any session reuses the same HTML. */
-  private renderCache = new Map<string, string>();
   /** Bumped on every session boundary (newSession / loadSession). Submit()
    *  captures the value at start; every async callback (onText, onTool*,
    *  finalizeAsstRender) checks it before mutating UI / messages. A
@@ -146,7 +145,7 @@ export class GlossaView extends ItemView {
 
     this.buildHeader();
     this.planBoardEl = el('div', { className: 'nc-plan-board', parent: this.rootEl });
-    this.planBoardEl.style.display = 'none';
+    setStyle(this.planBoardEl, { display: 'none' });
     this.messagesEl = el('div', { className: 'nc-messages', parent: this.rootEl });
     this.renderEmpty();
     this.buildInput();
@@ -165,7 +164,7 @@ export class GlossaView extends ItemView {
     this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.refreshAutoContext()));
     this.registerEvent(this.app.workspace.on('file-open', () => this.refreshAutoContext()));
     this.registerEvent(this.app.workspace.on('editor-selection-change' as any, () => this.refreshSelection()));
-    document.addEventListener('selectionchange', this.onDomSelectionChange);
+    activeDocument.addEventListener('selectionchange', this.onDomSelectionChange);
 
     // Re-render any header / input chrome whose strings come from `t()` when
     // the user toggles language in settings — no plugin reload required.
@@ -206,17 +205,17 @@ export class GlossaView extends ItemView {
   applyCssVars() {
     if (!this.rootEl) return;
     const size = Math.max(11, Math.min(18, this.plugin.settings.reasoningFontSize ?? 13));
-    this.rootEl.style.setProperty('--nc-base-font', `${size}px`);
-    this.rootEl.style.setProperty('--nc-reasoning-font', `${size}px`);
+    setVars(this.rootEl, { ['--nc-base-font']: `${size}px` });
+    setVars(this.rootEl, { ['--nc-reasoning-font']: `${size}px` });
     // Derived ratios so everything scales together: small captions, header,
     // pills. Pinned to the base via em values whenever possible, but these
     // explicit-px feeders cover spots that need integer rounding for crispness.
-    this.rootEl.style.setProperty('--nc-font-sm', `${Math.max(10, size - 2)}px`);
-    this.rootEl.style.setProperty('--nc-font-xs', `${Math.max(9, size - 3)}px`);
+    setVars(this.rootEl, { ['--nc-font-sm']: `${Math.max(10, size - 2)}px` });
+    setVars(this.rootEl, { ['--nc-font-xs']: `${Math.max(9, size - 3)}px` });
   }
 
   async onClose() {
-    document.removeEventListener('selectionchange', this.onDomSelectionChange);
+    activeDocument.removeEventListener('selectionchange', this.onDomSelectionChange);
     this.popup.destroy();
     this.langUnsub?.();
     this.langUnsub = null;
@@ -256,7 +255,7 @@ export class GlossaView extends ItemView {
     el('span', { className: 'nc-header-spacer', parent: header });
 
     const newBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('new_chat') });
-    newBtn.innerHTML = ICON.plus;
+    setTrustedSvg(newBtn, ICON.plus);
     newBtn.onclick = () => this.startNewSession();
 
     // Aurora v0.4: history popover stays as a dedicated header icon because
@@ -264,11 +263,11 @@ export class GlossaView extends ItemView {
     // session). Settings is the low-frequency action — collapsed into ⋯.
     // This keeps the header at 3 right-side icons instead of 4.
     const histBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('chat_history') });
-    histBtn.innerHTML = ICON.history;
+    setTrustedSvg(histBtn, ICON.history);
     histBtn.onclick = () => this.toggleHistoryPopover(histBtn);
 
     const moreBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('more') });
-    moreBtn.innerHTML = ICON.more;
+    setTrustedSvg(moreBtn, ICON.more);
     moreBtn.onclick = (e) => this.openMoreMenu(e);
   }
 
@@ -305,19 +304,19 @@ export class GlossaView extends ItemView {
     // popover feel like a modal. We want a Raycast / Cursor task-list feel
     // (small floating panel, surrounding page stays alive). Outside-click
     // still closes via the document-level listener below.
-    const host = document.createElement('div');
+    const host = activeDocument.createElement('div');
     host.className = 'nc-history-popover';
-    document.body.appendChild(host);
+    activeDocument.body.appendChild(host);
     this.histPopEl = host;
 
     // Position below the anchor, right-aligned. Use rAF so we measure after
     // the host has been laid out.
-    requestAnimationFrame(() => this.positionHistoryPopover(anchor));
+    window.requestAnimationFrame(() => this.positionHistoryPopover(anchor));
 
     const cleanupView = renderHistoryPopover(host, this.plugin, {
       onPick: (s) => {
         this.closeHistoryPopover({ immediate: true });
-        requestAnimationFrame(() => this.loadSession(s.id));
+        window.requestAnimationFrame(() => this.loadSession(s.id));
       },
       onClose: () => this.closeHistoryPopover(),
     });
@@ -331,14 +330,14 @@ export class GlossaView extends ItemView {
       this.closeHistoryPopover();
     };
     const onScroll = () => this.positionHistoryPopover(anchor);
-    document.addEventListener('keydown', onKey, true);
+    activeDocument.addEventListener('keydown', onKey, true);
     // Defer mousedown registration so the same click that opened the
     // popover doesn't immediately close it.
-    setTimeout(() => document.addEventListener('mousedown', onDocClick, true), 0);
+    window.setTimeout(() => activeDocument.addEventListener('mousedown', onDocClick, true), 0);
     window.addEventListener('resize', onScroll);
     this.histPopCleanup = () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.removeEventListener('mousedown', onDocClick, true);
+      activeDocument.removeEventListener('keydown', onKey, true);
+      activeDocument.removeEventListener('mousedown', onDocClick, true);
       window.removeEventListener('resize', onScroll);
       cleanupView();
     };
@@ -348,14 +347,14 @@ export class GlossaView extends ItemView {
     const r = anchor.getBoundingClientRect();
     const popW = 320;
     const popMaxH = Math.min(460, window.innerHeight - r.bottom - 24);
-    this.histPopEl.style.width = `${popW}px`;
-    this.histPopEl.style.maxHeight = `${popMaxH}px`;
+    setStyle(this.histPopEl, { width: `${popW}px` });
+    setStyle(this.histPopEl, { maxHeight: `${popMaxH}px` });
     // Right-align with the anchor, clamped inside viewport.
     let left = r.right - popW;
     left = Math.max(8, Math.min(window.innerWidth - popW - 8, left));
     const top = Math.min(window.innerHeight - popMaxH - 8, r.bottom + 6);
-    this.histPopEl.style.left = `${left}px`;
-    this.histPopEl.style.top = `${top}px`;
+    setStyle(this.histPopEl, { left: `${left}px` });
+    setStyle(this.histPopEl, { top: `${top}px` });
   }
   private closeHistoryPopover(opts: { immediate?: boolean } = {}) {
     if (!this.histPopEl) return;
@@ -368,7 +367,7 @@ export class GlossaView extends ItemView {
       return;
     }
     el.classList.add('closing');
-    setTimeout(() => el.remove(), 140);
+    window.setTimeout(() => el.remove(), 140);
   }
 
   private openMoreMenu(e: MouseEvent) {
@@ -500,7 +499,7 @@ export class GlossaView extends ItemView {
     // Selection is empty. Only KEEP the existing one if the user is *actively typing*
     // in our chat textarea (i.e., the textarea is the focused element). Any other focus
     // state — editor pane, status bar, ribbon, another sidebar — counts as "deselected".
-    const typingInChat = document.activeElement === this.inputEl;
+    const typingInChat = activeDocument.activeElement === this.inputEl;
     if (!typingInChat) {
       if (this.currentSelection) {
         this.currentSelection = null;
@@ -513,7 +512,7 @@ export class GlossaView extends ItemView {
   private renderSelectionPreview() {
     if (!this.selectionPreviewEl) return;
     clear(this.selectionPreviewEl);
-    if (!this.currentSelection) { this.selectionPreviewEl.style.display = 'none'; return; }
+    if (!this.currentSelection) { setStyle(this.selectionPreviewEl, { display: 'none' }); return; }
     const sel = this.currentSelection;
     const text = sel.text;
     const lineCount = this.selectionLineCount(text);
@@ -521,10 +520,10 @@ export class GlossaView extends ItemView {
     const source = this.selectionSourceLabel(sel.source);
     const title = this.selectionTitle(text, source);
     const preview = this.compactSelectionPreview(text, isLarge ? 140 : 220);
-    this.selectionPreviewEl.style.display = '';
+    setStyle(this.selectionPreviewEl, { display: '' });
     this.selectionPreviewEl.classList.toggle('is-large', isLarge);
     const ic = el('span', { className: 'nc-selection-preview-icon', parent: this.selectionPreviewEl });
-    ic.innerHTML = ICON.quote;
+    setTrustedSvg(ic, ICON.quote);
     const body = el('div', { className: 'nc-selection-preview-body', parent: this.selectionPreviewEl });
     const head = el('div', { className: 'nc-selection-preview-head', parent: body });
     el('span', { className: 'nc-selection-preview-title', text: title, parent: head });
@@ -536,7 +535,7 @@ export class GlossaView extends ItemView {
     el('span', { className: 'nc-selection-preview-chars', text: `${text.length.toLocaleString()} chars${lineCount > 1 ? ` · ${lineCount.toLocaleString()} lines` : ''}`, parent: meta });
     el('div', { className: 'nc-selection-preview-text', text: preview, title: text.length > preview.length ? text.slice(0, 1200) : undefined, parent: body });
     const close = el('span', { className: 'nc-selection-preview-close', parent: this.selectionPreviewEl, title: 'Detach selection' });
-    close.innerHTML = ICON.x;
+    setTrustedSvg(close, ICON.x);
     close.onclick = () => { this.currentSelection = null; this.renderSelectionPreview(); };
   }
 
@@ -595,7 +594,7 @@ export class GlossaView extends ItemView {
         (thumb as HTMLImageElement).src = it.content;
       } else {
         const ic = el('span', { className: 'nc-pill-icon', parent: pill });
-        ic.innerHTML = pillIcon(it);
+        setTrustedSvg(ic, pillIcon(it));
       }
       el('span', { className: 'nc-pill-label', text: it.label, title: it.detail || it.label, parent: pill });
       if (it.isCurrent) {
@@ -606,7 +605,7 @@ export class GlossaView extends ItemView {
         el('span', { className: 'nc-pill-meta', text: formatTokenCount(it.tokens), parent: pill });
       }
       const close = el('span', { className: 'nc-pill-close', parent: pill, title: 'Remove' });
-      close.innerHTML = ICON.x;
+      setTrustedSvg(close, ICON.x);
       // Single removal routine shared by both close-button and context-menu paths.
       // The "current file" pill has TWO subtleties the regular ctx.remove
       // path can't handle on its own:
@@ -662,7 +661,7 @@ export class GlossaView extends ItemView {
     // Breathing scale animation lives entirely in CSS (.g-orb-halo, .g-orb-core)
     // so this method stays pure DOM.
     const orb = el('div', { className: 'nc-empty-icon nc-empty-orb', parent: this.emptyEl });
-    orb.innerHTML = AURORA_ORB_SVG;
+    setTrustedSvg(orb, AURORA_ORB_SVG);
     // Title — keeps the existing aurora-flow gradient via .nc-empty-title CSS.
     el('div', { className: 'nc-empty-title', text: t('empty_title'), parent: this.emptyEl });
 
@@ -679,17 +678,17 @@ export class GlossaView extends ItemView {
     examples.forEach((ex, i) => {
       // <button> so keyboard nav + screen reader semantics come for free
       // (was <div>, which screen readers skipped entirely).
-      const chip = document.createElement('button');
+      const chip = activeDocument.createElement('button');
       chip.className = 'nc-example-chip';
       chip.type = 'button';
       chip.setAttribute('role', 'listitem');
       chip.setAttribute('aria-label', `${ex.cmd} — ${ex.text}`);
       chips.appendChild(chip);
-      chip.style.setProperty('--g-stagger', `${i * 60}ms`);
+      setVars(chip, { ['--g-stagger']: `${i * 60}ms` });
       el('span', { className: 'nc-example-chip-cmd', text: ex.cmd, parent: chip });
       el('span', { className: 'nc-example-chip-text', text: ex.text, parent: chip });
       const arrow = el('span', { className: 'nc-example-chip-arrow', parent: chip });
-      arrow.innerHTML = ICON.arrowRight;
+      setTrustedSvg(arrow, ICON.arrowRight);
       const fire = () => {
         this.inputEl.value = ex.cmd + (ex.cmd === '@' ? '' : ' ');
         this.inputEl.focus();
@@ -725,7 +724,7 @@ export class GlossaView extends ItemView {
     const ricon = el('span', { className: 'nc-role-icon', parent: role });
     if (m.compactSummary) {
       // Distinct icon + label + interactive collapse/undo controls
-      ricon.innerHTML = ICON.folderFile;
+      setTrustedSvg(ricon, ICON.folderFile);
       const depthBadge = (m.summaryDepth && m.summaryDepth > 1) ? ` · L${m.summaryDepth}` : '';
       const tag = m.summaryOfCount
         ? `Compacted · ${m.summaryOfCount} msgs · ~${formatTokenCount(m.summaryTokensSaved ?? 0)} tok saved${depthBadge}`
@@ -735,14 +734,15 @@ export class GlossaView extends ItemView {
       const acts = el('span', { className: 'nc-compact-actions', parent: role });
       // Expand / collapse toggle
       const toggleBtn = el('button', { className: 'nc-compact-toggle', parent: acts });
-      toggleBtn.innerHTML = ICON.chevronDown;
+      setTrustedSvg(toggleBtn, ICON.chevronDown);
       toggleBtn.title = 'Toggle summary';
       toggleBtn.onclick = (e) => { e.stopPropagation(); wrap.classList.toggle('collapsed'); };
       // Undo button — only present if a snapshot exists for this summary
       const hasSnapshot = (this.session.compactHistory ?? []).some(s => s.summaryId === m.id);
       if (hasSnapshot) {
         const undoBtn = el('button', { className: 'nc-compact-undo', parent: acts, attrs: { title: 'Restore the pre-compact messages' } });
-        undoBtn.innerHTML = `${ICON.undo}<span>Undo</span>`;
+        setTrustedSvg(undoBtn, ICON.undo);
+        undoBtn.createEl('span', { text: 'Undo' });
         undoBtn.onclick = (e) => { e.stopPropagation(); this.undoCompact(m.id); };
       }
       // Whole header row toggles collapse too (but ignore clicks on action buttons)
@@ -754,7 +754,7 @@ export class GlossaView extends ItemView {
       // No role row for user — the darker bubble bg is the visual marker.
       role.classList.add('hidden-role');
     } else {
-      ricon.innerHTML = ICON.bot;
+      setTrustedSvg(ricon, ICON.bot);
       el('span', { text: 'Glossa', className: 'nc-role-name', parent: role });
       // Live elapsed-time counter — only updates while the message is in the
       // `.streaming` state. Surfaces during the long codex-CLI "Thinking…" wait
@@ -788,7 +788,7 @@ export class GlossaView extends ItemView {
         renderInto(this.app, m.reasoningContent, reasoningBody, this).catch(() => {});
       };
       reasoningCard.addEventListener('toggle', lazyRender);
-      if (!m.reasoningContent) reasoningCard.style.display = 'none';
+      if (!m.reasoningContent) setStyle(reasoningCard, { display: 'none' });
     }
 
     // Inline <thinking>…</thinking> / <reasoning>…</reasoning> blocks extracted
@@ -818,46 +818,18 @@ export class GlossaView extends ItemView {
       // Update the unified card label
       const lbl = reasoningCard.querySelector('.nc-thinking-summary') as HTMLElement | null;
       if (lbl) lbl.textContent = `🧠 Reasoning (${merged.length.toLocaleString()} chars)`;
-      reasoningCard.style.display = '';
+      setStyle(reasoningCard, { display: '' });
     }
 
-    // Main visible content. Hash-cache: a message's rendered HTML only
-    // depends on (role, content). On batch load (loadSession, compact undo,
-    // history switch) we re-render every message; the cache lets us skip
-    // markdown + MathJax + mermaid for content we've rendered before in
-    // this session, turning a 200-message switch from O(N) renders into
-    // O(N) cheap innerHTML assigns. Cache is per-view-instance + LRU-capped
-    // so it doesn't grow unbounded across sessions.
+    // Main visible content. Use Obsidian MarkdownRenderer directly. A previous
+    // HTML-string cache reinserted rendered markup; the community review flags
+    // that pattern, so replay now keeps the safer renderer path.
     const body = el('div', { className: 'nc-msg-body', parent: wrap });
-    const cacheKey = `${m.role}\x00${visible}`;
-    const cached = this.renderCache.get(cacheKey);
-    if (cached !== undefined) {
-      // Trusted HTML: cached value was produced by Obsidian's MarkdownRenderer
-      // (which sanitises) and stored without further mutation. Refresh
-      // LRU position by re-setting.
-      body.innerHTML = cached;
-      this.renderCache.delete(cacheKey);
-      this.renderCache.set(cacheKey, cached);
-      if (m.role === 'assistant') decorateCodeBlocks(body, this.codeBlockHandlers());
-    } else {
-      renderInto(this.app, visible, body, this)
-        .then(() => {
-          if (m.role === 'assistant') decorateCodeBlocks(body, this.codeBlockHandlers());
-          // After render, snapshot innerHTML into the cache. Cap at 200 entries
-          // (Map iterates in insertion order — drop the oldest).
-          try {
-            const html = body.innerHTML;
-            if (html && html.length < 200_000) {
-              this.renderCache.set(cacheKey, html);
-              if (this.renderCache.size > 200) {
-                const oldest = this.renderCache.keys().next().value;
-                if (oldest != null) this.renderCache.delete(oldest);
-              }
-            }
-          } catch {}
-        })
-        .catch(() => {});
-    }
+    renderInto(this.app, visible, body, this)
+      .then(() => {
+        if (m.role === 'assistant') decorateCodeBlocks(body, this.codeBlockHandlers());
+      })
+      .catch(() => {});
 
     // Selection echo (user-side): show the quoted snippet that went into the prompt.
     if (m.role === 'user' && m.selectionEcho) {
@@ -952,7 +924,7 @@ export class GlossaView extends ItemView {
 
   private renderPlanBoard() {
     if (!this.planBoardEl) return;
-    if (this.currentPlan.length === 0) { this.planBoardEl.style.display = 'none'; clear(this.planBoardEl); return; }
+    if (this.currentPlan.length === 0) { setStyle(this.planBoardEl, { display: 'none' }); clear(this.planBoardEl); return; }
 
     const done = this.currentPlan.filter(i => i.status === 'completed').length;
     const total = this.currentPlan.length;
@@ -961,19 +933,19 @@ export class GlossaView extends ItemView {
       i.status === 'in_progress' ||
       (i.status === 'pending' && !/\s\(stopped\)$/.test(i.content)));
     if (allDone || !hasLiveWork) {
-      this.planBoardEl.style.display = 'none';
+      setStyle(this.planBoardEl, { display: 'none' });
       clear(this.planBoardEl);
       return;
     }
 
-    this.planBoardEl.style.display = '';
+    setStyle(this.planBoardEl, { display: '' });
     clear(this.planBoardEl);
     this.planBoardEl.classList.remove('collapsed');
 
     const header = el('div', { className: 'nc-plan-header', parent: this.planBoardEl });
     const titleWrap = el('div', { className: 'nc-plan-title-wrap', parent: header });
     const titleIcon = el('span', { className: 'nc-plan-title-icon', parent: titleWrap });
-    titleIcon.innerHTML = ICON.check;
+    setTrustedSvg(titleIcon, ICON.check);
     el('span', { className: 'nc-plan-title', text: 'Plan', parent: titleWrap });
     el('span', { className: 'nc-plan-progress', text: `${done} / ${total}`, parent: header });
     const toggle = el('span', { className: 'nc-plan-toggle', text: '▾', parent: header });
@@ -1037,13 +1009,13 @@ export class GlossaView extends ItemView {
   private renderToolCard(box: HTMLElement, ev: ToolEvent) {
     clear(box);
     const meta = metaFor(ev.name);
-    box.style.setProperty('--tool-color', meta.color);
+    setVars(box, { ['--tool-color']: meta.color });
 
     const hdr = el('div', { className: 'nc-tool-event-header', parent: box });
 
     // Icon
     const icon = el('span', { className: 'nc-tool-icon', parent: hdr });
-    icon.innerHTML = meta.icon;
+    setTrustedSvg(icon, meta.icon);
 
     // Header text — prefer the tool's own renderer for custom-formatted
     // headers (e.g. a tool that wants to colorize args or show a badge).
@@ -1083,7 +1055,7 @@ export class GlossaView extends ItemView {
 
     // Chevron
     const chev = el('span', { className: 'nc-tool-event-chev', parent: hdr });
-    chev.innerHTML = ICON.arrowRight;
+    setTrustedSvg(chev, ICON.arrowRight);
 
     const body = el('div', { className: 'nc-tool-event-body', parent: box });
     const argsDetails = el('details', { parent: body });
@@ -1192,9 +1164,13 @@ export class GlossaView extends ItemView {
     }
     const dur = totalMs < 1000 ? `${totalMs}ms` : `${(totalMs / 1000).toFixed(1)}s`;
     const summary = el('button', { className: 'nc-tool-stack-summary', parent: stack });
-    summary.innerHTML = `<span class="nc-tool-stack-summary-icon">⚙</span> Ran ${cards.length} tools · ${dur} · <span class="nc-tool-stack-summary-ok">all ✓</span> <span class="nc-tool-stack-summary-chev">▸</span>`;
+    el('span', { className: 'nc-tool-stack-summary-icon', text: '⚙', parent: summary });
+    summary.appendText(` Ran ${cards.length} tools · ${dur} · `);
+    el('span', { className: 'nc-tool-stack-summary-ok', text: 'all ✓', parent: summary });
+    summary.appendText(' ');
+    el('span', { className: 'nc-tool-stack-summary-chev', text: '▸', parent: summary });
     summary.onclick = () => { stack.classList.add('expanded'); this.updateToolStackCollapse(stack); };
-    if (hasFailure) (summary.querySelector('.nc-tool-stack-summary-ok') as HTMLElement).textContent = 'some failed';
+    if (hasFailure) (summary.querySelector('.nc-tool-stack-summary-ok') as HTMLElement).textContent = 'Some failed';
   }
 
   private compactProcessForTurn(turnId: string | undefined) {
@@ -1227,7 +1203,9 @@ export class GlossaView extends ItemView {
     const roleRow = first.wrap.querySelector(':scope > .nc-msg-role');
     first.wrap.insertBefore(summary, roleRow?.nextSibling ?? first.wrap.firstChild);
     const label = `Process · ${reasoningCount} reasoning · ${toolCount} tools`;
-    summary.innerHTML = `<span class="nc-process-dot"></span><span>${label}</span><span class="nc-process-chev">▸</span>`;
+    el('span', { className: 'nc-process-dot', parent: summary });
+    el('span', { text: label, parent: summary });
+    el('span', { className: 'nc-process-chev', text: '▸', parent: summary });
 
     const setExpanded = (expanded: boolean) => {
       summary.classList.toggle('expanded', expanded);
@@ -1263,15 +1241,15 @@ export class GlossaView extends ItemView {
     const actions = el('div', { className: 'nc-msg-actions', parent: footer });
     const mkBtn = (icon: string, label: string, onClick: () => void) => {
       const b = el('button', { parent: actions, title: label, className: 'nc-icon-action' });
-      b.innerHTML = icon;
+      setTrustedSvg(b, icon);
       b.onclick = onClick;
       return b;
     };
     const copyBtn = mkBtn(ICON.copy, 'Copy', () => {
       navigator.clipboard.writeText(m.content);
-      copyBtn.innerHTML = ICON.checkThick;
-      copyBtn.style.color = '#3fb950';
-      setTimeout(() => { copyBtn.innerHTML = ICON.copy; copyBtn.style.color = ''; }, 900);
+      setTrustedSvg(copyBtn, ICON.checkThick);
+      setStyle(copyBtn, { color: '#3fb950' });
+      window.setTimeout(() => { setTrustedSvg(copyBtn, ICON.copy); setStyle(copyBtn, { color: '' }); }, 900);
     });
     if (m.role === 'assistant') {
       mkBtn(ICON.refresh, t('regenerate'), () => this.regenerateLast());
@@ -1285,7 +1263,14 @@ export class GlossaView extends ItemView {
         if (cp) {
           mkBtn(ICON.refresh, 'Rollback file edits made in this turn', async () => {
             const paths = cp.snapshots.map(s => s.path).join('\n  • ');
-            if (!confirm(`Rollback will overwrite ${cp.snapshots.length} file(s):\n  • ${paths}\n\nContinue?`)) return;
+            const { confirmModal } = await import('./confirm_modal');
+            const ok = await confirmModal(this.app, {
+              title: 'Rollback file edits',
+              body: `Rollback will overwrite ${cp.snapshots.length} file(s):\n  • ${paths}\n\nContinue?`,
+              confirmText: 'Rollback',
+              danger: true,
+            });
+            if (!ok) return;
             const { restored, failed } = await this.plugin.checkpoint.rollback(this.session.id, m.id);
             quickNotice(`Rolled back ${restored} file(s)${failed.length ? `, ${failed.length} failed` : ''}.`);
           });
@@ -1339,14 +1324,14 @@ export class GlossaView extends ItemView {
   }
 
   /* ============================================================
-     Streaming render — Obsidian MarkdownRenderer everywhere (safe, no innerHTML).
+     Streaming render — Obsidian MarkdownRenderer everywhere.
      Throttle 100ms; serialize concurrent renders; re-fire if buffer changed during render.
      ============================================================ */
   private streamRenderTimer: any;
   private streamRenderInFlight = false;
   private scheduleStreamingRender() {
     if (this.streamRenderTimer || this.streamRenderInFlight || !this.streamingMsgUI) return;
-    this.streamRenderTimer = setTimeout(() => {
+    this.streamRenderTimer = window.setTimeout(() => {
       this.streamRenderTimer = null;
       this.doStreamingRender();
     }, 150);     // 150ms to reduce math flicker
@@ -1372,7 +1357,7 @@ export class GlossaView extends ItemView {
       // growing). Append any new ones (paras.length - 1 > committed).
       if (paras.length - 1 > committed) {
         for (let i = committed; i < paras.length - 1; i++) {
-          const wrap = document.createElement('div');
+          const wrap = activeDocument.createElement('div');
           wrap.className = 'nc-stream-para';
           // Insert BEFORE the tail element so paragraph order is correct.
           if (ui._tailEl?.isConnected) ui.body.insertBefore(wrap, ui._tailEl);
@@ -1384,7 +1369,7 @@ export class GlossaView extends ItemView {
       // Render the trailing (incomplete) paragraph — reuses tailEl so we don't
       // accumulate orphan nodes.
       if (!ui._tailEl || !ui._tailEl.isConnected) {
-        ui._tailEl = document.createElement('div');
+        ui._tailEl = activeDocument.createElement('div');
         ui._tailEl.className = 'nc-stream-para nc-stream-tail';
         ui.body.appendChild(ui._tailEl);
       }
@@ -1434,12 +1419,13 @@ export class GlossaView extends ItemView {
      Inline approval — replaces the modal popup
      ============================================================ */
   private askInlineApproval(tool: ToolImpl, args: any): Promise<ApprovalResult> {
-    return new Promise(async resolve => {
+    return new Promise(resolve => {
+      void (async () => {
       const host = this.streamingMsgUI?.wrap ?? this.messagesEl;
       const wrap = el('div', { className: 'nc-inline-approval', parent: host });
       const hdr = el('div', { className: 'nc-inline-approval-hdr', parent: wrap });
       const ic = el('span', { className: 'nc-inline-approval-icon', parent: hdr });
-      ic.innerHTML = metaFor(tool.spec.name).icon;
+      setTrustedSvg(ic, metaFor(tool.spec.name).icon);
       // Header text — let the tool override via `renderToolUseMessage`; fall
       // back to `<verb> — <describe>` to keep parity with prior behavior.
       const customHdr = toolUseMessage(tool.spec.name, args);
@@ -1480,7 +1466,7 @@ export class GlossaView extends ItemView {
                 el('div', { className: 'nc-diff-line del', text: `(file will be deleted)`, parent: sec });
               } else if (fp.oldText !== (fp.newText ?? '')) {
                 const box = el('div', { className: 'nc-diff-box nc-inline-diff-box', parent: sec });
-                box.innerHTML = diffToHtml(fp.oldText, fp.newText ?? '');
+                renderDiffInto(box, fp.oldText, fp.newText ?? '');
               } else {
                 el('div', { className: 'nc-diff-line eq', text: '(no changes)', parent: sec });
               }
@@ -1496,7 +1482,7 @@ export class GlossaView extends ItemView {
             } else {
               const f = this.app.vault.getAbstractFileByPath(args.file_path);
               if (f && 'extension' in (f as any)) {
-                try { oldText = await this.app.vault.read(f as any); } catch {}
+                try { oldText = await this.app.vault.read(f as any); } catch { /* ignore */ }
               }
               if (typeof args.old_string === 'string' && oldText.includes(args.old_string)) {
                 newText = args.replace_all
@@ -1510,7 +1496,7 @@ export class GlossaView extends ItemView {
             label = args.path ?? '';
             const f = this.app.vault.getAbstractFileByPath(args.path);
             if (f && 'extension' in (f as any)) {
-              try { oldText = await this.app.vault.read(f as any); } catch {}
+              try { oldText = await this.app.vault.read(f as any); } catch { /* ignore */ }
             }
             if (name === 'write_note' || name === 'create_note') newText = args.content ?? '';
             else if (name === 'edit_section' && typeof args.find === 'string' && args.find && oldText.includes(args.find)) newText = oldText.replace(args.find, args.replace ?? '');
@@ -1526,10 +1512,10 @@ export class GlossaView extends ItemView {
             const det = el('details', { parent: wrap });
             el('summary', { className: 'nc-inline-approval-diff-summary', text: 'Show diff', parent: det });
             const box = el('div', { className: 'nc-diff-box nc-inline-diff-box', parent: det });
-            box.innerHTML = diffToHtml(oldText, newText);
+            renderDiffInto(box, oldText, newText);
           }
         }
-      } catch {}
+      } catch { /* ignore */ }
 
       /* --- "Always allow" rule selector --- */
       // Show only when the tool has a path-ish arg (so folder/path scopes make sense)
@@ -1551,7 +1537,7 @@ export class GlossaView extends ItemView {
       if (mcpServer) opts.push({ value: 'always-mcp-server', label: `Always allow MCP server "${mcpServer}"` });
       const sel = el('select', { className: 'nc-inline-rule-select', parent: ruleRow }) as HTMLSelectElement;
       for (const o of opts) {
-        const optEl = document.createElement('option');
+        const optEl = activeDocument.createElement('option');
         optEl.value = o.value; optEl.textContent = o.label;
         sel.appendChild(optEl);
       }
@@ -1561,11 +1547,16 @@ export class GlossaView extends ItemView {
       // Hint row: discreet keyboard shortcuts to the left of the buttons so the
       // user knows Enter/Esc/A work without having to hover for tooltips.
       const hints = el('span', { className: 'nc-inline-approval-hints', parent: acts });
-      hints.innerHTML = `<kbd>↵</kbd> approve · <kbd>Esc</kbd> deny · <kbd>A</kbd> always`;
+      hints.createEl('kbd', { text: '↵' });
+      hints.appendText(' approve · ');
+      hints.createEl('kbd', { text: 'Esc' });
+      hints.appendText(' deny · ');
+      hints.createEl('kbd', { text: 'A' });
+      hints.appendText(' always');
       const deny = el('button', { className: 'nc-inline-deny', parent: acts, title: 'Deny (Esc)' });
-      deny.innerHTML = 'Deny';
+      deny.textContent = 'Deny';
       const approve = el('button', { className: 'nc-inline-approve', parent: acts, title: 'Approve (Enter)' });
-      approve.innerHTML = 'Approve';
+      approve.textContent = 'Approve';
 
       const buildRule = (): import('../types').PermissionRule | undefined => {
         if (ruleChoice === 'once') return undefined;
@@ -1589,36 +1580,40 @@ export class GlossaView extends ItemView {
       this.scrollToBottom();
 
       const keyH = (e: KeyboardEvent) => {
-        if (!wrap.isConnected) { document.removeEventListener('keydown', keyH, true); return; }
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.removeEventListener('keydown', keyH, true); finish(true); }
-        else if (e.key === 'Escape') { e.preventDefault(); document.removeEventListener('keydown', keyH, true); finish(false); }
+        if (!wrap.isConnected) { activeDocument.removeEventListener('keydown', keyH, true); return; }
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); activeDocument.removeEventListener('keydown', keyH, true); finish(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); activeDocument.removeEventListener('keydown', keyH, true); finish(false); }
         // 'a' (always-allow this tool globally) — only when focus isn't inside an input.
-        else if ((e.key === 'a' || e.key === 'A') && !(document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement)) {
+        else if ((e.key === 'a' || e.key === 'A') && !(activeDocument.activeElement?.instanceOf(HTMLInputElement) || activeDocument.activeElement?.instanceOf(HTMLTextAreaElement))) {
           e.preventDefault();
           ruleChoice = 'always-tool';
-          document.removeEventListener('keydown', keyH, true);
+          activeDocument.removeEventListener('keydown', keyH, true);
           finish(true);
         }
       };
-      document.addEventListener('keydown', keyH, true);
+      activeDocument.addEventListener('keydown', keyH, true);
+      })().catch((err: unknown) => {
+        console.warn('[Glossa] inline approval failed', err);
+        resolve({ ok: false });
+      });
     });
   }
 
   private reasoningRenderTimer: any;
   private scheduleReasoningRender() {
     if (this.reasoningRenderTimer || !this.streamingMsgUI?.reasoningCard) return;
-    this.reasoningRenderTimer = setTimeout(async () => {
+    this.reasoningRenderTimer = window.setTimeout(async () => {
       this.reasoningRenderTimer = null;
       const ui = this.streamingMsgUI;
       const content = this.currentAsstMsg?.reasoningContent ?? '';
       if (!ui?.reasoningCard || !ui.reasoningBody) return;
-      ui.reasoningCard.style.display = '';
+      setStyle(ui.reasoningCard, { display: '' });
       // Stay COLLAPSED — user clicks to peek. Only update the summary label.
       const sum = ui.reasoningCard.querySelector('.nc-thinking-summary span');
       if (sum) sum.textContent = `🧠 Reasoning (${content.length.toLocaleString()} chars${this.streaming ? ' · streaming' : ''})`;
       // Only render the body content if the user has actually opened it.
       if (ui.reasoningCard.hasAttribute('open')) {
-        try { await renderInto(this.app, content, ui.reasoningBody, this); } catch {}
+        try { await renderInto(this.app, content, ui.reasoningBody, this); } catch { /* ignore */ }
       }
     }, 300);
   }
@@ -1626,10 +1621,10 @@ export class GlossaView extends ItemView {
   private elapsedTimer: any;
   private startElapsedTicker() {
     if (this.elapsedTimer) return;
-    this.elapsedTimer = setInterval(() => this.tickElapsed(), 250);
+    this.elapsedTimer = window.setInterval(() => this.tickElapsed(), 250);
   }
   private stopElapsedTicker() {
-    if (this.elapsedTimer) { clearInterval(this.elapsedTimer); this.elapsedTimer = null; }
+    if (this.elapsedTimer) { window.clearInterval(this.elapsedTimer); this.elapsedTimer = null; }
   }
   private tickElapsed() {
     // Update the per-message elapsed counter on the role label.
@@ -1675,15 +1670,15 @@ export class GlossaView extends ItemView {
   private recomputeInputHeight() {
     if (this.inputRafPending) return;
     this.inputRafPending = true;
-    requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
       this.inputRafPending = false;
       if (!this.inputEl) return;
-      this.inputEl.style.height = 'auto';
+      setStyle(this.inputEl, { height: 'auto' });
       // Force a synchronous reflow so scrollHeight reflects the new content,
       // not the prior (potentially taller) box.
       void this.inputEl.offsetHeight;
       const h = Math.min(this.inputEl.scrollHeight, 240);
-      this.inputEl.style.height = h + 'px';
+      setStyle(this.inputEl, { height: h + 'px' });
     });
   }
 
@@ -1696,7 +1691,7 @@ export class GlossaView extends ItemView {
     this.inputWrap = wrap;
 
     this.selectionPreviewEl = el('div', { className: 'nc-selection-preview', parent: wrap });
-    this.selectionPreviewEl.style.display = 'none';
+    setStyle(this.selectionPreviewEl, { display: 'none' });
     this.contextBarEl = el('div', { className: 'nc-context-bar', parent: wrap });
 
     this.inputEl = el('textarea', {
@@ -1741,13 +1736,13 @@ export class GlossaView extends ItemView {
 
     // (1) Attach button — hidden file input + button
     const fileInput = el('input', { className: 'nc-file-input', parent: footer, type: 'file', attrs: { multiple: 'true', accept: '*/*' } }) as HTMLInputElement;
-    fileInput.style.display = 'none';
+    setStyle(fileInput, { display: 'none' });
     fileInput.onchange = async () => {
       if (fileInput.files) for (const f of Array.from(fileInput.files)) this.ctx.add(await resolveDroppedFile(f));
       fileInput.value = '';
     };
     const attachBtn = el('button', { className: 'nc-composer-icon-btn', parent: footer, title: t('attach_file') });
-    attachBtn.innerHTML = ICON.plusThin;
+    setTrustedSvg(attachBtn, ICON.plusThin);
     attachBtn.onclick = () => fileInput.click();
 
     // (2) Permission pill — quick toggle of read-only / workspace-write / full
@@ -1817,7 +1812,7 @@ export class GlossaView extends ItemView {
       path = `<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/>`;
     }
     const ic = el('span', { className: 'nc-pill-glyph', parent: this.permPillEl });
-    ic.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+    setTrustedSvg(ic, `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`);
     el('span', { className: 'nc-pill-text', text: this.permLabel(), parent: this.permPillEl });
     el('span', { className: 'nc-pill-caret', text: '▾', parent: this.permPillEl });
     this.permPillEl.title = bi('Click to switch permission level', '点击切换权限级别');
@@ -1880,7 +1875,7 @@ export class GlossaView extends ItemView {
     const ic = el('span', { className: 'nc-pill-glyph', parent: this.reasoningPillEl });
     // Lucide `sparkles` — same icon ChatGPT and Cursor use for reasoning /
     // thinking. Universally readable, brand-neutral.
-    ic.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>`;
+    setTrustedSvg(ic, `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>`);
     // Subtle subscript so users see the current level at a glance.
     const map: Record<string, string> = { off: '·', low: 'L', medium: 'M', high: 'H', xhigh: 'X' };
     el('span', { className: 'nc-pill-sub', text: map[effort] ?? 'M', parent: this.reasoningPillEl });
@@ -1951,21 +1946,21 @@ export class GlossaView extends ItemView {
     if (text.length > 400) return;
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const rect = this.inputWrap.getBoundingClientRect();
-    const ghost = document.createElement('div');
+    const ghost = activeDocument.createElement('div');
     ghost.className = 'nc-send-flyout';
     ghost.textContent = text;
-    Object.assign(ghost.style, {
+    setStyle(ghost, {
       position: 'fixed',
       left: `${rect.left + 8}px`,
       top:  `${rect.top + 8}px`,
       width:  `${rect.width - 16}px`,
       maxHeight: '120px',
     });
-    document.body.appendChild(ghost);
+    activeDocument.body.appendChild(ghost);
     // Two-frame deferral: one frame for the browser to paint the ghost at
     // its origin, another to apply the .flying class. Without this both
     // states fire in the same paint and the transition is skipped.
-    requestAnimationFrame(() => requestAnimationFrame(() => ghost.classList.add('flying')));
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => ghost.classList.add('flying')));
     window.setTimeout(() => ghost.remove(), 520);
   }
 
@@ -1975,7 +1970,7 @@ export class GlossaView extends ItemView {
     if (this.streaming) {
       this.submitBtn.classList.add('stop');
       this.submitBtn.title = 'Stop';
-      ic.innerHTML = ICON.stop;
+      setTrustedSvg(ic, ICON.stop);
       // Aurora ring on the composer also activates during streaming so
       // the "alive" signal is multi-locus (button morph + ring rotates).
       this.inputWrap?.classList.add('streaming');
@@ -1987,8 +1982,8 @@ export class GlossaView extends ItemView {
       // the visual "done" cue tied to result-to-claim cycle completion.
       const wasStreaming = this.inputWrap?.classList.contains('streaming') ?? false;
       this.submitBtn.classList.remove('stop');
-      this.submitBtn.title = 'Send (⌘/Ctrl+↵)';
-      ic.innerHTML = ICON.send;
+      this.submitBtn.title = `Send (⌘/${'Ctrl'}+↵)`;
+      setTrustedSvg(ic, ICON.send);
       this.inputWrap?.classList.remove('streaming');
       if (wasStreaming) {
         this.inputWrap?.classList.add('streamed');
@@ -2003,7 +1998,7 @@ export class GlossaView extends ItemView {
     if (!active) {
       el('span', { className: 'nc-model-label', text: bi('No endpoint', '未配置 endpoint'), parent: this.modelBtn });
       const a = el('span', { className: 'nc-arrow', parent: this.modelBtn });
-      a.innerHTML = ICON.arrowDown;
+      setTrustedSvg(a, ICON.arrowDown);
       this.modelBtn.title = bi('No endpoint — open settings', '未配置 endpoint — 打开设置');
       return;
     }
@@ -2011,7 +2006,7 @@ export class GlossaView extends ItemView {
     // the tooltip — the chip stays compact and the label drives identity.
     el('span', { className: 'nc-model-label', text: active.label, parent: this.modelBtn });
     const a = el('span', { className: 'nc-arrow', parent: this.modelBtn });
-    a.innerHTML = ICON.arrowDown;
+    setTrustedSvg(a, ICON.arrowDown);
     const model = active.model ?? bi('(default)', '（默认）');
     this.modelBtn.title = `${active.label}\nmodel: ${model}\n${bi('click to switch', '点击切换')}`;
   }
@@ -2117,7 +2112,10 @@ export class GlossaView extends ItemView {
       label: query.match(/^https?:\/\//) ? query : 'web URL…', hint: 'fetch page',
       iconSvg: ICON.globe, section: 'GENERIC',
       onSelect: async () => {
-        const url = query.match(/^https?:\/\//) ? query : prompt('URL?') || '';
+        const { promptModal } = await import('./confirm_modal');
+        const url = query.match(/^https?:\/\//)
+          ? query
+          : (await promptModal(this.app, { title: 'URL', placeholder: 'https://…' }) ?? '');
         if (url) { const it = await resolveWebUrl(url); this.ctx.add(it); }
         this.removeToken(tokenStart);
       }
@@ -2267,7 +2265,7 @@ export class GlossaView extends ItemView {
     this.recomputeInputHeight();
     this.inputEl.focus();
     this.inputEl.classList.add('nc-flash');
-    setTimeout(() => this.inputEl.classList.remove('nc-flash'), 380);
+    window.setTimeout(() => this.inputEl.classList.remove('nc-flash'), 380);
   }
 
   /** If the input starts with a known slash trigger like `/translate Chinese`, expand
@@ -2393,7 +2391,7 @@ export class GlossaView extends ItemView {
     // Insert a transient loading card at the END of the messages list
     const loading = el('div', { className: 'nc-compact-loading', parent: this.messagesEl });
     const spinner = el('div', { className: 'nc-compact-loading-spinner', parent: loading });
-    spinner.innerHTML = ICON.spinnerRing;
+    setTrustedSvg(spinner, ICON.spinnerRing);
     el('span', { className: 'nc-compact-loading-text',
       text: `Summarising ${this.session.messages.length - keepRecent} older messages…`, parent: loading });
     this.scrollToBottom();
@@ -2414,7 +2412,7 @@ export class GlossaView extends ItemView {
       for (const m of this.session.messages) this.renderMessage(m);
       this.compactAllProcessGroups();
       this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-      requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
+      window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
       await this.flushPersistNow();
       quickNotice(`Compacted ${result.summarisedCount} msgs → 1 summary (~${formatTokenCount(result.tokensSaved)} tok saved)`);
     } catch (e: any) {
@@ -2433,7 +2431,7 @@ export class GlossaView extends ItemView {
     for (const m of this.session.messages) this.renderMessage(m);
     this.compactAllProcessGroups();
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-    requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
+    window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
     await this.flushPersistNow();
     quickNotice('Restored pre-compact history.');
   }
@@ -2506,7 +2504,7 @@ export class GlossaView extends ItemView {
     // AND focus isn't currently in the sidebar (i.e., user has clicked away from both), drop it.
     {
       const winSel = window.getSelection()?.toString().trim() ?? '';
-      const focusInSidebar = this.containerEl.contains(document.activeElement);
+      const focusInSidebar = this.containerEl.contains(activeDocument.activeElement);
       if (!winSel && !focusInSidebar) {
         this.currentSelection = null;
         this.renderSelectionPreview();
@@ -2851,7 +2849,7 @@ export class GlossaView extends ItemView {
         if (a && (!a.content || a.content.length === 0) && (!a.toolEvents || a.toolEvents.length === 0)) {
           this.session.messages = this.session.messages.filter(m => m.id !== a.id);
           // Remove the rendered bubble too.
-          try { this.streamingMsgUI?.wrap?.remove(); } catch {}
+          try { this.streamingMsgUI?.wrap?.remove(); } catch { /* ignore */ }
         }
       } catch (e) { console.warn('[Glossa] empty-assistant cleanup failed', e); }
     } finally {
@@ -2871,9 +2869,9 @@ export class GlossaView extends ItemView {
 
   /** After streaming ends, render the final message via Obsidian (math / wikilinks / mermaid). */
   private async finalizeAsstRender(ui: MsgUI, m: ChatMessage) {
-    if (this.streamRenderTimer) { clearTimeout(this.streamRenderTimer); this.streamRenderTimer = null; }
+    if (this.streamRenderTimer) { window.clearTimeout(this.streamRenderTimer); this.streamRenderTimer = null; }
     // Wait for any in-flight stream render to settle
-    while (this.streamRenderInFlight) await new Promise(r => setTimeout(r, 20));
+    while (this.streamRenderInFlight) await new Promise(r => window.setTimeout(r, 20));
     await renderInto(this.app, m.content || '', ui.body, this, this.app.workspace.getActiveFile()?.path ?? '');
     decorateCodeBlocks(ui.body, this.codeBlockHandlers());
     this.applyPreambleStyle(ui, m);
@@ -2889,7 +2887,7 @@ export class GlossaView extends ItemView {
     if (!ui.reasoningCard) return;
     const content = m.reasoningContent ?? '';
     if (!content) {
-      ui.reasoningCard.style.display = 'none';
+      setStyle(ui.reasoningCard, { display: 'none' });
       return;
     }
     const sum = ui.reasoningCard.querySelector('.nc-thinking-summary span') as HTMLElement | null;
@@ -2985,9 +2983,9 @@ export class GlossaView extends ItemView {
     const showBudget = totalPromptTokens > 0 && maxCtx > 0;
 
     if (!this.plugin.settings.showCostBar || (!hasUsage && !showBudget)) {
-      this.costBar.style.display = 'none'; return;
+      setStyle(this.costBar, { display: 'none' }); return;
     }
-    this.costBar.style.display = '';
+    setStyle(this.costBar, { display: '' });
     clear(this.costBar);
 
     if (showBudget) {
@@ -3005,19 +3003,19 @@ export class GlossaView extends ItemView {
       // Sub-segments to show ctx vs. history split
       if (ctxTokens > 0) {
         const ctxFill = el('div', { className: 'nc-budget-fill nc-budget-ctx', parent: bar });
-        ctxFill.style.width = Math.min(100, (ctxTokens / maxCtx) * 100).toFixed(1) + '%';
+        setStyle(ctxFill, { width: Math.min(100, (ctxTokens / maxCtx) * 100).toFixed(1) + '%' });
       }
       if (sessionCtxTokens > 0) {
         const hist = el('div', { className: 'nc-budget-fill nc-budget-history', parent: bar });
-        hist.style.left = Math.min(100, (ctxTokens / maxCtx) * 100).toFixed(1) + '%';
-        hist.style.width = Math.min(100, (sessionCtxTokens / maxCtx) * 100).toFixed(1) + '%';
+        setStyle(hist, { left: Math.min(100, (ctxTokens / maxCtx) * 100).toFixed(1) + '%' });
+        setStyle(hist, { width: Math.min(100, (sessionCtxTokens / maxCtx) * 100).toFixed(1) + '%' });
       }
       if (pct > 85 || overHard) bar.classList.add('danger');
       else if (pct > 60) bar.classList.add('warn');
       // Hard-cap marker
       if (hardCap < maxCtx) {
         const marker = el('div', { className: 'nc-budget-hard-cap', parent: bar });
-        marker.style.left = ((hardCap / maxCtx) * 100).toFixed(1) + '%';
+        setStyle(marker, { left: ((hardCap / maxCtx) * 100).toFixed(1) + '%' });
       }
       const label = `ctx ${formatTokenCount(totalPromptTokens)} / ${formatTokenCount(maxCtx)}`;
       const lbl = el('span', { className: 'nc-budget-label' + (overHard ? ' over' : ''), text: label, parent: this.costBar });
@@ -3089,7 +3087,7 @@ export class GlossaView extends ItemView {
       for (const m of this.session.messages) this.renderMessage(m);
       this.compactAllProcessGroups();
       this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-      requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
+      window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
     }
     this.rebuildPlanFromSession();
   }
@@ -3102,7 +3100,7 @@ export class GlossaView extends ItemView {
   private persistSession() {
     if (this._persistTimer) return;
     const session = this.session;
-    this._persistTimer = setTimeout(() => {
+    this._persistTimer = window.setTimeout(() => {
       this._persistTimer = null;
       this.plugin.store.saveSession(session);
     }, 1000);
@@ -3110,14 +3108,14 @@ export class GlossaView extends ItemView {
   /** Force-write the current session now (bypasses debounce). Use at stream
    *  end, before navigation, or before destructive operations like compact. */
   private async flushPersistNow() {
-    if (this._persistTimer) { clearTimeout(this._persistTimer); this._persistTimer = null; }
+    if (this._persistTimer) { window.clearTimeout(this._persistTimer); this._persistTimer = null; }
     await this.plugin.store.saveSession(this.session);
   }
 
   private async exportChatToNote() {
     if (this.session.messages.length === 0) { quickNotice('No messages.'); return; }
     const folder = this.plugin.settings.chatsFolder || 'Chats';
-    try { await this.app.vault.createFolder(folder); } catch {}
+    try { await this.app.vault.createFolder(folder); } catch { /* ignore */ }
     const safeTitle = (this.session.title || 'chat').replace(/[\\/:*?"<>|]/g, '-').slice(0, 60);
     const path = `${folder}/${new Date().toISOString().slice(0,10)}_${safeTitle}.md`;
 
@@ -3185,7 +3183,7 @@ export class GlossaView extends ItemView {
 
   private async saveResponseAsNote(m: ChatMessage) {
     const folder = this.plugin.settings.chatsFolder || 'Chats';
-    try { await this.app.vault.createFolder(folder); } catch {}
+    try { await this.app.vault.createFolder(folder); } catch { /* ignore */ }
     const path = `${folder}/${new Date().toISOString().replace(/[:.]/g,'-')}_assistant.md`;
     await this.app.vault.create(path, m.content);
     const f = this.app.vault.getAbstractFileByPath(path);
@@ -3221,7 +3219,7 @@ export class GlossaView extends ItemView {
       for (const m of this.session.messages) this.renderMessage(m);
       this.compactAllProcessGroups();
       this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-      requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
+      window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
     }
     // Persist the trimmed history before re-submit. Without this, an Obsidian
     // crash / quick reload between "regenerate" and the new turn finishing

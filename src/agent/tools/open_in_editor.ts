@@ -138,7 +138,7 @@ export const openInEditor: ToolImpl = buildTool({
           editor.setCursor({ line: lineIdx, ch: 0 });
         }
         // Scroll the target line into view.
-        try { editor.scrollIntoView({ from: { line: lineIdx, ch: 0 }, to: { line: lineIdx, ch: lineText.length } }, true); } catch {}
+        try { editor.scrollIntoView({ from: { line: lineIdx, ch: 0 }, to: { line: lineIdx, ch: lineText.length } }, true); } catch { /* ignore */ }
       }
     }
 

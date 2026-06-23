@@ -24,7 +24,7 @@ export const createNote: ToolImpl = buildTool({
     const content = typeof args.content === 'string' ? args.content : '';
     try {
       const folder = vaultFolderOf(path);
-      if (folder) try { await app.vault.createFolder(folder); } catch {}
+      if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
       await app.vault.create(path, content);
       return `Created ${path}.`;
     } catch (e: any) { return `Error: ${e.message}`; }

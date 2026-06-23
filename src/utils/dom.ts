@@ -13,18 +13,17 @@ export function el<K extends keyof HTMLElementTagNameMap>(
     style: Partial<CSSStyleDeclaration>;
   }> = {}
 ): HTMLElementTagNameMap[K] {
-  // Note: previously this also accepted an `html` option that called
-  // innerHTML. That was an XSS footgun (any model-derived text reaching el
-  // could inject script) — removed. Callers that genuinely need raw HTML
-  // injection (e.g. SVG icons) must do `target.innerHTML = trustedStr`
-  // explicitly so the unsafety is visible at the call site.
-  const e = document.createElement(tag);
+  // Note: previously this also accepted an `html` option that injected markup.
+  // That was an XSS footgun (any model-derived text reaching el could inject
+  // script) — removed. Callers that genuinely need trusted SVG
+  // constants should go through setTrustedSvg().
+  const e = activeDocument.createElement(tag);
   if (opts.className) e.className = opts.className;
   if (opts.text != null) e.textContent = opts.text;
   if (opts.title) e.title = opts.title;
   if (opts.type) (e as any).type = opts.type;
   if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) e.setAttribute(k, v);
-  if (opts.style) Object.assign(e.style, opts.style);
+  if (opts.style) setStyle(e, opts.style);
   if (opts.onClick) e.addEventListener('click', opts.onClick);
   if (opts.parent) opts.parent.appendChild(e);
   return e;
@@ -34,9 +33,53 @@ export function clear(el: HTMLElement) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
 
+export function setStyle(
+  target: HTMLElement,
+  styles: Partial<CSSStyleDeclaration>,
+): void {
+  target.setCssStyles(styles);
+}
+
+export function setVars(
+  target: HTMLElement,
+  props: Record<string, string>,
+): void {
+  target.setCssProps(props);
+}
+
+export function setTrustedSvg(target: HTMLElement, svgText: string): void {
+  clear(target);
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgText, 'image/svg+xml');
+  const svg = doc.documentElement;
+  if (svg.localName.toLowerCase() !== 'svg') return;
+  const cloned = cloneSvgElement(svg);
+  if (cloned) target.appendChild(cloned);
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function cloneSvgElement(source: Element): SVGElement | null {
+  const cloned = activeDocument.createElementNS(SVG_NS, source.localName);
+  for (const attr of Array.from(source.attributes)) {
+    cloned.setAttribute(attr.name, attr.value);
+  }
+  for (const child of Array.from(source.childNodes)) {
+    const copied = cloneSvgNode(child);
+    if (copied) cloned.appendChild(copied);
+  }
+  return cloned;
+}
+
+function cloneSvgNode(source: ChildNode): Node | null {
+  if (source.nodeType === 3) return activeDocument.createTextNode(source.textContent ?? '');
+  if (source.nodeType !== 1) return null;
+  return cloneSvgElement(source as Element);
+}
+
 export function debounce<F extends (...a: any[]) => any>(fn: F, ms: number): F {
   let t: any;
-  return ((...a: any[]) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }) as F;
+  return ((...a: any[]) => { window.clearTimeout(t); t = window.setTimeout(() => fn(...a), ms); }) as F;
 }
 
 export function uid(): string {

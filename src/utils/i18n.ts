@@ -12,7 +12,7 @@ export function setLanguage(l: Lang) {
     const sys = (navigator.language || 'en').toLowerCase();
     _lang = sys.startsWith('zh') ? 'zh' : 'en';
   } else _lang = l;
-  if (_lang !== before) for (const fn of _subs) try { fn(); } catch {}
+  if (_lang !== before) for (const fn of _subs) try { fn(); } catch { /* ignore */ }
 }
 
 export function currentLanguage(): 'en' | 'zh' { return _lang; }

@@ -48,7 +48,7 @@ export async function discoverContextFiles(app: App): Promise<ContextFileEntry[]
         try {
           const text = await app.vault.cachedRead(f);
           if (text.trim()) out.push({ path: p, text, depth });
-        } catch {}
+        } catch { /* ignore */ }
       }
     }
   }

@@ -66,7 +66,7 @@ export const fileEdit: ToolImpl = buildTool({
       const existing = app.vault.getAbstractFileByPath(file_path);
       if (existing instanceof TFile) return `Error: ${file_path} already exists — use a non-empty old_string to edit, or write_note to overwrite.`;
       const folder = vaultFolderOf(file_path);
-      if (folder) try { await app.vault.createFolder(folder); } catch {}
+      if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
       await app.vault.create(file_path, new_string);
       return `Created ${file_path} (${new_string.length} chars).`;
     }

@@ -228,7 +228,7 @@ export async function resolveWebUrl(url: string): Promise<ContextItem> {
     };
   }
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), WEB_FETCH_TIMEOUT_MS);
+  const timer = window.setTimeout(() => ctl.abort(), WEB_FETCH_TIMEOUT_MS);
   try {
     const r = await fetchWithSafeRedirects(validated.href, ctl.signal);
     let text = await r.text();
@@ -250,7 +250,7 @@ export async function resolveWebUrl(url: string): Promise<ContextItem> {
       content: `(failed to fetch ${validated.href}: ${e.message})`, tokens: 0, pinned: false,
     };
   } finally {
-    clearTimeout(timer);
+    window.clearTimeout(timer);
   }
 }
 

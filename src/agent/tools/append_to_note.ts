@@ -30,7 +30,7 @@ export const appendToNote: ToolImpl = buildTool({
     let f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) {
       const folder = vaultFolderOf(path);
-      if (folder) try { await app.vault.createFolder(folder); } catch {}
+      if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
       await app.vault.create(path, text);
       return `Created and wrote ${path}.`;
     }

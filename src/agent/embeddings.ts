@@ -1,4 +1,4 @@
-import { App, TFile, normalizePath, Notice } from 'obsidian';
+import { App, TFile, normalizePath, Notice, requestUrl } from 'obsidian';
 import type GlossaPlugin from '../main';
 import type { Endpoint } from '../types';
 
@@ -368,22 +368,9 @@ async function embedBatch(ep: Endpoint, model: string, inputs: string[], _proxy?
     ...(ep.headers ?? {}),
   };
   const body = JSON.stringify({ model, input: inputs });
-  // Use Obsidian requestUrl when endpoint opted into it — that path follows the system
-  // proxy (which is the only way to get embeddings through a corporate / GFW proxy).
-  if (ep.useObsidianFetch) {
-    const { requestUrl } = await import('obsidian');
-    const r = await requestUrl({ url, method: 'POST', headers, body, throw: false });
-    if (r.status >= 400) throw new Error(`Embedding HTTP ${r.status}: ${r.text.slice(0, 200)}`);
-    const data = r.json?.data;
-    if (!Array.isArray(data)) throw new Error(`Embedding response malformed: missing data[]`);
-    return data.map((d: any) => d.embedding);
-  }
-  const r = await fetch(url, { method: 'POST', headers, body });
-  if (!r.ok) {
-    const txt = await r.text().catch(() => '');
-    throw new Error(`Embedding HTTP ${r.status}: ${txt.slice(0, 200)}`);
-  }
-  const j = await r.json();
-  if (!Array.isArray(j?.data)) throw new Error(`Embedding response malformed: missing data[]`);
-  return j.data.map((d: any) => d.embedding);
+  const r = await requestUrl({ url, method: 'POST', headers, body, throw: false });
+  if (r.status >= 400) throw new Error(`Embedding HTTP ${r.status}: ${r.text.slice(0, 200)}`);
+  const data = r.json?.data;
+  if (!Array.isArray(data)) throw new Error(`Embedding response malformed: missing data[]`);
+  return data.map((d: any) => d.embedding);
 }

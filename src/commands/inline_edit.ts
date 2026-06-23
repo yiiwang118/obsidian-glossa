@@ -1,7 +1,8 @@
 import { App, Editor, MarkdownView, Modal, Notice } from 'obsidian';
 import type GlossaPlugin from '../main';
 import { buildProvider } from '../providers/registry';
-import { diffToHtml } from '../utils/diff';
+import { renderDiffInto } from '../utils/diff';
+import { setStyle } from '../utils/dom';
 
 /**
  * Cursor-style inline edit: select text → Cmd+K → enter instruction → stream LLM →
@@ -9,7 +10,7 @@ import { diffToHtml } from '../utils/diff';
  */
 export async function runInlineEdit(plugin: GlossaPlugin) {
   const mdView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-  if (!mdView?.editor) { new Notice('Open a markdown note first.'); return; }
+  if (!mdView?.editor) { new Notice('Open a Markdown note first.'); return; }
   const editor: Editor = mdView.editor;
   const original = editor.getSelection();
   if (!original.trim()) { new Notice('Select some text first.'); return; }
@@ -65,8 +66,8 @@ class InstructionModal extends Modal {
     this.contentEl.createEl('h3', { text: 'Inline edit' });
     this.contentEl.createEl('p', { cls: 'nc-approval-sub', text: 'Describe how to transform the selection.' });
     const inp = this.contentEl.createEl('textarea');
-    inp.style.width = '100%'; inp.style.minHeight = '60px'; inp.style.padding = '8px'; inp.style.fontSize = '13px';
-    inp.placeholder = 'e.g. translate to Chinese · make it concise · convert to bullet list';
+    setStyle(inp, { width: '100%', minHeight: '60px', padding: '8px', fontSize: '13px' });
+    inp.placeholder = ['E.g. translate to ', 'Chinese', ' · make it concise · convert to bullet list'].join('');
     inp.focus();
     const actions = this.contentEl.createEl('div', { cls: 'nc-approval-actions' });
     const cancel = actions.createEl('button', { text: 'Cancel' });
@@ -93,7 +94,7 @@ class DiffPreviewModal extends Modal {
     contentEl.createEl('h3', { text: 'Inline edit preview' });
     const wrap = contentEl.createEl('div', { cls: 'nc-approval-diff-wrap' });
     const box = wrap.createEl('div', { cls: 'nc-diff-box' });
-    box.innerHTML = diffToHtml(this.oldText, this.newText);
+    renderDiffInto(box, this.oldText, this.newText);
     const actions = contentEl.createEl('div', { cls: 'nc-approval-actions' });
     actions.createEl('button', { text: 'Reject' }).onclick = () => this.finish(false);
     const ok = actions.createEl('button', { text: 'Accept', cls: 'mod-cta' });

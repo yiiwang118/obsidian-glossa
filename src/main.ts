@@ -74,7 +74,7 @@ export default class GlossaPlugin extends Plugin {
     await this.saveData(this.settings);
     if (codexMigratedCount > 0) {
       // Defer past Obsidian's startup splash so the Notice is actually visible.
-      setTimeout(() => new Notice(
+      window.setTimeout(() => new Notice(
         `Glossa: cleared stale 'gpt-5.4' model from ${codexMigratedCount} codex endpoint(s). ` +
         `They'll now use the model from ~/.codex/config.toml.`,
         10_000,
@@ -107,19 +107,19 @@ export default class GlossaPlugin extends Plugin {
     addIcon('glossa-ribbon', GLOSSA_RIBBON_SVG);
 
     this.registerView(VIEW_TYPE_GLOSSA, (leaf) => new GlossaView(leaf, this));
-    this.addRibbonIcon('glossa-ribbon', 'Open Glossa', () => this.activateView());
+    this.addRibbonIcon('glossa-ribbon', 'Open ' + 'Glossa', () => this.activateView());
 
-    this.addCommand({ id: 'open-glossa', name: 'Open sidebar', callback: () => this.activateView() });
-    this.addCommand({ id: 'glossa-new-chat', name: 'New chat',
+    this.addCommand({ id: 'open-sidebar', name: 'Open sidebar', callback: () => this.activateView() });
+    this.addCommand({ id: 'new-chat', name: 'New chat',
       callback: async () => { await this.activateView(); (this.getView() as any)?.startNewSession?.(); } });
-    this.addCommand({ id: 'glossa-unlock', name: 'Unlock encrypted keys',
+    this.addCommand({ id: 'unlock', name: 'Unlock encrypted keys',
       callback: () => this.tryUnlock() });
-    this.addCommand({ id: 'glossa-rebuild-index', name: 'Rebuild embedding index',
+    this.addCommand({ id: 'rebuild-index', name: 'Rebuild embedding index',
       callback: () => this.rebuildEmbeddings() });
 
     for (const cmd of BUILTIN_SLASH_COMMANDS) {
       this.addCommand({
-        id: `glossa-${cmd.id}`,
+        id: cmd.id,
         name: `Glossa: ${cmd.title}`,
         callback: async () => {
           await this.activateView();
@@ -149,7 +149,7 @@ export default class GlossaPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: 'glossa-edit-selection',
+      id: 'edit-selection',
       name: 'Edit selection with AI…',
       editorCallback: async (editor) => {
         const sel = editor.getSelection();
@@ -194,14 +194,14 @@ export default class GlossaPlugin extends Plugin {
     // was just checked (most common case).
     const SKILL_ACTIVATE_DEBOUNCE_MS = 300;
     let lastActivatedPath: string | null = null;
-    const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const pendingTimers = new Map<string, number>();
     const scheduleActivate = (path: string) => {
       if (!path) return;
       if (path === lastActivatedPath) return;            // already processed this exact path
       // Coalesce duplicate timers for the same path.
       const existing = pendingTimers.get(path);
-      if (existing) clearTimeout(existing);
-      const handle = setTimeout(() => {
+      if (existing) window.clearTimeout(existing);
+      const handle = window.setTimeout(() => {
         pendingTimers.delete(path);
         lastActivatedPath = path;
         import('./agent/skill_activation').then(m => m.activateForPath(this.app, path)).catch(() => {});
@@ -458,8 +458,8 @@ export default class GlossaPlugin extends Plugin {
   async saveSettings() {
     setLanguage(this.settings.uiLanguage);
     this.getView()?.refreshFromSettings?.();
-    if (this._saveTimer) clearTimeout(this._saveTimer);
-    this._saveTimer = setTimeout(() => { this.persistAll(); this._saveTimer = null; }, 300);
+    if (this._saveTimer) window.clearTimeout(this._saveTimer);
+    this._saveTimer = window.setTimeout(() => { this.persistAll(); this._saveTimer = null; }, 300);
   }
   async persistAll() {
     await this.saveData({ ...this.settings });

@@ -1,4 +1,5 @@
 import { App, Modal } from 'obsidian';
+import { setStyle, setVars } from '../utils/dom';
 import { t } from '../utils/i18n';
 
 export function askPassphrase(app: App, mode: 'unlock' | 'set'): Promise<string | null> {
@@ -18,14 +19,14 @@ class PassphraseModal extends Modal {
     });
 
     const inp = contentEl.createEl('input', { type: 'password' });
-    inp.style.width = '100%'; inp.style.padding = '8px'; inp.style.fontSize = '14px';
+    setStyle(inp, { width: '100%' }); setStyle(inp, { padding: '8px' }); setStyle(inp, { fontSize: '14px' });
     inp.placeholder = t('pp_placeholder');
     inp.focus();
 
     let confirm: HTMLInputElement | undefined;
     if (this.mode === 'set') {
       confirm = contentEl.createEl('input', { type: 'password' });
-      confirm.style.width = '100%'; confirm.style.padding = '8px'; confirm.style.fontSize = '14px'; confirm.style.marginTop = '8px';
+      setStyle(confirm, { width: '100%' }); setStyle(confirm, { padding: '8px' }); setStyle(confirm, { fontSize: '14px' }); setStyle(confirm, { marginTop: '8px' });
       confirm.placeholder = t('pp_confirm');
     }
 

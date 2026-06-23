@@ -163,30 +163,20 @@ export async function fetchCatalog(url: string): Promise<McpEntry[]> {
   if (catalogUrl.protocol !== 'https:') {
     throw new Error('Catalog URLs must be https:// (refusing ' + catalogUrl.protocol + ').');
   }
-  // Lazy import obsidian's requestUrl to avoid hard dep in this module
   let text: string;
   // obsidian.requestUrl does NOT honor AbortController — `signal` is silently
   // ignored. We get timeout behavior via Promise.race instead.
   const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> => Promise.race([
     p,
-    new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`timeout after ${ms}ms`)), ms)),
+    new Promise<T>((_, rej) => window.setTimeout(() => rej(new Error(`timeout after ${ms}ms`)), ms)),
   ]);
   try {
     const obs = await import('obsidian');
     const r = await withTimeout(obs.requestUrl({ url, method: 'GET', throw: false }), 8000);
     if (r.status >= 400) throw new Error(`HTTP ${r.status}`);
     text = r.text;
-  } catch (eRequest) {
-    // Fallback: plain fetch (likely fails on CORS for cross-origin, but works
-    // for raw.githubusercontent.com / gist.github.com). fetch DOES honor
-    // AbortController so the timer pattern actually works here.
-    const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 8000);
-    try {
-      const r = await fetch(url, { signal: ctl.signal });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      text = await r.text();
-    } finally { clearTimeout(t); }
+  } catch (e: any) {
+    throw new Error(e?.message ?? String(e));
   }
   let json: unknown;
   try { json = JSON.parse(text); }

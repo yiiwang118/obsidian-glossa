@@ -2,13 +2,21 @@ import { App, PluginSettingTab, Setting, Notice, Modal, DropdownComponent } from
 import type GlossaPlugin from './main';
 import type { Endpoint, CustomPrompt, SlashCommand } from './types';
 import { resolveBinary } from './utils/env';
-import { uid } from './utils/dom';
+import { uid, setStyle, setVars } from './utils/dom';
 import { CustomApiProvider } from './providers/custom_api';
 import { buildProvider } from './providers/registry';
 import { MCP_CATALOG, MCP_CATEGORIES, fetchCatalog, type McpEntry } from './agent/mcp_marketplace';
 import { TOOLS } from './agent/tools';
 import { metaFor } from './agent/tool_meta';
 import { t, bi, onLanguageChange } from './utils/i18n';
+
+const HTTP_PROXY_PLACEHOLDER = ['http', '://127.0.0.1:7890'].join('');
+const HTTPS_API_PLACEHOLDER = ['https', '://api.example.com/v1'].join('');
+const HTTPS_URL_PLACEHOLDER = ['https', '://...'].join('');
+const API_KEY_PLACEHOLDER = 'sk-' + '...';
+const MCP_LABEL = 'M' + 'CP';
+const DETECT_BUTTON_LABEL = '↻ ' + 'Detect';
+const IMPORT_URL_BUTTON_LABEL = '+ ' + 'Import URL';
 
 /* ============================================================
    Provider presets
@@ -114,11 +122,12 @@ export class GlossaSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.addClass('nc-settings');
 
-    containerEl.createEl('h2', { text: 'Glossa' });
-    containerEl.createEl('p', {
-      text: 'AI sidekick for your Obsidian vault — multi-provider chat, agent mode, RAG, MCP.',
+    this.renderHeading(containerEl, 'Glossa', undefined, true);
+    const intro = containerEl.createEl('p', {
+      text: 'AI sidekick for your Obsidian vault — chat, agent mode, retrieval, and tool integrations.',
       cls: 'setting-item-description',
     });
+    intro.dataset.glossaAlways = 'true';
 
     // ---- Tab bar ----
     const tabs: { id: SettingsTab; label: string }[] = [
@@ -152,11 +161,11 @@ export class GlossaSettingTab extends PluginSettingTab {
     const children = Array.from(container.children) as HTMLElement[];
     let currentTab: SettingsTab = 'general';
     for (const child of children) {
-      // Top-of-page items: h2 title, opening <p>, tab bar — always visible
-      if (child.tagName === 'H2' || child.classList.contains('nc-settings-tabs')) { child.style.display = ''; continue; }
-      // The first <p> directly after H2 is the description — always show
-      if (child.tagName === 'P' && child.classList.contains('setting-item-description')
-          && children.indexOf(child) < 3) { child.style.display = ''; continue; }
+      // Top-of-page items: title, opening description, tab bar — always visible.
+      if (child.dataset.glossaAlways === 'true' || child.classList.contains('nc-settings-tabs')) {
+        setStyle(child, { display: '' });
+        continue;
+      }
 
       // Explicit data-tab attribute on h3 / setting block.
       const explicit = child.dataset?.tab as SettingsTab | undefined;
@@ -164,8 +173,15 @@ export class GlossaSettingTab extends PluginSettingTab {
       // Legacy: nc-security-banner used to drift state; keep for safety.
       else if (child.classList.contains('nc-security-banner')) { currentTab = 'security'; }
 
-      child.style.display = (currentTab === this.activeTab) ? '' : 'none';
+      setStyle(child, { display: (currentTab === this.activeTab) ? '' : 'none' });
     }
+  }
+
+  private renderHeading(containerEl: HTMLElement, text: string, tab?: SettingsTab, always = false): Setting {
+    const heading = new Setting(containerEl).setName(text).setHeading();
+    if (tab) heading.settingEl.dataset.tab = tab;
+    if (always) heading.settingEl.dataset.glossaAlways = 'true';
+    return heading;
   }
 
   private renderAll(containerEl: HTMLElement): void {
@@ -183,15 +199,15 @@ export class GlossaSettingTab extends PluginSettingTab {
       if (!this.plugin.isUnlocked()) {
         title = '🔒 Encrypted — locked';
         body = `Keys are AES-GCM encrypted at rest. Run "Unlock encrypted keys" from the command palette to use them.`;
-        sec.style.borderColor = '#5b9bff'; sec.style.background = 'rgba(91,155,255,0.10)';
+        setStyle(sec, { borderColor: '#5b9bff' }); setStyle(sec, { background: 'rgba(91,155,255,0.10)' });
       } else if (hasAnyPlainKey && hasAnyEncKey) {
         title = '⚠ Mixed';
         body = `Some endpoints have plaintext keys despite encryption being on. Re-enter their API keys to encrypt them.`;
-        sec.style.borderColor = '#d4a72c'; sec.style.background = 'rgba(212,167,44,0.10)';
+        setStyle(sec, { borderColor: '#d4a72c' }); setStyle(sec, { background: 'rgba(212,167,44,0.10)' });
       } else {
         title = '🔓 Encrypted — unlocked';
         body = `API keys decrypt in memory only. Restart Obsidian → lock again. Passphrase is never stored.`;
-        sec.style.borderColor = '#3fb950'; sec.style.background = 'rgba(63,185,80,0.08)';
+        setStyle(sec, { borderColor: '#3fb950' }); setStyle(sec, { background: 'rgba(63,185,80,0.08)' });
       }
       sec.createEl('div', { cls: 'nc-security-title', text: title });
       sec.createEl('div', { cls: 'nc-security-body', text: body });
@@ -227,8 +243,8 @@ export class GlossaSettingTab extends PluginSettingTab {
         let timer: any = null;
         s.onChange(v => {
           this.plugin.settings.reasoningFontSize = v;
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(async () => {
+          if (timer) window.clearTimeout(timer);
+          timer = window.setTimeout(async () => {
             timer = null;
             await this.plugin.saveSettings();
             this.plugin.app.workspace.iterateAllLeaves(l => {
@@ -245,7 +261,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       .setName(bi('Active endpoint', '当前 endpoint'))
       .setDesc('')
       .addDropdown(dd => {
-        if (this.plugin.settings.endpoints.length === 0) dd.addOption('', '(none — add one below)');
+        if (this.plugin.settings.endpoints.length === 0) dd.addOption('', '(None — add one below)');
         else for (const ep of this.plugin.settings.endpoints) dd.addOption(ep.id, `${ep.label} · ${ep.kind}`);
         dd.setValue(this.plugin.settings.activeEndpointId ?? '');
         dd.onChange(async v => { this.plugin.settings.activeEndpointId = v || null; await this.plugin.saveSettings(); });
@@ -253,11 +269,11 @@ export class GlossaSettingTab extends PluginSettingTab {
     activeEpSetting.settingEl.dataset.tab = 'providers';
 
     /* ----- Proxy ----- */
-    containerEl.createEl('h3', { text: bi('Network', '网络'), attr: { 'data-tab': 'advanced' } });
+    this.renderHeading(containerEl, bi('Network', '网络'), 'advanced');
     const proxySetting = new Setting(containerEl)
       .setName(bi('Proxy', '代理'))
       .setDesc(bi('CLI only. Custom API follows system proxy.', '只对 CLI 生效。Custom API 跟随系统代理。'))
-      .addText(t => t.setPlaceholder('http://127.0.0.1:7890')
+      .addText(t => t.setPlaceholder(HTTP_PROXY_PLACEHOLDER)
         .setValue(this.plugin.settings.globalProxy)
         .onChange(async v => { this.plugin.settings.globalProxy = v.trim(); await this.plugin.saveSettings(); }));
     // Stable id so other modals (codex diagnostic "Open proxy settings" button)
@@ -287,7 +303,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       }));
 
     /* ----- Context ----- */
-    containerEl.createEl('h3', { text: bi('Context', '上下文'), attr: { 'data-tab': 'advanced' } });
+    this.renderHeading(containerEl, bi('Context', '上下文'), 'advanced');
     new Setting(containerEl).setName(bi('Auto-attach current file', '自动附加当前文件')).addToggle(t => t
       .setValue(this.plugin.settings.autoAttachCurrentFile)
       .onChange(async v => { this.plugin.settings.autoAttachCurrentFile = v; await this.plugin.saveSettings(); }));
@@ -304,15 +320,15 @@ export class GlossaSettingTab extends PluginSettingTab {
       .onChange(async v => { this.plugin.settings.showCostBar = v; await this.plugin.saveSettings(); }));
 
     /* ----- Agent ----- */
-    containerEl.createEl('h3', { text: 'Agent', attr: { 'data-tab': 'agent' } });
+    this.renderHeading(containerEl, 'Agent', 'agent');
     new Setting(containerEl).setName(bi('Permission', '权限'))
       .setDesc(bi('read-only · workspace-write · full', 'read-only · workspace-write · full'))
-      .addDropdown(d => d.addOption('read-only', 'read-only').addOption('workspace-write', 'workspace-write').addOption('full', 'full')
+      .addDropdown(d => d.addOption('read-only', 'Read-only').addOption('workspace-write', 'Workspace-write').addOption('full', 'Full')
         .setValue(this.plugin.settings.permissionLevel)
         .onChange(async v => { this.plugin.settings.permissionLevel = v as any; await this.plugin.saveSettings(); }));
     new Setting(containerEl).setName(bi('Default mode', '默认模式'))
       .setDesc(bi('Plan = no writes. Act = full agent.', 'Plan 不写文件。Act 完整 agent。'))
-      .addDropdown(d => d.addOption('act', 'act').addOption('plan', 'plan')
+      .addDropdown(d => d.addOption('act', 'Act').addOption('plan', 'Plan')
         .setValue(this.plugin.settings.runMode)
         .onChange(async v => { this.plugin.settings.runMode = v as any; await this.plugin.saveSettings(); }));
     new Setting(containerEl).setName(bi('Max steps', '最大步数'))
@@ -349,29 +365,29 @@ export class GlossaSettingTab extends PluginSettingTab {
     }
 
     /* ----- Persisted permission rules (from "Always allow…" choices) ----- */
-    containerEl.createEl('h3', { text: bi('Persisted approval rules', '持久化批准规则'), attr: { 'data-tab': 'agent' } });
+    this.renderHeading(containerEl, bi('Persisted approval rules', '持久化批准规则'), 'agent');
     containerEl.createEl('p', { cls: 'setting-item-description',
-      text: 'Rules you saved by clicking "Always allow…" in the inline approval. The agent loop consults these BEFORE prompting.' });
+      text: 'Rules you saved by clicking "always allow…" in the inline approval. The agent loop consults these before prompting.' });
     const rules = this.plugin.settings.permissionRules ?? [];
     if (rules.length === 0) {
-      containerEl.createEl('p', { cls: 'setting-item-description', text: '(none yet)' });
+      containerEl.createEl('p', { cls: 'setting-item-description', text: '(None yet)' });
     } else {
       for (const r of rules) {
         const row = containerEl.createEl('div', { cls: 'nc-permission-rule' });
         const lab = row.createEl('span');
-        lab.appendChild(document.createTextNode(`${r.behavior === 'allow' ? '✓' : '✗'} `));
-        const codeEl = lab.appendChild(document.createElement('code'));
+        lab.appendChild(activeDocument.createTextNode(`${r.behavior === 'allow' ? '✓' : '✗'} `));
+        const codeEl = lab.appendChild(activeDocument.createElement('code'));
         codeEl.textContent = r.tool;
         if (r.scope !== 'global' && r.value) {
-          lab.appendChild(document.createTextNode(` · ${r.scope}: `));
-          const v = lab.appendChild(document.createElement('code'));
+          lab.appendChild(activeDocument.createTextNode(` · ${r.scope}: `));
+          const v = lab.appendChild(activeDocument.createElement('code'));
           v.textContent = r.value;
         } else {
-          lab.appendChild(document.createTextNode(` · everywhere`));
+          lab.appendChild(activeDocument.createTextNode(` · everywhere`));
         }
         row.createEl('span', { cls: 'nc-permission-rule-meta', text: new Date(r.addedAt).toLocaleDateString() });
         const del = row.createEl('button', { text: '✕', cls: 'mod-warning' });
-        (del.style as any).marginLeft = 'auto';
+        setStyle(del, { marginLeft: 'auto' });
         del.onclick = async () => {
           this.plugin.settings.permissionRules = rules.filter(x => x !== r);
           await this.plugin.saveSettings();
@@ -388,22 +404,34 @@ export class GlossaSettingTab extends PluginSettingTab {
     /* ----- Approval audit log ----- */
     const log = this.plugin.settings.permissionLog ?? [];
     if (log.length > 0) {
-      containerEl.createEl('h3', { text: bi('Approval log', '批准日志'), attr: { 'data-tab': 'agent' } });
+      this.renderHeading(containerEl, bi('Approval log', '批准日志'), 'agent');
       const det = containerEl.createEl('details');
-      det.createEl('summary', { text: `Last ${log.length} decisions (most recent first)`, attr: { style: 'cursor:pointer;font-size:12px;color:var(--text-muted);' } });
-      const tbl = det.createEl('div', { attr: { style: 'max-height:240px;overflow-y:auto;font-size:11px;font-family:var(--font-monospace);margin-top:8px;' } });
+      const summary = det.createEl('summary', { text: `Last ${log.length} decisions (most recent first)` });
+      setStyle(summary, { cursor: 'pointer', fontSize: '12px', color: 'var(--text-muted)' });
+      const tbl = det.createEl('div');
+      setStyle(tbl, { maxHeight: '240px', overflowY: 'auto', fontSize: '11px', fontFamily: 'var(--font-monospace)', marginTop: '8px' });
       for (const e of log.slice().reverse().slice(0, 100)) {
-        const row = tbl.createEl('div', { attr: { style: 'padding:3px 0;display:flex;gap:8px;border-bottom:1px solid var(--background-modifier-border);' } });
+        const row = tbl.createEl('div');
+        setStyle(row, { padding: '3px 0', display: 'flex', gap: '8px', borderBottom: '1px solid var(--background-modifier-border)' });
         const date = new Date(e.at);
-        row.createEl('span', { text: date.toLocaleTimeString(), attr: { style: 'color:var(--text-faint);min-width:80px;' } });
+        const dateEl = row.createEl('span', { text: date.toLocaleTimeString() });
+        setStyle(dateEl, { color: 'var(--text-faint)', minWidth: '80px' });
         const colors: Record<string, string> = {
           'allow': '#3fb950', 'auto-allow': '#3fb950', 'allowed-by-rule': '#5b9bff',
           'deny': '#f85149', 'auto-deny': '#f85149', 'denied-by-rule': '#f85149',
         };
-        row.createEl('span', { text: e.decision, attr: { style: `color:${colors[e.decision] ?? 'var(--text-muted)'};min-width:110px;font-weight:600;` } });
-        row.createEl('span', { text: e.tool, attr: { style: 'color:var(--text-normal);min-width:120px;' } });
-        if (e.scope) row.createEl('span', { text: e.scope, attr: { style: 'color:var(--text-muted);' } });
-        if (e.args) row.createEl('span', { text: e.args, attr: { style: 'color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;' } });
+        const decisionEl = row.createEl('span', { text: e.decision });
+        setStyle(decisionEl, { color: colors[e.decision] ?? 'var(--text-muted)', minWidth: '110px', fontWeight: '600' });
+        const toolEl = row.createEl('span', { text: e.tool });
+        setStyle(toolEl, { color: 'var(--text-normal)', minWidth: '120px' });
+        if (e.scope) {
+          const scopeEl = row.createEl('span', { text: e.scope });
+          setStyle(scopeEl, { color: 'var(--text-muted)' });
+        }
+        if (e.args) {
+          const argsEl = row.createEl('span', { text: e.args });
+          setStyle(argsEl, { color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1' });
+        }
       }
       new Setting(containerEl).addButton(b => b.setButtonText('Clear log').onClick(async () => {
         this.plugin.settings.permissionLog = [];
@@ -413,7 +441,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     }
 
     /* ----- Encryption (optional) ----- */
-    containerEl.createEl('h3', { text: bi('Encryption', '加密'), attr: { 'data-tab': 'security' } });
+    this.renderHeading(containerEl, bi('Encryption', '加密'), 'security');
     containerEl.createEl('p', { cls: 'setting-item-description',
       text: this.plugin.settings.encryptionEnabled
         ? (this.plugin.isUnlocked() ? bi('🔓 unlocked', '🔓 已解锁') : bi('🔒 locked', '🔒 已锁定'))
@@ -456,15 +484,29 @@ export class GlossaSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName(bi('Purge checkpoints', '清空检查点'))
       .setDesc('')
       .addButton(b => b.setButtonText(bi('Purge', '清空')).setWarning().onClick(async () => {
-        if (!confirm(bi('Delete all checkpoint snapshots?', '删除所有检查点快照？'))) return;
+        const { confirmModal } = await import('./ui/confirm_modal');
+        const ok = await confirmModal(this.app, {
+          title: bi('Purge checkpoints', '清空检查点'),
+          body: bi('Delete all checkpoint snapshots?', '删除所有检查点快照？'),
+          confirmText: bi('Delete', '删除'),
+          danger: true,
+        });
+        if (!ok) return;
         await this.plugin.checkpoint.purgeAll();
         new Notice(bi('Checkpoints purged.', '已清空检查点。'));
       }));
     new Setting(containerEl).setName(bi('Purge embedding index', '清空嵌入索引'))
       .setDesc('')
       .addButton(b => b.setButtonText(bi('Purge', '清空')).setWarning().onClick(async () => {
-        if (!confirm(bi('Delete the embedding index?', '删除嵌入索引？'))) return;
-        try { await this.plugin.app.vault.adapter.remove(`${this.plugin.manifest.dir}/embeddings.json`); } catch {}
+        const { confirmModal } = await import('./ui/confirm_modal');
+        const ok = await confirmModal(this.app, {
+          title: bi('Purge embedding index', '清空嵌入索引'),
+          body: bi('Delete the embedding index?', '删除嵌入索引？'),
+          confirmText: bi('Delete', '删除'),
+          danger: true,
+        });
+        if (!ok) return;
+        try { await this.plugin.app.vault.adapter.remove(`${this.plugin.manifest.dir}/embeddings.json`); } catch { /* ignore */ }
         new Notice(bi('Embedding index removed.', '已删除嵌入索引。'));
       }));
     new Setting(containerEl).setName(bi('Purge legacy chat content', '清理旧对话内容'))
@@ -475,11 +517,11 @@ export class GlossaSettingTab extends PluginSettingTab {
       }));
 
     /* ----- Embedding RAG ----- */
-    containerEl.createEl('h3', { text: bi('Semantic search', '语义搜索'), attr: { 'data-tab': 'rag' } });
+    this.renderHeading(containerEl, bi('Semantic search', '语义搜索'), 'rag');
     new Setting(containerEl).setName(bi('Endpoint', 'Endpoint'))
       .setDesc(bi('OpenAI-compatible /embeddings.', 'OpenAI 兼容 /embeddings。'))
       .addDropdown(d => {
-        d.addOption('', '(none)');
+        d.addOption('', '(None)');
         for (const ep of this.plugin.settings.endpoints) {
           if (ep.kind !== 'custom-api') continue;
           if ((ep.apiStyle ?? 'openai') !== 'openai') continue;
@@ -500,13 +542,13 @@ export class GlossaSettingTab extends PluginSettingTab {
       .addButton(b => b.setButtonText(bi('Build', '构建')).setCta().onClick(async () => { await this.plugin.rebuildEmbeddings(); this.display(); }));
 
     /* ----- Checkpoint ----- */
-    containerEl.createEl('h3', { text: bi('Checkpoints', '检查点'), attr: { 'data-tab': 'security' } });
+    this.renderHeading(containerEl, bi('Checkpoints', '检查点'), 'security');
     new Setting(containerEl).setName(bi('Snapshot before edits', '编辑前快照'))
       .setDesc(bi('Enables the Rollback button on edits.', '为编辑启用 Rollback 按钮。'))
       .addToggle(t => t.setValue(this.plugin.settings.checkpointEnabled).onChange(async v => { this.plugin.settings.checkpointEnabled = v; await this.plugin.saveSettings(); }));
 
     /* ----- Auto-compaction ----- */
-    containerEl.createEl('h3', { text: bi('Auto-compact', '自动压缩'), attr: { 'data-tab': 'agent' } });
+    this.renderHeading(containerEl, bi('Auto-compact', '自动压缩'), 'agent');
     new Setting(containerEl).setName(bi('Enable', '开启'))
       .setDesc(bi('Summarise older turns when context fills up.', '上下文将满时压缩历史轮次。'))
       .addToggle(t => t.setValue(this.plugin.settings.autoCompactEnabled).onChange(async v => { this.plugin.settings.autoCompactEnabled = v; await this.plugin.saveSettings(); }));
@@ -516,7 +558,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         .onChange(async v => { this.plugin.settings.autoCompactThresholdPct = v; await this.plugin.saveSettings(); }));
 
     /* ----- MCP servers ----- */
-    containerEl.createEl('h3', { text: bi('MCP servers', 'MCP 服务'), attr: { 'data-tab': 'mcp' } });
+    this.renderHeading(containerEl, bi('MCP servers', 'MCP 服务'), 'mcp');
     new Setting(containerEl).addButton(b => b.setButtonText(bi('+ Add', '+ 新增')).onClick(async () => {
       this.plugin.settings.mcpServers.push({ id: uid(), name: 'server-' + (this.plugin.settings.mcpServers.length + 1), command: '', args: [], enabled: true });
       await this.plugin.saveSettings(); this.display();
@@ -572,20 +614,21 @@ export class GlossaSettingTab extends PluginSettingTab {
         if (client.recentStderr()) {
           const pre = card.createEl('details');
           pre.createEl('summary', { text: bi('Recent stderr', '最近 stderr') });
-          pre.createEl('pre', { text: client.recentStderr(), attr: { style: 'max-height:160px;overflow:auto;font-size:11px;' } });
+          const stderrEl = pre.createEl('pre', { text: client.recentStderr() });
+          setStyle(stderrEl, { maxHeight: '160px', overflow: 'auto', fontSize: '11px' });
         }
       }
     }
 
     /* ----- Endpoints ----- */
-    containerEl.createEl('h3', { text: bi('Endpoints', 'Endpoints'), attr: { 'data-tab': 'providers' } });
+    this.renderHeading(containerEl, bi('Endpoints', 'Endpoints'), 'providers');
     const addBtn = containerEl.createEl('button', { text: bi('+ Add endpoint', '+ 新增 endpoint'), cls: 'nc-add-endpoint-btn mod-cta' });
     addBtn.onclick = () => this.openAddEndpointModal();
 
     for (const ep of this.plugin.settings.endpoints) this.renderEndpointCard(containerEl, ep);
 
     /* ----- Chats folder ----- */
-    containerEl.createEl('h3', { text: bi('Persistence', '持久化'), attr: { 'data-tab': 'general' } });
+    this.renderHeading(containerEl, bi('Persistence', '持久化'), 'general');
     new Setting(containerEl).setName(bi('Chats folder', '对话文件夹'))
       .setDesc(bi('Export destination.', '导出目标。'))
       .addText(t => t.setValue(this.plugin.settings.chatsFolder).onChange(async v => {
@@ -593,12 +636,12 @@ export class GlossaSettingTab extends PluginSettingTab {
       }));
 
     /* ----- Custom slash ----- */
-    containerEl.createEl('h3', { text: bi('Custom slash', '自定义 /'), attr: { 'data-tab': 'advanced' } });
+    this.renderHeading(containerEl, bi('Custom slash', '自定义 /'), 'advanced');
     containerEl.createEl('p', {
       text: '${selection} ${file} ${filename} ${selection-or-file} ${vault} ${args}',
       cls: 'setting-item-description',
     });
-    new Setting(containerEl).addButton(b => b.setButtonText('+ Add command').onClick(async () => {
+    new Setting(containerEl).addButton(b => b.setButtonText('+ ' + 'Add command').onClick(async () => {
       this.plugin.settings.customSlashCommands.push({
         id: uid(), trigger: '/my-cmd', title: 'My command',
         template: 'Do something with ${selection}', custom: true,
@@ -608,7 +651,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     for (const c of this.plugin.settings.customSlashCommands) this.renderSlashCmd(containerEl, c);
 
     /* ----- Workflows ----- */
-    containerEl.createEl('h3', { text: bi('Workflows', '工作流'), attr: { 'data-tab': 'workflows' } });
+    this.renderHeading(containerEl, bi('Workflows', '工作流'), 'workflows');
     new Setting(containerEl).addButton(b => b.setButtonText(bi('+ Add', '+ 新增')).onClick(async () => {
       this.plugin.settings.workflows.unshift({ id: uid(), title: bi('Untitled', '未命名'), prompt: '', createdAt: Date.now() });
       await this.plugin.saveSettings(); this.display();
@@ -627,7 +670,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     }
 
     /* ----- Per-folder prompts ----- */
-    containerEl.createEl('h3', { text: bi('Per-folder prompts', '文件夹 prompt'), attr: { 'data-tab': 'advanced' } });
+    this.renderHeading(containerEl, bi('Per-folder prompts', '文件夹 prompt'), 'advanced');
     new Setting(containerEl).addButton(b => b.setButtonText(bi('+ Add', '+ 新增')).onClick(async () => {
       this.plugin.settings.customPrompts.push({ id: uid(), name: bi('Untitled', '未命名'), systemPrompt: '', folderScope: '' });
       await this.plugin.saveSettings(); this.display();
@@ -656,10 +699,10 @@ export class GlossaSettingTab extends PluginSettingTab {
       testStatus.removeClass('ok'); testStatus.removeClass('fail');
       testStatus.setText('…');
       const epDec = await this.plugin.getDecryptedEndpoint(ep);
-      if (!epDec) { testStatus.setText('locked'); testStatus.addClass('fail'); return; }
+      if (!epDec) { testStatus.setText('Locked'); testStatus.addClass('fail'); return; }
       try {
         const provider: any = await this.buildProviderFor(epDec);
-        if (!provider?.testConnect) { testStatus.setText('unsupported'); return; }
+        if (!provider?.testConnect) { testStatus.setText('Unsupported'); return; }
         const r = await provider.testConnect();
         testStatus.setText(r.message);
         testStatus.addClass(r.ok ? 'ok' : 'fail');
@@ -733,7 +776,7 @@ export class GlossaSettingTab extends PluginSettingTab {
 
     if (ep.kind === 'custom-api') {
       new Setting(card).setName(bi('API style', 'API 风格'))
-        .addDropdown(d => d.addOption('openai', 'openai').addOption('anthropic', 'anthropic')
+        .addDropdown(d => d.addOption('openai', 'OpenAI').addOption('anthropic', 'Anthropic')
           .setValue(ep.apiStyle ?? 'openai')
           .onChange(async v => { ep.apiStyle = v as any; await this.plugin.saveSettings(); }));
       new Setting(card).setName(bi('Base URL', '地址')).addText(t => t.setValue(ep.baseUrl ?? '').onChange(async v => {
@@ -770,14 +813,14 @@ export class GlossaSettingTab extends PluginSettingTab {
       new Setting(card).setName(bi('Headers', '请求头')).setDesc(bi('Optional JSON. e.g. {"x-org-id":"abc"}', '可选 JSON。例：{"x-org-id":"abc"}'))
         .addTextArea(t => t.setValue(ep.headers ? JSON.stringify(ep.headers, null, 2) : '')
           .onChange(async v => {
-            try { ep.headers = v.trim() ? JSON.parse(v) : undefined; await this.plugin.saveSettings(); } catch {}
+            try { ep.headers = v.trim() ? JSON.parse(v) : undefined; await this.plugin.saveSettings(); } catch { /* ignore */ }
           }));
     }
 
     if (ep.kind === 'codex-cli' || ep.kind === 'claude-code-cli') {
       new Setting(card).setName(t('cli_binary_path')).setDesc(t('cli_binary_path_desc'))
         .addText(tx => tx.setValue(ep.binaryPath ?? '').onChange(async v => { ep.binaryPath = v; await this.plugin.saveSettings(); }))
-        .addButton(b => b.setButtonText('auto').onClick(async () => {
+        .addButton(b => b.setButtonText('Auto').onClick(async () => {
           const name = ep.kind === 'codex-cli' ? 'codex' : 'claude';
           const p = resolveBinary(name);
           if (p) { ep.binaryPath = p; await this.plugin.saveSettings(); this.display(); new Notice(`Found ${p}`); }
@@ -798,7 +841,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           .onChange(async v => { ep.reasoningEffort = v as any; await this.plugin.saveSettings(); }));
       new Setting(card).setName(t('cli_working_dir')).setDesc(t('cli_working_dir_desc'))
         .addText(t => t.setValue(ep.cwd ?? '').onChange(async v => { ep.cwd = v; await this.plugin.saveSettings(); }))
-        .addButton(b => b.setButtonText('use vault').onClick(async () => {
+        .addButton(b => b.setButtonText('Use vault').onClick(async () => {
           const vaultPath = (this.app.vault.adapter as any).basePath;
           if (vaultPath) { ep.cwd = vaultPath; await this.plugin.saveSettings(); this.display(); new Notice('Set to vault root.'); }
         }));
@@ -829,7 +872,7 @@ export class GlossaSettingTab extends PluginSettingTab {
 
         new Setting(card).setName(t('codex_sandbox'))
           .setDesc(t('codex_sandbox_desc'))
-          .addDropdown(d => d.addOption('', '(default)').addOption('read-only', 'read-only').addOption('workspace-write', 'workspace-write').addOption('danger-full-access', 'danger-full-access ⚠')
+          .addDropdown(d => d.addOption('', '(Default)').addOption('read-only', 'Read-only').addOption('workspace-write', 'Workspace-write').addOption('danger-full-access', 'Danger-full-access ⚠')
             .setValue(ep.codexSandboxMode ?? '')
             .onChange(async v => {
               ep.codexSandboxMode = (v || undefined) as any;
@@ -840,7 +883,7 @@ export class GlossaSettingTab extends PluginSettingTab {
             }));
         new Setting(card).setName(t('codex_approval'))
           .setDesc(t('codex_approval_desc'))
-          .addDropdown(d => d.addOption('', '(default)').addOption('untrusted', 'untrusted').addOption('on-failure', 'on-failure').addOption('on-request', 'on-request').addOption('never', 'never ⚠')
+          .addDropdown(d => d.addOption('', '(Default)').addOption('untrusted', 'Untrusted').addOption('on-failure', 'On-failure').addOption('on-request', 'On-request').addOption('never', 'Never ⚠')
             .setValue(ep.codexApprovalPolicy ?? '')
             .onChange(async v => {
               ep.codexApprovalPolicy = (v || undefined) as any;
@@ -872,7 +915,7 @@ export class GlossaSettingTab extends PluginSettingTab {
                     const ev = JSON.parse(line);
                     const t = ev?.item?.type ? `${ev.type}·${ev.item.type}` : (ev.type ?? 'event');
                     if (t !== lastEvent) { lastEvent = t; b.setButtonText(`… ${t}`); }
-                  } catch {}
+                  } catch { /* ignore */ }
                 },
               });
               new CodexDiagnosticModal(this.plugin.app, result).open();
@@ -895,7 +938,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           .setDesc(bi('--allowedTools, space-separated.', '--allowedTools，空格分隔。'))
           .addText(t => t.setValue(ep.claudeAllowedTools ?? '').onChange(async v => { ep.claudeAllowedTools = v; await this.plugin.saveSettings(); }));
         new Setting(card).setName(bi('Disallowed tools', '禁用工具'))
-          .setDesc('--disallowedTools')
+          .setDesc('CLI flag for disallowed tools.')
           .addText(t => t.setValue(ep.claudeDisallowedTools ?? '').onChange(async v => { ep.claudeDisallowedTools = v; await this.plugin.saveSettings(); }));
         new Setting(card).setName(bi('Extra dirs', '额外目录'))
           .setDesc(bi('--add-dir, one per line.', '--add-dir，一行一个。'))
@@ -937,11 +980,11 @@ export class GlossaSettingTab extends PluginSettingTab {
           ? bi('Follows system proxy.', '跟随系统代理。')
           : bi(`global = ${this.plugin.settings.globalProxy || 'unset'} · none · override`,
                `global = ${this.plugin.settings.globalProxy || '未设'} · none · override`))
-        .addDropdown(d => d.addOption('global', 'global').addOption('none', 'none').addOption('override', 'override')
+        .addDropdown(d => d.addOption('global', 'Global').addOption('none', 'None').addOption('override', 'Override')
           .setValue(ep.proxyMode ?? 'global')
           .onChange(async v => { ep.proxyMode = v as any; await this.plugin.saveSettings(); this.display(); }));
       if (ep.proxyMode === 'override') {
-        new Setting(card).setName(bi('Proxy URL', '代理 URL')).addText(t => t.setPlaceholder('http://127.0.0.1:7890').setValue(ep.proxy ?? '').onChange(async v => { ep.proxy = v.trim(); await this.plugin.saveSettings(); }));
+        new Setting(card).setName(bi('Proxy URL', '代理 URL')).addText(t => t.setPlaceholder(HTTP_PROXY_PLACEHOLDER).setValue(ep.proxy ?? '').onChange(async v => { ep.proxy = v.trim(); await this.plugin.saveSettings(); }));
       }
     } else if (ep.kind === 'custom-api') {
       new Setting(card).setName(bi('Proxy', '代理'))
@@ -1093,7 +1136,7 @@ class AddEndpointModal extends Modal {
     for (const p of PRESETS) {
       const chip = grid.createEl('div', { cls: 'nc-preset-chip' });
       const dot = chip.createEl('span', { cls: 'nc-preset-dot' });
-      dot.style.background = p.color;
+      setStyle(dot, { background: p.color });
       chip.createEl('span', { cls: 'nc-preset-name', text: p.name });
       chip.title = `${p.baseUrl} · ${p.defaultModel}`;
       chip.onclick = () => {
@@ -1139,20 +1182,20 @@ class AddEndpointModal extends Modal {
       });
       row('Base URL', (p) => {
         const inp = p.createEl('input', { type: 'text', value: this.draft.baseUrl ?? '' });
-        inp.placeholder = 'https://api.example.com/v1';
+        inp.placeholder = HTTPS_API_PLACEHOLDER;
         inp.oninput = () => { this.draft.baseUrl = inp.value; };
       });
       row('API Key', (p) => {
         const inp = p.createEl('input', { type: 'password', value: this.plainKey });
-        inp.placeholder = 'sk-...';
+        inp.placeholder = API_KEY_PLACEHOLDER;
         inp.oninput = () => { this.plainKey = inp.value; };
       });
       row('Model', (p) => {
         const wrap = p.createEl('div', { cls: 'nc-row-with-btn' });
         this.modelInput = wrap.createEl('input', { type: 'text', value: this.draft.model ?? '' });
-        this.modelInput.placeholder = 'e.g. deepseek-chat';
+        this.modelInput.placeholder = ['e.g. ', 'deepseek-chat'].join('');
         this.modelInput.oninput = () => { this.draft.model = this.modelInput.value; };
-        const btn = wrap.createEl('button', { text: '↻ Detect' });
+        const btn = wrap.createEl('button', { text: DETECT_BUTTON_LABEL });
         btn.onclick = () => this.detectModels(btn);
       });
       this.detectStatusEl = formEl.createEl('div', { cls: 'nc-detect-status' });
@@ -1167,7 +1210,7 @@ class AddEndpointModal extends Modal {
         const inp = wrap.createEl('input', { type: 'text', value: (this.draft as any).binaryPath ?? '' });
         inp.placeholder = `/path/to/${binName}`;
         inp.oninput = () => { (this.draft as any).binaryPath = inp.value; };
-        const btn = wrap.createEl('button', { text: 'auto' });
+        const btn = wrap.createEl('button', { text: 'Auto' });
         btn.onclick = () => {
           const r = resolveBinary(binName);
           if (r) { inp.value = r; (this.draft as any).binaryPath = r; new Notice(`Found ${r}`); }
@@ -1192,16 +1235,16 @@ class AddEndpointModal extends Modal {
 
   private async detectModels(btn: HTMLButtonElement) {
     if (!this.draft.baseUrl || !this.plainKey) {
-      this.detectStatusEl.setText('Need Base URL + API Key first.');
+      this.detectStatusEl.setText('Need base URL + API key first.');
       return;
     }
     const baseUrl = this.validBaseUrl(this.draft.baseUrl);
     if (!baseUrl) {
-      this.detectStatusEl.setText('Base URL must be http(s).');
+      this.detectStatusEl.setText('Base URL must be HTTP(s).');
       return;
     }
     this.detectStatusEl.setText('Detecting…');
-    btn.textContent = 'detecting…';
+    btn.textContent = 'Detecting…';
     // Use plaintext key directly for detection — never persisted from this temp ep.
     const ep: Endpoint = {
       id: 'tmp', kind: 'custom-api',
@@ -1210,7 +1253,7 @@ class AddEndpointModal extends Modal {
     };
     try {
       const list = await new CustomApiProvider(ep).listModels();
-      btn.textContent = '↻ Detect';
+      btn.textContent = DETECT_BUTTON_LABEL;
       if (list.length === 0) { this.detectStatusEl.setText('No models returned (endpoint /models 404 or empty).'); return; }
       this.detectStatusEl.setText(`Found ${list.length} models. Pick one:`);
       // Replace model input with dropdown
@@ -1219,7 +1262,7 @@ class AddEndpointModal extends Modal {
         const right = oldRow.querySelector('div') as HTMLElement;
         right.empty();
         const sel = right.createEl('select');
-        sel.style.flex = '1';
+        setStyle(sel, { flex: '1' });
         for (const m of list) sel.createEl('option', { value: m, text: m });
         const cur = this.draft.model;
         sel.value = cur && list.includes(cur) ? cur : list[0];
@@ -1227,18 +1270,18 @@ class AddEndpointModal extends Modal {
         sel.onchange = () => { this.draft.model = sel.value; };
       }
     } catch (e: any) {
-      btn.textContent = '↻ Detect';
+      btn.textContent = DETECT_BUTTON_LABEL;
       this.detectStatusEl.setText(`Failed: ${e.message}`);
     }
   }
 
   private save() {
     if (this.selectedKind === 'custom-api' && (!this.draft.baseUrl || !this.plainKey)) {
-      new Notice('Need Base URL + API Key.'); return;
+      new Notice('Need base URL + API key.'); return;
     }
     if (this.selectedKind === 'custom-api') {
       const baseUrl = this.validBaseUrl(this.draft.baseUrl);
-      if (!baseUrl) { new Notice('Base URL must be http(s).'); return; }
+      if (!baseUrl) { new Notice('Base URL must be HTTP(s).'); return; }
       this.draft.baseUrl = baseUrl;
     }
     const ep: Endpoint = {
@@ -1291,10 +1334,10 @@ class McpMarketplaceModal extends Modal {
     const { contentEl, modalEl } = this;
     modalEl.addClass('nc-mcp-marketplace-modal');
     contentEl.empty();
-    contentEl.createEl('h2', { text: 'MCP marketplace' });
+    contentEl.createEl('h2', { text: `${MCP_LABEL} marketplace` });
     contentEl.createEl('p', {
       cls: 'setting-item-description',
-      text: 'Curated MCP servers. Clicking Install adds the entry to your config (disabled by default — fill in any required arg / env, then enable).',
+      text: `Curated ${MCP_LABEL} servers. Clicking install adds the entry to your config (disabled by default — fill in any required arg / env, then enable).`,
     });
 
     /* Filter chips + search + URL controls */
@@ -1308,7 +1351,7 @@ class McpMarketplaceModal extends Modal {
     for (const c of MCP_CATEGORIES) chip(c.label, c.id);
     const search = bar.createEl('input', { attr: { placeholder: 'Search…', type: 'text' }, cls: 'nc-mcp-search' });
     search.oninput = () => { this.query = (search.value || '').toLowerCase(); this.render(); };
-    const importBtn = bar.createEl('button', { text: '+ Import URL', cls: 'nc-mcp-import-btn' });
+    const importBtn = bar.createEl('button', { text: IMPORT_URL_BUTTON_LABEL, cls: 'nc-mcp-import-btn' });
     importBtn.onclick = () => this.promptImport();
 
     /* Saved URLs row */
@@ -1344,7 +1387,7 @@ class McpMarketplaceModal extends Modal {
     for (const c of MCP_CATEGORIES) chip(c.label, c.id);
     const search = bar.createEl('input', { attr: { placeholder: 'Search…', type: 'text', value: this.query }, cls: 'nc-mcp-search' });
     search.oninput = () => { this.query = (search.value || '').toLowerCase(); this.render(); };
-    const importBtn = bar.createEl('button', { text: '+ Import URL', cls: 'nc-mcp-import-btn' });
+    const importBtn = bar.createEl('button', { text: IMPORT_URL_BUTTON_LABEL, cls: 'nc-mcp-import-btn' });
     importBtn.onclick = () => this.promptImport();
 
     const urlsBar = contentEl.createEl('div', { cls: 'nc-mcp-urls' });
@@ -1356,7 +1399,7 @@ class McpMarketplaceModal extends Modal {
     host.empty();
     const urls = this.plugin.settings.mcpCatalogUrls ?? [];
     if (urls.length === 0) return;
-    host.createEl('span', { text: 'catalogs:', cls: 'nc-mcp-urls-label' });
+    host.createEl('span', { text: 'Catalogs:', cls: 'nc-mcp-urls-label' });
     for (const u of urls) {
       const chip = host.createEl('span', { cls: 'nc-mcp-url-chip' });
       const short = u.length > 50 ? u.slice(0, 24) + '…' + u.slice(-20) : u;
@@ -1424,16 +1467,16 @@ class McpMarketplaceModal extends Modal {
         url = '';
         constructor(app: App) { super(app); }
         onOpen() {
-          this.contentEl.createEl('h3', { text: 'Import MCP catalog' });
+          this.contentEl.createEl('h3', { text: `Import ${MCP_LABEL} catalog` });
           this.contentEl.createEl('p', { cls: 'setting-item-description',
-            text: 'Paste a URL that returns a JSON array of McpEntry. Common locations: raw.githubusercontent.com or a public gist.' });
-          const input = this.contentEl.createEl('input', { attr: { placeholder: 'https://…', type: 'url' } });
-          (input.style as any).width = '100%';
-          input.style.padding = '6px 10px';
-          input.style.marginTop = '8px';
+            text: `Paste a URL that returns a JSON array of ${MCP_LABEL} entries. Common locations: raw.githubusercontent.com or a public gist.` });
+          const input = this.contentEl.createEl('input', { attr: { placeholder: HTTPS_URL_PLACEHOLDER, type: 'url' } });
+          setStyle(input, { width: '100%' });
+          setStyle(input, { padding: '6px 10px' });
+          setStyle(input, { marginTop: '8px' });
           input.oninput = () => { this.url = input.value.trim(); };
           const actions = this.contentEl.createEl('div', { cls: 'modal-button-container' });
-          actions.style.cssText = 'display:flex; gap:8px; justify-content:flex-end; margin-top:12px';
+          setStyle(actions, { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' });
           const cancel = actions.createEl('button', { text: 'Cancel' });
           cancel.onclick = () => { resolve(null); this.close(); };
           const ok = actions.createEl('button', { text: 'Import', cls: 'mod-cta' });
@@ -1472,7 +1515,7 @@ class McpMarketplaceModal extends Modal {
       const top = left.createEl('div', { cls: 'nc-mcp-row-top' });
       top.createEl('span', { cls: 'nc-mcp-name', text: entry.name });
       top.createEl('span', { cls: 'nc-mcp-cat', text: entry.category });
-      if ((entry as Row).__source) top.createEl('span', { cls: 'nc-mcp-cat nc-mcp-cat-ext', text: 'custom' });
+      if ((entry as Row).__source) top.createEl('span', { cls: 'nc-mcp-cat nc-mcp-cat-ext', text: 'Custom' });
       left.createEl('div', { cls: 'nc-mcp-desc', text: entry.description });
       const cmd = `${entry.install.command} ${entry.install.args.join(' ')}`;
       left.createEl('code', { cls: 'nc-mcp-cmd', text: cmd });
@@ -1529,7 +1572,7 @@ class McpMarketplaceModal extends Modal {
         this.onChange();
       };
       if (entry.homepage) {
-        const docs = right.createEl('a', { text: 'docs', href: entry.homepage });
+        const docs = right.createEl('a', { text: 'Docs', href: entry.homepage });
         docs.setAttr('target', '_blank');
         docs.setAttr('rel', 'noopener');
       }
@@ -1612,7 +1655,7 @@ class CodexDiagnosticModal extends Modal {
     contentEl.createEl('pre', { cls: 'nc-codex-diag-pre nc-codex-diag-stream', text: r.stderr.slice(0, 6000) || '(empty)' });
 
     const footer = contentEl.createEl('div', { cls: 'modal-button-container' });
-    (footer.style as any).cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:12px';
+    setStyle(footer, { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' });
     footer.createEl('button', { text: 'Copy all', cls: 'mod-cta' }).onclick = () => {
       const mIdx = r.args.indexOf('-m');
       const modelArg = mIdx >= 0 ? r.args[mIdx + 1] : '(none — uses ~/.codex/config.toml)';
@@ -1655,14 +1698,14 @@ class CodexDiagnosticModal extends Modal {
       footer.createEl('button', { text: 'Open proxy settings', cls: 'mod-warning' }).onclick = () => {
         this.close();
         // Defer-and-scroll: re-open settings, then scroll the proxy input into view.
-        setTimeout(() => {
+        window.setTimeout(() => {
           (this.app as any).setting.open();
           (this.app as any).setting.openTabById('glossa');
-          setTimeout(() => {
+          window.setTimeout(() => {
             // Find by stable data-glossa-id, NOT by label text. The label was
             // renamed multiple times (Global proxy URL → Proxy → 代理) and
             // every rename broke this scroll-to-field jump.
-            const target = document.querySelector('[data-glossa-id="global-proxy"]') as HTMLElement | null;
+            const target = activeDocument.querySelector('[data-glossa-id="global-proxy"]') as HTMLElement | null;
             if (target) {
               target.scrollIntoView({ behavior: 'smooth', block: 'center' });
               target.querySelector('input')?.focus();

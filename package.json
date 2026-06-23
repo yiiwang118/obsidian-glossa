@@ -31,7 +31,6 @@
   "homepage": "https://github.com/yiiwang118/obsidian-glossa#readme",
   "devDependencies": {
     "@types/node": "^20",
-    "builtin-modules": "^3.3.0",
     "esbuild": "^0.21.0",
     "obsidian": "^1.4.11",
     "tslib": "^2.6.0",

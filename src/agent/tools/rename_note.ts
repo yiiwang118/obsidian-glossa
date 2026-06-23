@@ -41,7 +41,7 @@ export const renameNote: ToolImpl = buildTool({
     if (app.vault.getAbstractFileByPath(to)) return `Error: destination already exists: ${to}`;
     try {
       const folder = vaultFolderOf(to);
-      if (folder) try { await app.vault.createFolder(folder); } catch {}
+      if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
       await app.fileManager.renameFile(f, to);
       return `Renamed ${from} → ${to} (backlinks auto-updated).`;
     } catch (e: any) {

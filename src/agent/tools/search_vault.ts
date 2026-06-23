@@ -53,7 +53,7 @@ export const searchVault: ToolImpl = buildTool({
       }
       if (bestScore > -Infinity) scored.push({ path: f.path, score: bestScore, snippet: bestSnippet });
       // Yield to the event loop every 32 files so the UI doesn't freeze on big vaults.
-      if (++yieldCounter % 32 === 0) await new Promise(r => setTimeout(r, 0));
+      if (++yieldCounter % 32 === 0) await new Promise(r => window.setTimeout(r, 0));
     }
     scored.sort((a, b) => b.score - a.score);
     const top = scored.slice(0, max_results);

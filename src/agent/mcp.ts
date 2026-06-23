@@ -35,7 +35,7 @@ export interface McpResource {
 interface Pending {
   resolve: (r: any) => void;
   reject: (e: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  timer: number;
 }
 
 export class McpClient {
@@ -49,7 +49,7 @@ export class McpClient {
   private resources: McpResource[] = [];
   private stderrLog: string[] = [];
   private reconnectAttempts = 0;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: number | null = null;
   status: 'idle' | 'connecting' | 'connected' | 'failed' = 'idle';
   lastError?: string;
   connectedAt?: number;
@@ -103,7 +103,7 @@ export class McpClient {
       // Reject any in-flight RPC calls so callers don't hang forever.
       const exitErr = new Error('MCP process exited');
       for (const [, p] of this.pending) {
-        clearTimeout(p.timer);
+        window.clearTimeout(p.timer);
         p.reject(exitErr);
       }
       this.pending.clear();
@@ -114,8 +114,8 @@ export class McpClient {
       if (this.cfg.enabled && this.reconnectAttempts < 5) {
         this.reconnectAttempts++;
         const delayMs = Math.min(30_000, 1000 * Math.pow(2, this.reconnectAttempts));
-        if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = setTimeout(() => {
+        if (this.reconnectTimer) window.clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = window.setTimeout(() => {
           console.warn(`[mcp:${this.cfg.name}] auto-reconnect attempt ${this.reconnectAttempts}`);
           this.connect().catch(e => {
             this.lastError = `reconnect failed: ${e?.message ?? e}`;
@@ -184,8 +184,8 @@ export class McpClient {
   }
 
   dispose() {
-    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
-    try { this.proc?.kill('SIGTERM'); } catch {}
+    if (this.reconnectTimer) { window.clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    try { this.proc?.kill('SIGTERM'); } catch { /* ignore */ }
     this.proc = undefined;
     this.status = 'idle';
   }
@@ -226,7 +226,7 @@ export class McpClient {
     if (typeof msg.id === 'number' && this.pending.has(msg.id)) {
       const p = this.pending.get(msg.id)!;
       this.pending.delete(msg.id);
-      clearTimeout(p.timer);
+      window.clearTimeout(p.timer);
       if (msg.error) p.reject(new Error(msg.error.message ?? 'RPC error'));
       else p.resolve(msg.result);
       return;
@@ -275,21 +275,21 @@ export class McpClient {
   private request(method: string, params: any, timeoutMs: number): Promise<any> {
     const id = ++this.rpcId;
     return new Promise<any>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = window.setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`MCP ${method} timed out`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       try { this.send({ jsonrpc: '2.0', id, method, params }); }
       catch (e: any) {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         this.pending.delete(id);
         reject(e);
       }
     });
   }
   private notify(method: string, params: any) {
-    try { this.send({ jsonrpc: '2.0', method, params }); } catch {}
+    try { this.send({ jsonrpc: '2.0', method, params }); } catch { /* ignore */ }
     return Promise.resolve();
   }
 }

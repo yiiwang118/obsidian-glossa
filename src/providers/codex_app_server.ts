@@ -169,7 +169,7 @@ class AppServerClient {
     return new Promise<T>((resolve, reject) => {
       const id = this.nextId++;
       this.pending.set(id, { resolve, reject });
-      const timer = setTimeout(() => {
+      const timer = window.setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
           reject(new Error(`${method} timeout after ${timeoutMs}ms`));
@@ -178,12 +178,12 @@ class AppServerClient {
       // Wrap resolve/reject to clear timer
       const orig = this.pending.get(id)!;
       this.pending.set(id, {
-        resolve: (r) => { clearTimeout(timer); orig.resolve(r); },
-        reject: (e) => { clearTimeout(timer); orig.reject(e); },
+        resolve: (r) => { window.clearTimeout(timer); orig.resolve(r); },
+        reject: (e) => { window.clearTimeout(timer); orig.reject(e); },
       });
       try { this.send({ jsonrpc: '2.0', id, method, params }); }
       catch (e: any) {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         this.pending.delete(id);
         reject(e);
       }
@@ -203,7 +203,7 @@ class AppServerClient {
 
   kill() {
     if (this.closed) return;
-    try { this.proc.kill('SIGTERM'); } catch {}
+    try { this.proc.kill('SIGTERM'); } catch { /* ignore */ }
     this.closed = true;
   }
 }
@@ -489,7 +489,7 @@ export async function* streamViaAppServer(
   } finally {
     if (abortListener && req.signal) req.signal.removeEventListener('abort', abortListener);
     client.kill();
-    for (const f of tempImageFiles) { try { fs.unlinkSync(f); } catch {} }
+    for (const f of tempImageFiles) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
   }
 }
 

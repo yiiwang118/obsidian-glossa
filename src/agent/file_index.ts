@@ -101,7 +101,7 @@ export class FileIndex {
           size: f.stat.size,
         });
         if (++i % YIELD_EVERY === 0) {
-          await new Promise(r => setTimeout(r, 0));
+          await new Promise(r => window.setTimeout(r, 0));
         }
       }
       this.entries = next;
@@ -122,7 +122,7 @@ export class FileIndex {
     for (const entry of this.entries.values()) {
       if (filter && !filter(entry)) continue;
       yield entry;
-      if (++i % YIELD_EVERY === 0) await new Promise(r => setTimeout(r, 0));
+      if (++i % YIELD_EVERY === 0) await new Promise(r => window.setTimeout(r, 0));
     }
   }
 

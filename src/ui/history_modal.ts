@@ -1,7 +1,7 @@
 import { App, Menu, Modal, Notice } from 'obsidian';
 import type GlossaPlugin from '../main';
 import type { ChatSession } from '../types';
-import { debounce } from '../utils/dom';
+import { debounce, setTrustedSvg } from '../utils/dom';
 import { t, bi } from '../utils/i18n';
 
 /* ============================================================
@@ -69,17 +69,17 @@ class HistoryPopover {
     const top = this.root.createEl('div', { cls: 'nc-history-pop-top' });
     const searchWrap = top.createEl('div', { cls: 'nc-history-pop-search' });
     const searchIcon = searchWrap.createEl('span', { cls: 'nc-history-pop-search-icon' });
-    searchIcon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`;
+    setTrustedSvg(searchIcon, `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`);
     const search = searchWrap.createEl('input', { type: 'text', cls: 'nc-history-pop-search-input' });
     search.placeholder = t('hist_search');
     const onSearch = debounce(() => { this.filter = search.value.toLowerCase(); this.renderList(); }, 80);
     search.addEventListener('input', onSearch);
-    setTimeout(() => search.focus(), 30);
+    window.setTimeout(() => search.focus(), 30);
 
     const moreBtn = top.createEl('button', { cls: 'nc-history-pop-more', attr: { title: t('more') } });
     // Filled dots — Lucide's stroke-only r=1 dots are too tiny to see at 14px,
     // so we use solid fill with r=1.6.
-    moreBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14"><circle cx="5"  cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>`;
+    setTrustedSvg(moreBtn, `<svg viewBox="0 0 24 24" width="14" height="14"><circle cx="5"  cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>`);
     moreBtn.onclick = (e) => this.openOverflowMenu(e, moreBtn);
 
     // List body — flex-grow, scrollable.
@@ -111,12 +111,12 @@ class HistoryPopover {
         this.onClose(); e.preventDefault(); e.stopPropagation();
       }
     };
-    document.addEventListener('keydown', this.keyHandler, true);
+    activeDocument.addEventListener('keydown', this.keyHandler, true);
   }
 
   destroy() {
     if (this.keyHandler) {
-      document.removeEventListener('keydown', this.keyHandler, true);
+      activeDocument.removeEventListener('keydown', this.keyHandler, true);
       this.keyHandler = null;
     }
     this.root.empty();
@@ -224,7 +224,7 @@ class HistoryPopover {
       if (e.key === 'Escape') { e.preventDefault(); cancel(); }
     };
     input.onblur = () => commit();
-    setTimeout(() => { input.focus(); input.select(); }, 10);
+    window.setTimeout(() => { input.focus(); input.select(); }, 10);
   }
 
   private openOverflowMenu(e: MouseEvent, anchor: HTMLElement) {

@@ -22,6 +22,7 @@
  */
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
+import { setStyle } from '../../utils/dom';
 
 type Op = 'append' | 'prepend' | 'replace';
 
@@ -148,20 +149,20 @@ export const patchNote: ToolImpl = buildTool({
                 : t.frontmatter_key ? `props.${t.frontmatter_key}`
                 : 'unknown anchor';
     if (result.startsWith('Error')) return null;        // fall back to default error rendering
-    const wrap = document.createElement('div');
-    wrap.style.padding = '6px 10px';
-    wrap.style.fontSize = '12px';
-    wrap.style.background = 'rgba(63, 185, 80, 0.08)';
-    wrap.style.borderLeft = '3px solid #3fb950';
-    wrap.style.borderRadius = '4px';
-    wrap.style.lineHeight = '1.5';
-    const head = document.createElement('div');
-    head.style.fontWeight = '600';
+    const wrap = activeDocument.createElement('div');
+    setStyle(wrap, { padding: '6px 10px' });
+    setStyle(wrap, { fontSize: '12px' });
+    setStyle(wrap, { background: 'rgba(63, 185, 80, 0.08)' });
+    setStyle(wrap, { borderLeft: '3px solid #3fb950' });
+    setStyle(wrap, { borderRadius: '4px' });
+    setStyle(wrap, { lineHeight: '1.5' });
+    const head = activeDocument.createElement('div');
+    setStyle(head, { fontWeight: '600' });
     head.textContent = `${(args?.op ?? 'patched').toUpperCase()} · ${where}`;
     wrap.appendChild(head);
-    const sub = document.createElement('div');
-    sub.style.opacity = '0.7';
-    sub.style.fontSize = '11px';
+    const sub = activeDocument.createElement('div');
+    setStyle(sub, { opacity: '0.7' });
+    setStyle(sub, { fontSize: '11px' });
     sub.textContent = result.split('\n')[0];
     wrap.appendChild(sub);
     return wrap;

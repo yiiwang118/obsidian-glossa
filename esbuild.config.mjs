@@ -1,6 +1,6 @@
 import esbuild from 'esbuild';
-import builtins from 'builtin-modules';
 import fs from 'fs';
+import { builtinModules } from 'module';
 import path from 'path';
 
 const prod = process.argv[2] === 'production';
@@ -51,7 +51,7 @@ const opts = {
     '@codemirror/language', '@codemirror/lint', '@codemirror/search',
     '@codemirror/state', '@codemirror/view',
     '@lezer/common', '@lezer/highlight', '@lezer/lr',
-    ...builtins,
+    ...builtinModules,
   ],
   format: 'cjs',
   target: 'es2020',

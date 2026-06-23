@@ -44,7 +44,7 @@ async function rotate(app: App): Promise<void> {
     files.sort();
     const toDelete = files.slice(0, files.length - MAX_STORED_FILES);
     for (const f of toDelete) {
-      try { await adapter.remove(f); } catch {}
+      try { await adapter.remove(f); } catch { /* ignore */ }
     }
   } catch (e) {
     console.warn('[tool_result_store] rotation failed', e);

@@ -154,7 +154,7 @@ export const TOOLS: Record<string, ToolImpl> = {
  * for keyword scoring — though it consults TOOLS directly today).
  */
 export function listToolSpecs(opts: { includeDeferred?: boolean } = {}): ToolSpec[] {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Keep bridge activation lazy to avoid loading optional plugin probes before Obsidian is ready.
   const { allBridgeToolNames, isBridgeActive } = require('./plugin_bridges') as typeof import('./plugin_bridges');
   const bridgeNames = new Set(allBridgeToolNames());
   return Object.values(TOOLS)

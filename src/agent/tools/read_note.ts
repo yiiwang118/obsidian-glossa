@@ -1,4 +1,5 @@
 import { TFile } from 'obsidian';
+import { setStyle, setVars } from '../../utils/dom';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
 const READ_BYTE_CAP = 50_000;
@@ -33,25 +34,25 @@ export const readNote: ToolImpl = buildTool({
       if (headings.length >= 20) break;
     }
 
-    const wrap = document.createElement('div');
-    wrap.style.padding = '6px 10px';
-    wrap.style.fontSize = '12px';
-    wrap.style.lineHeight = '1.5';
+    const wrap = activeDocument.createElement('div');
+    setStyle(wrap, { padding: '6px 10px' });
+    setStyle(wrap, { fontSize: '12px' });
+    setStyle(wrap, { lineHeight: '1.5' });
 
-    const header = document.createElement('div');
-    header.style.fontWeight = '600';
-    header.style.marginBottom = '6px';
+    const header = activeDocument.createElement('div');
+    setStyle(header, { fontWeight: '600' });
+    setStyle(header, { marginBottom: '6px' });
     header.textContent = `📄 ${path}  ·  ${totalLines} lines  ·  ${totalChars} chars`;
     wrap.appendChild(header);
 
     if (headings.length > 0) {
-      const tree = document.createElement('div');
-      tree.style.padding = '4px 0 6px 0';
-      tree.style.opacity = '0.85';
-      tree.style.fontSize = '11px';
+      const tree = activeDocument.createElement('div');
+      setStyle(tree, { padding: '4px 0 6px 0' });
+      setStyle(tree, { opacity: '0.85' });
+      setStyle(tree, { fontSize: '11px' });
       for (const h of headings) {
-        const item = document.createElement('div');
-        item.style.paddingLeft = `${(h.level - 1) * 12}px`;
+        const item = activeDocument.createElement('div');
+        setStyle(item, { paddingLeft: `${(h.level - 1) * 12}px` });
         item.textContent = `${'  '.repeat(h.level - 1)}${'#'.repeat(h.level)} ${h.text}`;
         tree.appendChild(item);
       }
@@ -59,18 +60,18 @@ export const readNote: ToolImpl = buildTool({
     }
 
     // Body in a collapsible details — keeps the card height bounded.
-    const det = document.createElement('details');
-    const sum = document.createElement('summary');
-    sum.textContent = 'full body';
-    sum.style.cursor = 'pointer';
-    sum.style.fontSize = '11px';
-    sum.style.opacity = '0.7';
+    const det = activeDocument.createElement('details');
+    const sum = activeDocument.createElement('summary');
+    sum.textContent = 'Full body';
+    setStyle(sum, { cursor: 'pointer' });
+    setStyle(sum, { fontSize: '11px' });
+    setStyle(sum, { opacity: '0.7' });
     det.appendChild(sum);
-    const pre = document.createElement('pre');
-    pre.style.fontSize = '11px';
-    pre.style.margin = '4px 0 0 0';
-    pre.style.maxHeight = '400px';
-    pre.style.overflow = 'auto';
+    const pre = activeDocument.createElement('pre');
+    setStyle(pre, { fontSize: '11px' });
+    setStyle(pre, { margin: '4px 0 0 0' });
+    setStyle(pre, { maxHeight: '400px' });
+    setStyle(pre, { overflow: 'auto' });
     pre.textContent = body.slice(0, 20_000);
     det.appendChild(pre);
     wrap.appendChild(det);

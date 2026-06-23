@@ -598,7 +598,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         }
         // Persist any "Always allow…" choice the user made on this approval
         if (res.persistRule && opts.onPermissionRulePersist) {
-          try { await opts.onPermissionRulePersist(res.persistRule); } catch {}
+          try { await opts.onPermissionRulePersist(res.persistRule); } catch { /* ignore */ }
         }
       }
       prepared.push({ call, ev, tool, mcpEntry, effectiveArgs, rewriteToWriteNote });
@@ -639,7 +639,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         const paths = pathsTouchedByTool(call.name, effectiveArgs);
         if (paths.length) {
           if (opts.checkpoint && opts.sessionId && opts.turnId) {
-            try { await opts.checkpoint.snapshot(opts.sessionId, opts.turnId, paths); } catch {}
+            try { await opts.checkpoint.snapshot(opts.sessionId, opts.turnId, paths); } catch { /* ignore */ }
           }
           for (const p of paths) {
             activateForPath(opts.app, p).catch(() => {});
@@ -651,7 +651,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       // Give the renderer one macrotask to paint the running state before a
       // synchronous-heavy tool (large file edit, markdown diff, etc.) starts.
       // Without this, the sidebar can look frozen until the tool returns.
-      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      await new Promise<void>(resolve => window.setTimeout(resolve, 0));
 
       try {
         // Stale-write guard: if user toggled per-line in approval, we captured a file

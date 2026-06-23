@@ -126,7 +126,7 @@ export const getPeriodicNote: ToolImpl = buildTool({
     }
     try {
       const folder = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-      if (folder) try { await app.vault.createFolder(folder); } catch {}
+      if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
       await app.vault.create(path, body);
       return `Created ${path}.\nGranularity: ${granularity}\nOffset: ${offset}`;
     } catch (e: any) {

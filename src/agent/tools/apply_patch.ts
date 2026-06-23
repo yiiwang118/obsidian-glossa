@@ -121,7 +121,7 @@ export const applyPatch: ToolImpl = buildTool({
         try {
           if (op.kind === 'add') {
             const folder = vaultFolderOf(op.path);
-            if (folder) try { await app.vault.createFolder(folder); } catch {}
+            if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
             if (app.vault.getAbstractFileByPath(op.path)) return `Error: Add File: ${op.path} already exists.`;
             await app.vault.create(op.path, op.contents);
             touched.push(`+${op.path}`);

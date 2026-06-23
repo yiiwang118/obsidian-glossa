@@ -90,7 +90,7 @@ export const grepVault: ToolImpl = buildTool({
           if (matches.length >= max) break outer;
         }
       }
-      if (scanned % YIELD_EVERY === 0) await new Promise(r => setTimeout(r, 0));
+      if (scanned % YIELD_EVERY === 0) await new Promise(r => window.setTimeout(r, 0));
     }
 
     if (matches.length === 0) return `No matches for /${pattern}/${args.flags ?? 'i'} across ${scanned} files.`;

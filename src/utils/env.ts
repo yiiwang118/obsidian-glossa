@@ -184,12 +184,12 @@ export function makeChildEnvForMcp(proxy?: string): NodeJS.ProcessEnv {
 export function resolveBinary(name: string): string | null {
   for (const dir of EXTRA_PATHS) {
     const p = path.join(dir, name);
-    try { fs.accessSync(p, fs.constants.X_OK); return p; } catch {}
+    try { fs.accessSync(p, fs.constants.X_OK); return p; } catch { /* ignore */ }
   }
   try {
     const shell = process.env.SHELL ?? '/bin/zsh';
     const out = execSync(`${shell} -ilc 'command -v ${name}'`, { encoding: 'utf-8', timeout: 4000 }).trim();
     if (out && out.startsWith('/') && fs.existsSync(out)) return out;
-  } catch {}
+  } catch { /* ignore */ }
   return null;
 }
