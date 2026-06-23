@@ -36,7 +36,7 @@ export const listOpenFiles: ToolImpl = buildTool({
     parameters: { type: 'object', properties: {} },
   },
   run: async (app) => {
-    const activeLeaf = app.workspace.activeLeaf;
+    const activeLeaf = app.workspace.getMostRecentLeaf();
     const out: OpenFile[] = [];
     // Iterate ALL leaves; filter to those with a file open. Includes splits + sidebar.
     app.workspace.iterateAllLeaves((leaf: WorkspaceLeaf) => {

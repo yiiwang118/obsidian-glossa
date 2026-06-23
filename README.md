@@ -7,7 +7,7 @@
 [![CI](https://github.com/yiiwang118/obsidian-glossa/actions/workflows/ci.yml/badge.svg)](https://github.com/yiiwang118/obsidian-glossa/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/yiiwang118/obsidian-glossa?display_name=tag&sort=semver)](https://github.com/yiiwang118/obsidian-glossa/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1181_passed-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-96_passed-brightgreen)](tests/)
 [![zh](https://img.shields.io/badge/中文-README-orange)](README.zh-CN.md)
 
 </div>
@@ -16,9 +16,9 @@
 
 ## What it is
 
-Glossa is a side-panel assistant for the desktop knowledge-base app it runs in. It speaks to multiple LLM providers (OpenAI, Anthropic, any OpenAI-compatible gateway, Codex CLI), reads your selection / current note / arbitrary files via `@`-mentions, runs a tool-using agent over your vault with explicit per-action approval, and stays out of your way the rest of the time.
+Glossa is a side-panel assistant for Obsidian desktop. It speaks to multiple LLM providers (OpenAI, Anthropic, compatible gateways, Codex CLI, and local CLI bridges), reads your selection / current note / arbitrary files via `@`-mentions, runs a tool-using agent over your vault with explicit per-action approval, and stays out of your way the rest of the time.
 
-It is **not** a cloud service. Glossa is a local plugin; the only network calls go to the provider endpoints **you** configure.
+It is **not** a cloud service. Glossa is a local plugin; network calls go to provider endpoints you configure, embedding endpoints you choose, public URLs you attach / approve, and any MCP or local CLI tools you explicitly enable.
 
 ## Features
 
@@ -36,12 +36,7 @@ It is **not** a cloud service. Glossa is a local plugin; the only network calls 
 
 ## Screenshots
 
-> 截图待补 — see `docs/screenshots/` for current builds.
-
-|   |   |
-|---|---|
-| `sidebar.png` — main chat + streaming + reasoning card | `agent.png` — agent loop with tool approvals |
-| `settings.png` — provider list + security tab | `mcp.png` — MCP marketplace |
+Screenshots are kept in `docs/screenshots/` for release submissions. They are not required to build the plugin.
 
 ## Install
 
@@ -76,7 +71,7 @@ Then reload the host app and enable Glossa under Community plugins.
 
 1. Open the sidebar (ribbon icon or command palette → "Open sidebar")
 2. Settings → Providers → **Add endpoint** → paste an API key
-3. Pick a mode pill: **Plan** (read-only, advisory) or **Act** (allowed to run tools)
+3. New installs start in **Plan** + **read-only**. Switch to **Act** or raise permissions only when you want the agent to write files.
 4. Type, or `@` to attach context, or `/` to fire a slash command
 5. Shift-Enter for newline, Enter to send
 
@@ -88,13 +83,14 @@ Then reload the host app and enable Glossa under Community plugins.
 | Anthropic | ✅ | ✅ | ✅ (extended thinking) | ✅ |
 | Codex CLI (legacy `exec --json`) | ✅ | ✅ | ✅ (xhigh effort) | ✅ tmp-file |
 | Codex App-Server (stdio JSON-RPC) | ✅ | ✅ | ✅ | ✅ |
+| Claude Code CLI (local, experimental) | ✅ | ✅ | ✅ | depends |
 | Custom (any HTTP gateway) | ✅ | ✅ | depends | depends |
 
 Use Obsidian system-proxy mode (`useObsidianFetch`) for gateways behind corporate / GFW proxies.
 
 ## Agent mode
 
-Three permission levels:
+New installs default to **Plan** mode with **read-only** permission. Three permission levels are available:
 
 - **read-only** — only tools tagged `isReadOnly: true` (read_note, search_vault, semantic_search, …) can run
 - **workspace-write** — read + write tools (file_edit, write_note, patch_note, apply_patch, …); destructive calls hit the approval modal
@@ -110,7 +106,8 @@ See [PRIVACY.md](PRIVACY.md) for the exact data-flow map (what goes to which pro
 1. Your chat / prompt / attached context goes to the **provider you configured**. Glossa's author cannot see it.
 2. RAG / embedding rebuild **uploads every markdown file's content** to your chosen embedding endpoint. A one-time consent modal asks before the first build.
 3. API keys default to plaintext in `data.json`. Turn on encryption in Settings → Security if you want a passphrase gate at unlock.
-4. MCP child processes inherit a *filtered* env (LLM credentials stripped). If you use other-tool secrets (GitHub PAT, AWS keys), put them in the per-MCP-server env override instead of your shell rc.
+4. Local CLI endpoints (`codex`, `claude`) spawn subprocesses and may inherit whitelisted shell proxy / API-key environment so those tools work from the Obsidian desktop app.
+5. MCP child processes inherit a *filtered* env (LLM credentials stripped). If you use other-tool secrets (GitHub PAT, AWS keys), put them in the per-MCP-server env override instead of your shell rc.
 
 ## Skills
 
@@ -158,28 +155,27 @@ npm install
 npm run dev        # rebuild on save
 npm run build      # production bundle (main.js)
 npm run typecheck  # tsc --noEmit
-npm test           # unit + integration tests (60 + 1181 assertions)
+npm test           # in-tree Node tests
+npm run release:check -- --allow-dirty
 ```
 
 ## Testing
 
-Glossa ships a 7-layer test suite in `tests/`:
+Glossa currently ships a focused in-tree Node test suite in `tests/`:
 
-| Suite | Scope | Env |
-|---|---|---|
-| A unit | crypto, parsers, permission, tokens, tool_search, slash, markdown, vault paths | Node |
-| B integration | agent loop with mock provider, approval precedence, checkpoint concurrency, compact, encryption lifecycle, file_index | Node + mock app |
-| C provider | SSE / NDJSON / JSON-RPC fuzz for OpenAI, Anthropic, Codex | Node |
-| D perf | embedding search, render, file_index — micro-benchmarks with thresholds | Node |
-| E security | SSRF, path traversal × 18 tools, MCP env isolation, namespace collisions, marketplace command guard | Node |
-| F e2e | long-session render, streaming, session race, mode toggle, cancel cycle, encryption loop, MCP reconnect storm, adversarial model | happy-dom |
-| G chromium | real Chromium via Puppeteer — stream render rate, long session load, innerHTML scaling | headless Chromium |
+| Area | Covered by |
+|---|---|
+| permissions / MCP rules | `permission_rule.test.cjs`, `agent_permission.test.cjs` |
+| patch envelopes / globbing / stable stringify | `patch_envelope.test.cjs`, `list_files_glob.test.cjs`, `stable_stringify.test.cjs` |
+| compaction / model context / PDF extraction | `compact.test.cjs`, `model_context.test.cjs`, `pdf_extract.test.cjs` |
+| Codex CLI argument safety | `codex_cli_args.test.cjs` |
+| release defaults / large diff guard | `release_readiness.test.cjs` |
 
 ```bash
-npm test              # A + B + C + E (~5s, default CI)
-npm run test:e2e      # F (happy-dom, ~6s)
-npm run test:render   # G (real Chromium, ~1s)
-npm run test:all      # everything (~10s)
+npm test              # 10 test files, 96 assertions at this release
+npm run typecheck
+npm run build
+npm run release:check -- --allow-dirty
 ```
 
 ## Roadmap
@@ -196,8 +192,8 @@ Short-term focus areas:
 
 PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the build / test loop. Before opening a PR:
 
-1. `npm test` and `npm run typecheck` clean
-2. New tools include their own `tests/A_unit/` or `tests/E_security/` cases
+1. `npm test`, `npm run typecheck`, and `npm run build` clean
+2. New tools include focused tests in `tests/*.test.cjs`
 3. UI-visible changes include a screenshot in the PR description
 4. No `console.log` left in production paths
 

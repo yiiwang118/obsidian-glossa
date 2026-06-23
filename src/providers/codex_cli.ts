@@ -6,6 +6,18 @@ import { makeChildEnv, shellEnvSnapshot } from '../utils/env';
 import type { Endpoint } from '../types';
 import type { LLMProvider, ChatRequest, ChatChunk } from './types';
 
+function redactDiagnosticText(text: string): string {
+  return text
+    .replace(/\b(sk-[A-Za-z0-9_-]{12,})\b/g, 'sk-[redacted]')
+    .replace(/\b(api[_-]?key|token|authorization)\s*[:=]\s*["']?[^"'\s]+/gi, '$1=[redacted]')
+    .replace(/\b(Bearer)\s+[A-Za-z0-9._-]+/gi, '$1 [redacted]')
+    .replace(/(https?:\/\/)([^\/\s:@]+):([^\/\s@]+)@/gi, '$1[redacted]:[redacted]@');
+}
+
+function redactProxyUrl(value: string | undefined): string | undefined {
+  return value ? redactDiagnosticText(value) : undefined;
+}
+
 /**
  * `codex exec` integration.
  *
@@ -125,13 +137,13 @@ export class CodexCliProvider implements LLMProvider {
       // Proxy vars are the #1 reason codex hangs when launched from a GUI app
       // on macOS — surface them in the modal so the user can see whether our
       // shell-env loader actually picked them up.
-      HTTPS_PROXY: childEnv.HTTPS_PROXY || childEnv.https_proxy,
-      HTTP_PROXY: childEnv.HTTP_PROXY || childEnv.http_proxy,
-      ALL_PROXY: childEnv.ALL_PROXY || childEnv.all_proxy,
-      NO_PROXY: childEnv.NO_PROXY || childEnv.no_proxy,
+      HTTPS_PROXY: redactProxyUrl(childEnv.HTTPS_PROXY || childEnv.https_proxy),
+      HTTP_PROXY: redactProxyUrl(childEnv.HTTP_PROXY || childEnv.http_proxy),
+      ALL_PROXY: redactProxyUrl(childEnv.ALL_PROXY || childEnv.all_proxy),
+      NO_PROXY: redactProxyUrl(childEnv.NO_PROXY || childEnv.no_proxy),
       proxySource,
-      shellProxyHTTPS: shellSnap.HTTPS_PROXY || shellSnap.https_proxy,
-      shellProxyHTTP: shellSnap.HTTP_PROXY || shellSnap.http_proxy,
+      shellProxyHTTPS: redactProxyUrl(shellSnap.HTTPS_PROXY || shellSnap.https_proxy),
+      shellProxyHTTP: redactProxyUrl(shellSnap.HTTP_PROXY || shellSnap.http_proxy),
     };
     const started = Date.now();
     let stdout = '', stderr = '', parsedText = '';
@@ -166,7 +178,7 @@ export class CodexCliProvider implements LLMProvider {
         for (const line of lines) {
           const l = line.trim();
           if (!l) continue;
-          opts?.onEvent?.(l);
+          opts?.onEvent?.(redactDiagnosticText(l));
           try {
             const ev = JSON.parse(l);
             const evType = ev?.type ?? 'unknown';
@@ -175,9 +187,9 @@ export class CodexCliProvider implements LLMProvider {
               at: Date.now() - started,
               type: itemType ? `${evType} · ${itemType}` : evType,
               payload: itemType === 'agent_message'
-                ? (ev.item.text ?? '').slice(0, 120)
+                ? redactDiagnosticText(ev.item.text ?? '').slice(0, 120)
                 : itemType === 'reasoning'
-                ? (ev.item.text ?? '').slice(0, 120)
+                ? redactDiagnosticText(ev.item.text ?? '').slice(0, 120)
                 : undefined,
             });
             // New canonical shape: item.completed { item: { type:'agent_message', text:'…' } }
@@ -228,6 +240,7 @@ export class CodexCliProvider implements LLMProvider {
       })
       .join('\n')
       .trim();
+    const safeRealStderr = redactDiagnosticText(realStderr);
     // Surface auth errors regardless of where they surface (stderr / stream / parsed text).
     const authErrorMatch =
       /token[_ ]?revoked|invalidated oauth token|401 unauthorized|auth error code:|oauth.+expired/i.test(stderr) ||
@@ -247,7 +260,7 @@ export class CodexCliProvider implements LLMProvider {
                   `  codex logout && codex login\n\n` +
                   `This usually happens when you logged into codex from another machine, your ChatGPT account was logged out from the web, or the token simply expired.`;
     } else if (turnFailMsg) {
-      diagnosis = `❌ Turn failed: ${turnFailMsg}`;
+      diagnosis = `❌ Turn failed: ${redactDiagnosticText(turnFailMsg)}`;
       // The "Reconnecting... N/5" pattern is codex retrying a network call.
       // When launched from Obsidian on macOS, this almost always means we
       // failed to inherit the user's HTTPS_PROXY from ~/.zshrc — GUI apps
@@ -284,11 +297,11 @@ export class CodexCliProvider implements LLMProvider {
       } else {
         diagnosis += `We did not pass -m (using your codex config's default model).\n` +
                      (realStderr
-                       ? `stderr says:\n${realStderr.slice(0, 400)}`
+                       ? `stderr says:\n${safeRealStderr.slice(0, 400)}`
                        : `No stderr. Likely auth/network — try \`codex login\` in a terminal, or check that \`codex exec\` works manually.`);
       }
     } else if (exitCode !== 0 && !parsedText) {
-      diagnosis = `❌ codex exited ${exitCode} with no agent message.\n\nstderr: ${realStderr || '(empty)'}\n`;
+      diagnosis = `❌ codex exited ${exitCode} with no agent message.\n\nstderr: ${safeRealStderr || '(empty)'}\n`;
       if (/auth|login|token|api[_ ]?key/i.test(realStderr)) diagnosis += `Likely an AUTH issue. Run \`codex login\` in a terminal, then retry.`;
       else if (/unknown.+model|model.+not.+found/i.test(realStderr)) diagnosis += `The model name "${model}" is not recognised by codex.`;
       else if (!realStderr) diagnosis += `codex died silently. Probably an arg-parsing issue — check the args below.`;
@@ -296,7 +309,19 @@ export class CodexCliProvider implements LLMProvider {
       diagnosis = `⚠ Inconclusive. exit=${exitCode}, stdout=${stdout.length} bytes, stderr=${realStderr.length} bytes, parsedText=${parsedText.length} chars.`;
     }
 
-    return { version, cwd, args, env: envSnap, stdout, stderr, exitCode, durationMs, parsedText, eventTimeline, diagnosis };
+    return {
+      version,
+      cwd,
+      args,
+      env: envSnap,
+      stdout: redactDiagnosticText(stdout),
+      stderr: redactDiagnosticText(stderr),
+      exitCode,
+      durationMs,
+      parsedText: redactDiagnosticText(parsedText),
+      eventTimeline,
+      diagnosis,
+    };
   }
 
   async *stream(req: ChatRequest): AsyncGenerator<ChatChunk> {
@@ -325,13 +350,14 @@ export class CodexCliProvider implements LLMProvider {
 
     // Sandbox + approval.
     // SECURITY: non-fullAgent → force read-only + never (prompt-side constraint AND policy).
-    // SECURITY: fullAgent default approval=never (because we don't have a real stdin bridge
-    //   — see comment below). Caller can override explicitly in settings.
+    // SECURITY: fullAgent defaults to read-only. If the user explicitly raises the
+    // sandbox to workspace-write/danger-full-access and leaves approval unset, we
+    // require Codex-side approvals instead of silently letting the external agent write.
     const sandbox = this.ep.cliFullAgent
-      ? (this.ep.codexSandboxMode ?? 'workspace-write')
+      ? (this.ep.codexSandboxMode ?? 'read-only')
       : 'read-only';
     const approval = this.ep.cliFullAgent
-      ? (this.ep.codexApprovalPolicy ?? 'never')        // changed from 'on-request' to avoid hang
+      ? (this.ep.codexApprovalPolicy ?? (sandbox === 'read-only' ? 'never' : 'on-request'))
       : 'never';
     args.push('-c', `sandbox_mode="${sandbox}"`);
     args.push('-c', `approval_policy="${approval}"`);
@@ -414,7 +440,7 @@ export class CodexCliProvider implements LLMProvider {
     // when the sidebar shows nothing and we need to see what codex is emitting.
     const debug = !!(this.ep as any).cliDebug;
     if (debug) {
-      console.log('[Glossa] codex spawn:', { args, cwd, modelArg, promptLen: prompt.length, fullAgent: !!this.ep.cliFullAgent });
+      console.debug('[Glossa] codex spawn:', { args, cwd, modelArg, promptLen: prompt.length, fullAgent: !!this.ep.cliFullAgent });
     }
 
     let buf = '';
@@ -464,7 +490,7 @@ export class CodexCliProvider implements LLMProvider {
         if (!s) continue;
         let ev: any; try { ev = JSON.parse(s); } catch { continue; }
         const evType: string | undefined = ev?.type;
-        if (debug) console.log('[Glossa] codex ev:', evType, ev?.item?.type ?? '', JSON.stringify(ev).slice(0, 200));
+        if (debug) console.debug('[Glossa] codex ev:', evType, ev?.item?.type ?? '', JSON.stringify(ev).slice(0, 200));
 
         if (evType === 'turn.failed') {
           turnFailedMessage = ev?.error?.message ?? 'codex turn failed without message';

@@ -6,7 +6,8 @@ Only the latest minor version receives security fixes. As of this writing:
 
 | Version | Supported |
 |---|---|
-| 0.4.x   | ✅ |
+| 0.4.1   | ✅ |
+| 0.4.0   | ❌ (please upgrade) |
 | 0.3.x   | ❌ (please upgrade) |
 | < 0.3   | ❌ |
 

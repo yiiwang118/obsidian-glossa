@@ -113,8 +113,23 @@ export class CustomApiProvider implements LLMProvider {
       };
       const messages: any[] = [];
       for (const m of req.messages) {
-        if (m.role === 'tool') messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: m.toolCallId, content: m.content }] });
-        else if (m.role !== 'system') messages.push({ role: m.role, content: m.content });
+        if (m.role === 'tool') {
+          let resultContent: any = m.content;
+          if (m.toolContentBlocks?.length) {
+            const blocks: any[] = [];
+            if (m.content) blocks.push({ type: 'text', text: m.content });
+            for (const b of m.toolContentBlocks) blocks.push(b);
+            resultContent = blocks;
+          }
+          const trBlock: any = { type: 'tool_result', tool_use_id: m.toolCallId, content: resultContent };
+          if (m.toolIsError) trBlock.is_error = true;
+          messages.push({ role: 'user', content: [trBlock] });
+        } else if (m.role === 'assistant' && m.toolCalls?.length) {
+          const blocks: any[] = [];
+          if (m.content) blocks.push({ type: 'text', text: m.content });
+          for (const tc of m.toolCalls) blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.args ?? {} });
+          messages.push({ role: 'assistant', content: blocks });
+        } else if (m.role !== 'system') messages.push({ role: m.role, content: m.content });
       }
       const body: any = { model: req.model ?? this.ep.model, max_tokens: req.maxTokens ?? 4096, messages, stream: false };
       if (req.systemPrompt) body.system = stripBoundary(req.systemPrompt);
@@ -149,6 +164,21 @@ export class CustomApiProvider implements LLMProvider {
     if (req.systemPrompt) messages.push({ role: 'system', content: stripBoundary(req.systemPrompt) });
     for (const m of req.messages) {
       if (m.role === 'tool') messages.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content });
+      else if (m.role === 'assistant' && m.toolCalls?.length) {
+        const out: any = {
+          role: 'assistant',
+          content: m.content || null,
+          tool_calls: m.toolCalls.map(tc => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: JSON.stringify(tc.args ?? {}) },
+          })),
+        };
+        if (m.reasoningContent) out.reasoning_content = m.reasoningContent;
+        messages.push(out);
+      } else if (m.role === 'assistant' && m.reasoningContent) {
+        messages.push({ role: 'assistant', content: m.content, reasoning_content: m.reasoningContent });
+      }
       else messages.push({ role: m.role, content: m.content });
     }
     const body: any = { model: req.model ?? this.ep.model, messages, stream: false, temperature: req.temperature ?? 0.7 };

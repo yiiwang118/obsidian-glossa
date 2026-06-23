@@ -6,14 +6,20 @@ const svg = (path: string, extras = '') =>
 /* ============================================================
    Glossa mark — the user-authored cloud-moon-sparkles glyph.
    Two-tone cyan→blue→purple gradient burned into the stroke so the
-   icon stays in brand colour everywhere (ribbon, tab, role badge),
-   independent of light/dark theme. viewBox cropped tight to the
+   icon stays in brand colour in brand surfaces (tab, role badge,
+   empty-state hero), independent of light/dark theme. viewBox cropped tight to the
    artwork so Obsidian's icon system renders it crisply at 16-24px.
    `glossa-mark-grad` is the SVG-internal gradient id; modern browsers
    resolve url(#…) lookups within the same SVG fragment, so repeated
    inline copies in the chat transcript don't collide.
    ============================================================ */
-export const GLOSSA_MARK_SVG = `<svg viewBox="98 38 154 154" xmlns="http://www.w3.org/2000/svg" fill="none"><defs><linearGradient id="glossa-mark-grad" x1="104" y1="172" x2="238" y2="52" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#10c8f4"/><stop offset="0.48" stop-color="#2f86ff"/><stop offset="1" stop-color="#654cf3"/></linearGradient></defs><g stroke="url(#glossa-mark-grad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M120.2 131.7 C112.4 125.1 108.2 115.8 109.1 105.6 C110.4 91.1 121.7 80.6 136.2 79.9 C140.7 64.6 154.3 55.1 171.5 54.2 C178.1 53.9 184.1 54.9 189.8 57.1 M226.9 72.5 C235.1 77.6 239.8 86.3 239.2 96.2 C246.2 100.6 249.8 108.5 249 117 C247.9 130.3 236.8 140.4 222.7 140.4 C218.5 149.6 209.8 155.7 199.5 155.8 C190.5 156 182.8 151.9 178.1 145.3 C172.8 150.8 165.5 153.8 157.7 153.4 C150.7 153.1 144.7 150.6 139.9 146.3"/><path d="M175.8 73.3 C160.9 79.1 151.1 94.2 153.4 110.6 C156.3 131.2 175.5 145.4 196.1 142.4 C205.7 141.1 214.1 136.2 220 129 C216.7 130.6 213.1 131.7 209.2 132.2 C189.2 135.1 170.8 121.2 168 101.3 C166.5 90.8 169.7 80.8 175.8 73.3Z"/><circle cx="140.1" cy="143.8" r="15.9"/><circle cx="118.8" cy="168.3" r="7.6"/><path d="M208.9 52 C210.8 61.1 214.5 64.8 223.6 66.7 C214.5 68.6 210.8 72.3 208.9 81.4 C207 72.3 203.3 68.6 194.2 66.7 C203.3 64.8 207 61.1 208.9 52Z"/><path d="M195.5 84.5 C197 91.1 199.7 93.9 206.2 95.4 C199.7 96.9 197 99.6 195.5 106.2 C194 99.6 191.3 96.9 184.7 95.4 C191.3 93.9 194 91.1 195.5 84.5Z"/></g></svg>`;
+const GLOSSA_MARK_PATHS = `<path d="M120.2 131.7 C112.4 125.1 108.2 115.8 109.1 105.6 C110.4 91.1 121.7 80.6 136.2 79.9 C140.7 64.6 154.3 55.1 171.5 54.2 C178.1 53.9 184.1 54.9 189.8 57.1 M226.9 72.5 C235.1 77.6 239.8 86.3 239.2 96.2 C246.2 100.6 249.8 108.5 249 117 C247.9 130.3 236.8 140.4 222.7 140.4 C218.5 149.6 209.8 155.7 199.5 155.8 C190.5 156 182.8 151.9 178.1 145.3 C172.8 150.8 165.5 153.8 157.7 153.4 C150.7 153.1 144.7 150.6 139.9 146.3"/><path d="M175.8 73.3 C160.9 79.1 151.1 94.2 153.4 110.6 C156.3 131.2 175.5 145.4 196.1 142.4 C205.7 141.1 214.1 136.2 220 129 C216.7 130.6 213.1 131.7 209.2 132.2 C189.2 135.1 170.8 121.2 168 101.3 C166.5 90.8 169.7 80.8 175.8 73.3Z"/><circle cx="140.1" cy="143.8" r="15.9"/><circle cx="118.8" cy="168.3" r="7.6"/><path d="M208.9 52 C210.8 61.1 214.5 64.8 223.6 66.7 C214.5 68.6 210.8 72.3 208.9 81.4 C207 72.3 203.3 68.6 194.2 66.7 C203.3 64.8 207 61.1 208.9 52Z"/><path d="M195.5 84.5 C197 91.1 199.7 93.9 206.2 95.4 C199.7 96.9 197 99.6 195.5 106.2 C194 99.6 191.3 96.9 184.7 95.4 C191.3 93.9 194 91.1 195.5 84.5Z"/>`;
+
+export const GLOSSA_MARK_SVG = `<svg viewBox="98 38 154 154" xmlns="http://www.w3.org/2000/svg" fill="none"><defs><linearGradient id="glossa-mark-grad" x1="104" y1="172" x2="238" y2="52" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#10c8f4"/><stop offset="0.48" stop-color="#2f86ff"/><stop offset="1" stop-color="#654cf3"/></linearGradient></defs><g stroke="url(#glossa-mark-grad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">${GLOSSA_MARK_PATHS}</g></svg>`;
+
+/* Same mark, but monochrome. Used only for Obsidian's ribbon so it matches
+   the host app's other sidebar icons and inherits theme color via currentColor. */
+export const GLOSSA_RIBBON_SVG = `<svg viewBox="98 38 154 154" xmlns="http://www.w3.org/2000/svg" fill="none"><g stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">${GLOSSA_MARK_PATHS}</g></svg>`;
 
 /* ============================================================
    Aurora orb — empty-state hero (v2: echoes the brand mark)
@@ -86,8 +92,7 @@ export const ICON = {
   selection: svg(`<path d="M9 4v16M15 4v16M3 9h2M3 15h2M19 9h2M19 15h2"/>`),
   quote: svg(`<path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/>`),
   pin: svg(`<path d="m12 17 .01 5M9 3l.094.07a4 4 0 0 1 1.45 1.453L13 9l-3 .54a3 3 0 0 0-2.43 2.47L7 14h10l-.57-2a3 3 0 0 0-2.43-2.47L11 9l2.456-4.477A4 4 0 0 1 14.906 3.07L15 3z"/>`),
-  // Role badge inside every assistant message — same glyph as the ribbon icon,
-  // so the brand mark is consistent end-to-end.
+  // Role badge inside every assistant message — same glyph as the brand mark.
   bot: GLOSSA_MARK_SVG,
   user: svg(`<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>`),
   stop: `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`,

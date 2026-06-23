@@ -31,6 +31,14 @@ const HARD_DENY_COMMANDS = new Set<string>([
  *  plugin registers a similar id. */
 const HARD_DENY_PREFIXES = ['app:delete-', 'app:wipe-'];
 
+function hardDenyReason(id: string): string | null {
+  if (HARD_DENY_COMMANDS.has(id)) return `Command "${id}" is hard-denied (app-shutdown / vault-reset commands).`;
+  for (const p of HARD_DENY_PREFIXES) {
+    if (id.startsWith(p)) return `Command "${id}" hard-denied (matches "${p}*").`;
+  }
+  return null;
+}
+
 export const executeCommand: ToolImpl = buildTool({
   isReadOnly: () => false,
   isDestructive: () => true,             // unknown side effects → treat as destructive
@@ -58,17 +66,15 @@ export const executeCommand: ToolImpl = buildTool({
   async checkPermissions(_app, args): Promise<PermissionResult> {
     const id = String(args?.command_id ?? '');
     if (!id) return { behavior: 'deny', message: 'command_id is required.' };
-    if (HARD_DENY_COMMANDS.has(id)) {
-      return { behavior: 'deny', message: `Command "${id}" is hard-denied (app-shutdown / vault-reset commands).` };
-    }
-    for (const p of HARD_DENY_PREFIXES) {
-      if (id.startsWith(p)) return { behavior: 'deny', message: `Command "${id}" hard-denied (matches "${p}*").` };
-    }
+    const hardDeny = hardDenyReason(id);
+    if (hardDeny) return { behavior: 'deny', message: hardDeny };
     return { behavior: 'ask', message: `Dispatch command: ${id}` };
   },
   run: async (app, args) => {
     const id = String(args?.command_id ?? '').trim();
     if (!id) return 'Error: command_id is required.';
+    const hardDeny = hardDenyReason(id);
+    if (hardDeny) return `Error: ${hardDeny}`;
     const cmd = (app as any).commands?.commands?.[id];
     if (!cmd) return `Error: command not found: ${id}. Use list_commands to discover valid IDs.`;
     try {

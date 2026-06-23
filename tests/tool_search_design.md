@@ -332,8 +332,8 @@ export function __resetForTests(): void {
 ## 运行命令
 
 ```bash
-cd /Users/wangyi/Documents/Code-vault/glossa
+cd obsidian-glossa
 npm test
 ```
 
-测试通过条件：当前 60 个测试全过 + 本套件新增的 ~17 个全过 → 总 ≥ 77 passed, 0 failed。
+测试通过条件：`npm test` 全部通过，0 failed。

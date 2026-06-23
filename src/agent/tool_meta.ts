@@ -53,6 +53,11 @@ export const TOOL_META: Record<string, ToolMeta> = {
     color: '#b66cf0', category: 'read',
     summarize: a => a.path,
   },
+  read_pdf: {
+    icon: ICON.file, label: 'Read PDF', verb: 'Extracting PDF',
+    color: '#5b9bff', category: 'read',
+    summarize: a => `${a.path}${a.pages ? ` (${a.pages})` : ''}`,
+  },
   query_metadata: {
     icon: ICON.tag, label: 'Metadata', verb: 'Inspecting',
     color: '#5b9bff', category: 'meta',

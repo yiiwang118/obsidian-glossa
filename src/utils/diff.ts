@@ -1,6 +1,6 @@
 /**
  * Tiny line-level diff for the approval modal preview.
- * Uses LCS to compute a minimal edit script. No external deps.
+ * Uses LCS for modest files and falls back to a bounded preview for large edits.
  */
 
 export type DiffOp =
@@ -8,27 +8,20 @@ export type DiffOp =
   | { type: 'del'; text: string; line: number }
   | { type: 'add'; text: string; line: number };
 
+const EXACT_DIFF_MAX_LINES = 2_000;
+const EXACT_DIFF_MAX_CELLS = EXACT_DIFF_MAX_LINES * EXACT_DIFF_MAX_LINES;
+const FALLBACK_PREVIEW_LINES = 160;
+
 export function lineDiff(a: string, b: string): DiffOp[] {
   const A = a.split('\n');
   const B = b.split('\n');
   const n = A.length, m = B.length;
 
-  // LCS table — full O(n·m) memory. Larger CAP than before (2000→20000) so
-  // edits beyond line 2000 in big notes are visible in approval diff. At
-  // 20k×20k cells × 4 bytes the table is ~1.6GB worst-case, but typical
-  // edited files are <5k lines; pre-flight test below short-circuits when
-  // the input is too large.
-  const HARD_CAP = 20_000;
-  if (A.length > HARD_CAP || B.length > HARD_CAP) {
-    // Falls back to a degenerate "everything changed" representation —
-    // approval UI shows the too-big warning and offers full-replace.
-    return [...A.map((t, i) => ({ type: 'del' as const, text: t, line: i })),
-            ...B.map((t, i) => ({ type: 'add' as const, text: t, line: i }))];
-  }
+  if (!exactDiffFeasible(n, m)) return largeDiffPreview(A, B);
   const Acap = A, Bcap = B;
   const NA = Acap.length, NB = Bcap.length;
 
-  const lcs: number[][] = Array.from({ length: NA + 1 }, () => new Array(NB + 1).fill(0));
+  const lcs: Uint16Array[] = Array.from({ length: NA + 1 }, () => new Uint16Array(NB + 1));
   for (let i = NA - 1; i >= 0; i--) {
     for (let j = NB - 1; j >= 0; j--) {
       lcs[i][j] = Acap[i] === Bcap[j] ? lcs[i + 1][j + 1] + 1
@@ -64,6 +57,9 @@ export function diffToHtml(a: string, b: string): string {
 /** Apply diff with per-line selection: accepted=true rebuilds the new content using only
  *  approved adds + rejected dels (rejected dels stay as eq). */
 export function applySelectedDiff(a: string, b: string, accepts: Map<number, boolean>): string {
+  const oldLines = a.split('\n').length;
+  const newLines = b.split('\n').length;
+  if (!exactDiffFeasible(oldLines, newLines)) return b;
   const ops = lineDiff(a, b);
   const out: string[] = [];
   let opIdx = 0;
@@ -81,4 +77,29 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, ch =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string)
   );
+}
+
+function exactDiffFeasible(oldLines: number, newLines: number): boolean {
+  return oldLines <= EXACT_DIFF_MAX_LINES &&
+    newLines <= EXACT_DIFF_MAX_LINES &&
+    oldLines * newLines <= EXACT_DIFF_MAX_CELLS;
+}
+
+function largeDiffPreview(oldLines: string[], newLines: string[]): DiffOp[] {
+  const out: DiffOp[] = [{
+    type: 'eq',
+    text: `[diff too large for exact preview: ${oldLines.length.toLocaleString()} -> ${newLines.length.toLocaleString()} lines; showing first ${FALLBACK_PREVIEW_LINES} removed and added lines]`,
+    line: 0,
+  }];
+  const oldShown = oldLines.slice(0, FALLBACK_PREVIEW_LINES);
+  for (let i = 0; i < oldShown.length; i++) out.push({ type: 'del', text: oldShown[i], line: i });
+  if (oldLines.length > oldShown.length) {
+    out.push({ type: 'eq', text: `[${(oldLines.length - oldShown.length).toLocaleString()} removed lines hidden]`, line: oldShown.length });
+  }
+  const newShown = newLines.slice(0, FALLBACK_PREVIEW_LINES);
+  for (let i = 0; i < newShown.length; i++) out.push({ type: 'add', text: newShown[i], line: i });
+  if (newLines.length > newShown.length) {
+    out.push({ type: 'eq', text: `[${(newLines.length - newShown.length).toLocaleString()} added lines hidden]`, line: newShown.length });
+  }
+  return out;
 }

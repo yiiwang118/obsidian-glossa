@@ -1,11 +1,12 @@
 name: Release
 
-# Trigger on a tag that matches the manifest.json version pattern.
-# Obsidian community plugins REQUIRE tags WITHOUT a `v` prefix (so `0.4.0`, not `v0.4.0`).
+# Trigger on any tag, then fail inside the workflow if it does not exactly
+# match manifest.json. GitHub Actions tag patterns are glob-like, not regex.
+# Obsidian community plugins require tags WITHOUT a `v` prefix (so `0.4.0`, not `v0.4.0`).
 on:
   push:
     tags:
-      - '[0-9]+.[0-9]+.[0-9]+*'
+      - '*'
 
 permissions:
   contents: write
@@ -27,6 +28,9 @@ jobs:
 
       - name: Build (production)
         run: npm run build
+
+      - name: Release metadata check
+        run: npm run release:check
 
       - name: Verify version match (manifest.json vs tag)
         run: |

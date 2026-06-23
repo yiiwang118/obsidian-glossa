@@ -50,6 +50,17 @@ async function loadModule(srcPath) {
   Module.prototype.require = function(req) {
     if (req === 'obsidian') return {
       TFile: class TFile {}, TFolder: class TFolder {},
+      Modal: class Modal {
+        constructor(app) {
+          this.app = app;
+          this.contentEl = { empty() {}, createEl() { return this; }, addClass() {}, removeClass() {}, appendText() {} };
+          this.modalEl = { addClass() {}, removeClass() {} };
+        }
+        open() {}
+        close() {}
+      },
+      Notice: class Notice {},
+      loadPdfJs: async () => ({ getDocument: () => { throw new Error('loadPdfJs shim has no document'); } }),
       getAllTags: () => [], prepareSimpleSearch: () => null,
       requestUrl: () => ({ status: 200, text: '[]', json: [] }),
     };

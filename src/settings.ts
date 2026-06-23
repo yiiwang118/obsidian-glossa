@@ -47,6 +47,57 @@ const KIND_CARDS = [
   { kind: 'claude-code-cli' as const, title: 'Claude Code',    badge: 'LOCAL', desc: 'Reuses local claude (--bare --max-turns 1)' },
 ];
 
+function renderWarningHint(parent: HTMLElement, text: string) {
+  const hint = parent.createEl('div', { cls: 'nc-info-hint nc-warning-hint' });
+  hint.createEl('strong', { text: 'Warning' });
+  hint.appendText(` — ${text}`);
+  return hint;
+}
+
+function configOverrideValue(overrides: string | undefined, key: string): string | null {
+  const rx = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*["']?([^"']+)["']?$`);
+  for (const line of (overrides ?? '').split('\n')) {
+    const m = line.trim().match(rx);
+    if (m) return m[1].trim();
+  }
+  return null;
+}
+
+function codexSafetyWarning(ep: Endpoint): string | null {
+  if (ep.kind !== 'codex-cli') return null;
+  const overrideSandbox = configOverrideValue(ep.codexConfigOverrides, 'sandbox_mode') as Endpoint['codexSandboxMode'] | null;
+  const overrideApproval = configOverrideValue(ep.codexConfigOverrides, 'approval_policy') as Endpoint['codexApprovalPolicy'] | null;
+  const sandbox = overrideSandbox ?? ep.codexSandboxMode ?? 'read-only';
+  const approval = overrideApproval ?? ep.codexApprovalPolicy ?? (sandbox === 'read-only' ? 'never' : 'on-request');
+  const warnings: string[] = [];
+
+  if (overrideSandbox || overrideApproval) {
+    warnings.push('free-form config overrides can bypass Glossa safety defaults');
+  }
+  if (sandbox === 'danger-full-access') {
+    warnings.push('danger-full-access lets Codex access files outside the vault and run unrestricted commands');
+  } else if (sandbox === 'workspace-write') {
+    warnings.push('workspace-write lets Codex modify files in its working directory');
+  }
+  if ((sandbox === 'workspace-write' || sandbox === 'danger-full-access') && approval === 'never') {
+    warnings.push('approval_policy=never means Codex-side approval prompts may be auto-approved');
+  }
+  if (!ep.cliFullAgent && sandbox !== 'read-only') {
+    warnings.push('non-agent Codex chat should stay read-only; override sandbox only if you understand the local side effects');
+  }
+  return warnings.length ? warnings.join('; ') + '.' : null;
+}
+
+function localCliWarning(kind: Endpoint['kind']): string | null {
+  if (kind === 'codex-cli') {
+    return 'This endpoint spawns the local codex binary and may inherit shell proxy/API-key environment. Keep sandbox read-only unless you intentionally want local file access.';
+  }
+  if (kind === 'claude-code-cli') {
+    return 'This endpoint spawns the local claude binary. Full-agent options, extra directories, MCP config, or allowed tools can let that process read or modify local files.';
+  }
+  return null;
+}
+
 /* ============================================================
    Settings tab
    ============================================================ */
@@ -214,17 +265,25 @@ export class GlossaSettingTab extends PluginSettingTab {
     // — labels are translated and frequently renamed.
     proxySetting.settingEl.dataset.glossaId = 'global-proxy';
     new Setting(containerEl)
-      .setName(bi('Test', '测试'))
-      .setDesc('')
+      .setName(bi('Test active endpoint', '测试当前 endpoint'))
+      .setDesc(bi('Runs the selected endpoint\'s own connection test.', '使用当前 endpoint 自带的连接测试，不固定请求 OpenAI。'))
       .addButton(b => b.setButtonText(bi('Run', '运行')).onClick(async () => {
-        const { spawn } = await import('child_process');
-        const { makeChildEnv } = await import('./utils/env');
-        const env = makeChildEnv(this.plugin.settings.globalProxy || undefined);
-        const proc = spawn('curl', ['-sS', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '8',
-          'https://api.openai.com/v1/models'], { env });
-        let out = '';
-        proc.stdout.on('data', d => out += d.toString());
-        proc.on('close', () => new Notice(`OpenAI: HTTP ${out || 'no-response'} ${out === '401' ? '(reachable — needs auth, OK)' : ''}`));
+        const activeId = this.plugin.settings.activeEndpointId;
+        const ep = this.plugin.settings.endpoints.find(e => e.id === activeId);
+        if (!ep) { new Notice(bi('No active endpoint selected.', '未选择当前 endpoint。')); return; }
+        b.setButtonText(bi('Running...', '运行中...')).setDisabled(true);
+        try {
+          const epDec = await this.plugin.getDecryptedEndpoint(ep);
+          if (!epDec) { new Notice(bi('Endpoint is locked.', 'Endpoint 已锁定。')); return; }
+          const provider: any = await this.buildProviderFor(epDec);
+          if (!provider?.testConnect) { new Notice(bi('This endpoint does not support connection tests.', '这个 endpoint 不支持连接测试。')); return; }
+          const r = await provider.testConnect();
+          new Notice(`${ep.label}: ${r.message}`, r.ok ? 4000 : 8000);
+        } catch (e: any) {
+          new Notice(`${ep.label}: ${e?.message ?? e}`, 8000);
+        } finally {
+          b.setButtonText(bi('Run', '运行')).setDisabled(false);
+        }
       }));
 
     /* ----- Context ----- */
@@ -665,6 +724,11 @@ export class GlossaSettingTab extends PluginSettingTab {
       this.display();
     };
 
+    const cliWarn = localCliWarning(ep.kind);
+    if (cliWarn) renderWarningHint(card, cliWarn);
+    const codexWarn = codexSafetyWarning(ep);
+    if (codexWarn) renderWarningHint(card, codexWarn);
+
     new Setting(card).setName(bi('Label', '名称')).addText(t => t.setValue(ep.label).onChange(async v => { ep.label = v; await this.plugin.saveSettings(); }));
 
     if (ep.kind === 'custom-api') {
@@ -767,12 +831,24 @@ export class GlossaSettingTab extends PluginSettingTab {
           .setDesc(t('codex_sandbox_desc'))
           .addDropdown(d => d.addOption('', '(default)').addOption('read-only', 'read-only').addOption('workspace-write', 'workspace-write').addOption('danger-full-access', 'danger-full-access ⚠')
             .setValue(ep.codexSandboxMode ?? '')
-            .onChange(async v => { ep.codexSandboxMode = (v || undefined) as any; await this.plugin.saveSettings(); }));
+            .onChange(async v => {
+              ep.codexSandboxMode = (v || undefined) as any;
+              await this.plugin.saveSettings();
+              const warn = codexSafetyWarning(ep);
+              if (warn) new Notice(`Warning: ${warn}`, 10000);
+              this.display();
+            }));
         new Setting(card).setName(t('codex_approval'))
           .setDesc(t('codex_approval_desc'))
           .addDropdown(d => d.addOption('', '(default)').addOption('untrusted', 'untrusted').addOption('on-failure', 'on-failure').addOption('on-request', 'on-request').addOption('never', 'never ⚠')
             .setValue(ep.codexApprovalPolicy ?? '')
-            .onChange(async v => { ep.codexApprovalPolicy = (v || undefined) as any; await this.plugin.saveSettings(); }));
+            .onChange(async v => {
+              ep.codexApprovalPolicy = (v || undefined) as any;
+              await this.plugin.saveSettings();
+              const warn = codexSafetyWarning(ep);
+              if (warn) new Notice(`Warning: ${warn}`, 10000);
+              this.display();
+            }));
         new Setting(card).setName(t('codex_use_oss'))
           .addToggle(tg => tg.setValue(!!ep.codexUseOss).onChange(async v => { ep.codexUseOss = v; await this.plugin.saveSettings(); }));
         new Setting(card).setName(t('codex_config_overrides'))
@@ -1083,6 +1159,8 @@ class AddEndpointModal extends Modal {
     }
 
     if (this.selectedKind === 'codex-cli' || this.selectedKind === 'claude-code-cli') {
+      const warn = localCliWarning(this.selectedKind);
+      if (warn) renderWarningHint(formEl, warn);
       const binName = this.selectedKind === 'codex-cli' ? 'codex' : 'claude';
       row('Binary', (p) => {
         const wrap = p.createEl('div', { cls: 'nc-row-with-btn' });
@@ -1117,12 +1195,17 @@ class AddEndpointModal extends Modal {
       this.detectStatusEl.setText('Need Base URL + API Key first.');
       return;
     }
+    const baseUrl = this.validBaseUrl(this.draft.baseUrl);
+    if (!baseUrl) {
+      this.detectStatusEl.setText('Base URL must be http(s).');
+      return;
+    }
     this.detectStatusEl.setText('Detecting…');
     btn.textContent = 'detecting…';
     // Use plaintext key directly for detection — never persisted from this temp ep.
     const ep: Endpoint = {
       id: 'tmp', kind: 'custom-api',
-      label: this.draft.label ?? '', baseUrl: this.draft.baseUrl, apiKey: this.plainKey,
+      label: this.draft.label ?? '', baseUrl, apiKey: this.plainKey,
       apiStyle: this.draft.apiStyle ?? 'openai',
     };
     try {
@@ -1153,6 +1236,11 @@ class AddEndpointModal extends Modal {
     if (this.selectedKind === 'custom-api' && (!this.draft.baseUrl || !this.plainKey)) {
       new Notice('Need Base URL + API Key.'); return;
     }
+    if (this.selectedKind === 'custom-api') {
+      const baseUrl = this.validBaseUrl(this.draft.baseUrl);
+      if (!baseUrl) { new Notice('Base URL must be http(s).'); return; }
+      this.draft.baseUrl = baseUrl;
+    }
     const ep: Endpoint = {
       id: uid(),
       kind: this.selectedKind,
@@ -1163,8 +1251,22 @@ class AddEndpointModal extends Modal {
     } as Endpoint;
     if (ep.kind === 'claude-code-cli' && !ep.maxTurns) ep.maxTurns = 1;
     if (ep.kind === 'claude-code-cli' && ep.bareMode == null) ep.bareMode = true;
+    const warn = localCliWarning(ep.kind) ?? codexSafetyWarning(ep);
+    if (warn) new Notice(`Warning: ${warn}`, 10000);
     this.onSave(ep, this.plainKey);
     this.close();
+  }
+
+  private validBaseUrl(raw?: string): string | null {
+    const trimmed = (raw ?? '').trim();
+    if (!trimmed) return null;
+    try {
+      const u = new URL(trimmed);
+      if (!/^https?:$/.test(u.protocol)) return null;
+      return trimmed.replace(/\/+$/, '');
+    } catch {
+      return null;
+    }
   }
 }
 

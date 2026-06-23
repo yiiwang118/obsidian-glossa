@@ -43,6 +43,7 @@ interface MsgUI {
   msg: ChatMessage;
   wrap: HTMLElement;
   body: HTMLElement;
+  activityEl?: HTMLElement;
   toolStack?: HTMLElement;
   actionsEl?: HTMLElement;
   reasoningCard?: HTMLElement;
@@ -120,6 +121,7 @@ export class GlossaView extends ItemView {
   private sessionCostUSD = 0;
   private sessionInputTokens = 0;
   private sessionOutputTokens = 0;
+  private currentActivityStartedAt = 0;
 
   constructor(leaf: WorkspaceLeaf, plugin: GlossaPlugin) {
     super(leaf);
@@ -194,7 +196,7 @@ export class GlossaView extends ItemView {
     this.refreshFromSettings();
   }
 
-  onDomSelectionChange = debounce(() => this.refreshSelection(), 300);
+  onDomSelectionChange = debounce(() => this.refreshSelection(), 120);
 
   /** Apply user-tunable CSS variables to the view root. The single Font size
    *  slider in Settings drives both the base prose font (`--nc-base-font`) and
@@ -296,6 +298,7 @@ export class GlossaView extends ItemView {
   private histPopEl: HTMLElement | null = null;
   private histPopCleanup: (() => void) | null = null;
   private async toggleHistoryPopover(anchor: HTMLElement) {
+    this.popup.hide();
     if (this.histPopEl) { this.closeHistoryPopover(); return; }
     const { renderHistoryPopover } = await import('./history_modal');
     // NO backdrop — earlier feedback: dimming the rest of the page makes the
@@ -312,7 +315,10 @@ export class GlossaView extends ItemView {
     requestAnimationFrame(() => this.positionHistoryPopover(anchor));
 
     const cleanupView = renderHistoryPopover(host, this.plugin, {
-      onPick: (s) => { this.closeHistoryPopover(); this.loadSession(s.id); },
+      onPick: (s) => {
+        this.closeHistoryPopover({ immediate: true });
+        requestAnimationFrame(() => this.loadSession(s.id));
+      },
       onClose: () => this.closeHistoryPopover(),
     });
 
@@ -351,12 +357,16 @@ export class GlossaView extends ItemView {
     this.histPopEl.style.left = `${left}px`;
     this.histPopEl.style.top = `${top}px`;
   }
-  private closeHistoryPopover() {
+  private closeHistoryPopover(opts: { immediate?: boolean } = {}) {
     if (!this.histPopEl) return;
     this.histPopCleanup?.();
     this.histPopCleanup = null;
     const el = this.histPopEl;
     this.histPopEl = null;
+    if (opts.immediate) {
+      el.remove();
+      return;
+    }
     el.classList.add('closing');
     setTimeout(() => el.remove(), 140);
   }
@@ -420,6 +430,20 @@ export class GlossaView extends ItemView {
     this.tokenBadge.textContent = formatTokenCount(total);
     this.tokenBadge.title = `Context: ${ctxN} tok${selN ? ` + Selection: ${selN} tok` : ''} = ${total}`;
     this.tokenBadge.toggleClass('warn', total > this.plugin.settings.warnTokenThreshold);
+  }
+
+  private effectiveContextWindow(model: string | undefined | null = this.activeEndpoint()?.model): {
+    maxCtx: number;
+    inferred: number | null;
+    settingsMax: number;
+    source: 'model' | 'settings';
+  } {
+    const settingsMax = this.plugin.settings.maxContextTokens;
+    const inferred = modelContextWindow(model);
+    if (inferred && inferred > 0) {
+      return { maxCtx: Math.min(inferred, settingsMax), inferred, settingsMax, source: 'model' };
+    }
+    return { maxCtx: settingsMax, inferred: null, settingsMax, source: 'settings' };
   }
 
   /* ============================================================
@@ -490,20 +514,67 @@ export class GlossaView extends ItemView {
     if (!this.selectionPreviewEl) return;
     clear(this.selectionPreviewEl);
     if (!this.currentSelection) { this.selectionPreviewEl.style.display = 'none'; return; }
+    const sel = this.currentSelection;
+    const text = sel.text;
+    const lineCount = this.selectionLineCount(text);
+    const isLarge = text.length > 360 || lineCount > 6;
+    const source = this.selectionSourceLabel(sel.source);
+    const title = this.selectionTitle(text, source);
+    const preview = this.compactSelectionPreview(text, isLarge ? 140 : 220);
     this.selectionPreviewEl.style.display = '';
+    this.selectionPreviewEl.classList.toggle('is-large', isLarge);
     const ic = el('span', { className: 'nc-selection-preview-icon', parent: this.selectionPreviewEl });
     ic.innerHTML = ICON.quote;
     const body = el('div', { className: 'nc-selection-preview-body', parent: this.selectionPreviewEl });
-    el('div', { className: 'nc-selection-preview-text', text: this.currentSelection.text, parent: body });
+    const head = el('div', { className: 'nc-selection-preview-head', parent: body });
+    el('span', { className: 'nc-selection-preview-title', text: title, parent: head });
     const meta = el('div', { className: 'nc-selection-preview-meta', parent: body });
-    el('span', { className: 'nc-selection-preview-source', text: this.currentSelection.source, parent: meta });
-    if (this.currentSelection.file) {
-      el('span', { className: 'nc-selection-preview-file', text: this.currentSelection.file.basename, title: this.currentSelection.file.path, parent: meta });
+    el('span', { className: 'nc-selection-preview-source', text: source, parent: meta });
+    if (sel.file) {
+      el('span', { className: 'nc-selection-preview-file', text: sel.file.basename, title: sel.file.path, parent: meta });
     }
-    el('span', { className: 'nc-selection-preview-chars', text: `${this.currentSelection.text.length} chars`, parent: meta });
+    el('span', { className: 'nc-selection-preview-chars', text: `${text.length.toLocaleString()} chars${lineCount > 1 ? ` · ${lineCount.toLocaleString()} lines` : ''}`, parent: meta });
+    el('div', { className: 'nc-selection-preview-text', text: preview, title: text.length > preview.length ? text.slice(0, 1200) : undefined, parent: body });
     const close = el('span', { className: 'nc-selection-preview-close', parent: this.selectionPreviewEl, title: 'Detach selection' });
     close.innerHTML = ICON.x;
     close.onclick = () => { this.currentSelection = null; this.renderSelectionPreview(); };
+  }
+
+  private selectionSourceLabel(source: string) {
+    if (source === 'markdown') return 'Markdown';
+    if (source === 'pdf') return 'PDF';
+    if (source === 'html') return 'HTML';
+    return 'Selection';
+  }
+
+  private selectionLineCount(text: string) {
+    if (!text) return 0;
+    return text.split(/\r\n|\r|\n/).length;
+  }
+
+  private selectionTitle(text: string, source: string) {
+    const lines = text.split(/\r\n|\r|\n/).map(s => s.trim()).filter(Boolean);
+    const tableLines = lines.filter(s => /^\|.+\|$/.test(s)).length;
+    if (tableLines >= 2) return 'Table selection';
+    if (text.length > 1200 || lines.length > 12) return 'Large selection';
+    if (source === 'PDF') return 'PDF selection';
+    return 'Selected text';
+  }
+
+  private compactSelectionPreview(text: string, maxChars: number) {
+    const normalized = text
+      .replace(/\|[-:\s|]+\|/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) return '';
+    if (normalized.length <= maxChars) return normalized;
+    return normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd() + '…';
+  }
+
+  private compactSelectionEcho(text: string) {
+    const limit = 1600;
+    if (text.length <= limit) return text;
+    return text.slice(0, limit).trimEnd() + `\n...[truncated ${text.length.toLocaleString()} chars]`;
   }
 
   private contextBarSig = '';
@@ -694,6 +765,14 @@ export class GlossaView extends ItemView {
     // DOM order matches the model's thought→speech progression: reasoning FIRST,
     // then prose, then tool actions. Read top-to-bottom = chronologically correct.
 
+    let activityEl: HTMLElement | undefined;
+    if (m.role === 'assistant') {
+      activityEl = el('div', { className: 'nc-turn-activity', parent: wrap });
+      el('span', { className: 'nc-turn-activity-dot', parent: activityEl });
+      el('span', { className: 'nc-turn-activity-text', text: 'Thinking...', parent: activityEl });
+      el('span', { className: 'nc-turn-activity-time', parent: activityEl });
+    }
+
     // Persistent reasoning card (separate from inline <thinking> blocks). Goes ABOVE
     // the body so reasoning visually precedes the prose it produced.
     let reasoningCard: HTMLElement | undefined;
@@ -783,9 +862,22 @@ export class GlossaView extends ItemView {
     // Selection echo (user-side): show the quoted snippet that went into the prompt.
     if (m.role === 'user' && m.selectionEcho) {
       const echo = el('details', { className: 'nc-selection-echo', parent: wrap });
-      el('summary', { className: 'nc-selection-echo-summary', text: `📎 Selection · ${m.selectionEcho.source}${m.selectionEcho.file ? ' · ' + m.selectionEcho.file : ''} (${m.selectionEcho.text.length} chars)`, parent: echo });
+      const src = this.selectionSourceLabel(m.selectionEcho.source);
+      const lines = this.selectionLineCount(m.selectionEcho.text);
+      const title = this.selectionTitle(m.selectionEcho.text, src);
+      el('summary', {
+        className: 'nc-selection-echo-summary',
+        text: `📎 ${title} · ${src}${m.selectionEcho.file ? ' · ' + m.selectionEcho.file : ''} (${m.selectionEcho.text.length.toLocaleString()} chars${lines > 1 ? ` · ${lines.toLocaleString()} lines` : ''})`,
+        parent: echo,
+      });
       const pre = el('pre', { className: 'nc-selection-echo-body', parent: echo });
-      pre.textContent = m.selectionEcho.text.slice(0, 4000) + (m.selectionEcho.text.length > 4000 ? '\n…[truncated]' : '');
+      let rendered = false;
+      const renderEcho = () => {
+        if (rendered || !echo.open) return;
+        rendered = true;
+        pre.textContent = this.compactSelectionEcho(m.selectionEcho!.text);
+      };
+      echo.addEventListener('toggle', renderEcho);
     }
 
     // Tool event stack (after body — actions follow the explanation that triggered them).
@@ -798,7 +890,7 @@ export class GlossaView extends ItemView {
       }
     }
 
-    const ui: MsgUI = { msg: m, wrap, body, toolStack, reasoningCard, reasoningBody };
+    const ui: MsgUI = { msg: m, wrap, body, activityEl, toolStack, reasoningCard, reasoningBody };
     this.msgUIs.set(m.id, ui);
 
     this.renderMessageActions(wrap, m);
@@ -807,8 +899,27 @@ export class GlossaView extends ItemView {
     // History replay: apply preamble style for messages with text+tools loaded from storage.
     if (m.role === 'assistant') this.applyPreambleStyle(ui, m);
 
-    this.scrollToBottom();
+    if (!this.messagesEl.classList.contains('no-anim')) this.scrollToBottom();
     return ui;
+  }
+
+  private setTurnActivity(ui: MsgUI | null, label: string, status: 'thinking' | 'tool' | 'idle' = 'thinking') {
+    if (!ui?.activityEl) return;
+    if (status === 'idle') {
+      ui.activityEl.classList.remove('active', 'tool', 'thinking');
+      ui.activityEl.removeAttribute('data-started-at');
+      const time = ui.activityEl.querySelector('.nc-turn-activity-time') as HTMLElement | null;
+      if (time) time.textContent = '';
+      return;
+    }
+    ui.activityEl.classList.add('active');
+    ui.activityEl.classList.toggle('tool', status === 'tool');
+    ui.activityEl.classList.toggle('thinking', status === 'thinking');
+    if (!ui.activityEl.getAttribute('data-started-at')) {
+      ui.activityEl.setAttribute('data-started-at', String(Date.now()));
+    }
+    const text = ui.activityEl.querySelector('.nc-turn-activity-text') as HTMLElement | null;
+    if (text) text.textContent = label;
   }
 
   /* ---------- Plan board (todo_write sticky) ---------- */
@@ -825,19 +936,39 @@ export class GlossaView extends ItemView {
     this.persistSession();
   }
 
+  private closeOpenPlanItems(status: 'completed' | 'stopped') {
+    const shouldClose = (p: PlanItem) => status === 'completed'
+      ? p.status !== 'completed'
+      : p.status !== 'completed';
+    if (!this.session.plan?.some(shouldClose)) return;
+    this.session.plan = this.session.plan.map(p => {
+      if (!shouldClose(p)) return p;
+      if (status === 'completed') return { ...p, status: 'completed' as const };
+      const stopped = /\s\(stopped\)$/.test(p.content) ? p.content : `${p.content} (stopped)`;
+      return { ...p, content: stopped, status: 'pending' as const };
+    });
+    this.renderPlanBoard();
+  }
+
   private renderPlanBoard() {
     if (!this.planBoardEl) return;
     if (this.currentPlan.length === 0) { this.planBoardEl.style.display = 'none'; clear(this.planBoardEl); return; }
-    this.planBoardEl.style.display = '';
-    clear(this.planBoardEl);
 
     const done = this.currentPlan.filter(i => i.status === 'completed').length;
     const total = this.currentPlan.length;
-    // Auto-collapse the body when every item is completed — header still shows the
-    // final progress badge so users can re-open it to review.
     const allDone = total > 0 && done === total;
-    if (allDone) this.planBoardEl.classList.add('collapsed');
-    else this.planBoardEl.classList.remove('collapsed');
+    const hasLiveWork = this.streaming && this.currentPlan.some(i =>
+      i.status === 'in_progress' ||
+      (i.status === 'pending' && !/\s\(stopped\)$/.test(i.content)));
+    if (allDone || !hasLiveWork) {
+      this.planBoardEl.style.display = 'none';
+      clear(this.planBoardEl);
+      return;
+    }
+
+    this.planBoardEl.style.display = '';
+    clear(this.planBoardEl);
+    this.planBoardEl.classList.remove('collapsed');
 
     const header = el('div', { className: 'nc-plan-header', parent: this.planBoardEl });
     const titleWrap = el('div', { className: 'nc-plan-title-wrap', parent: header });
@@ -872,7 +1003,8 @@ export class GlossaView extends ItemView {
   private rebuildPlanFromSession() {
     if (this.session.plan && this.session.plan.length > 0) { this.renderPlanBoard(); return; }
     let recovered: PlanItem[] = [];
-    for (const m of this.session.messages) {
+    for (let i = this.session.messages.length - 1; i >= 0; i--) {
+      const m = this.session.messages[i];
       for (const ev of m.toolEvents ?? []) {
         if (ev.name === 'todo_write' && Array.isArray(ev.args?.items)) {
           recovered = ev.args.items.map((it: any) => ({
@@ -880,8 +1012,10 @@ export class GlossaView extends ItemView {
             activeForm: typeof it?.activeForm === 'string' ? it.activeForm : undefined,
             status: (['pending','in_progress','completed'].includes(it?.status) ? it.status : 'pending') as PlanItem['status'],
           }));
+          break;
         }
       }
+      if (recovered.length > 0) break;
     }
     if (recovered.length > 0) this.session.plan = recovered;
     this.renderPlanBoard();
@@ -1063,6 +1197,63 @@ export class GlossaView extends ItemView {
     if (hasFailure) (summary.querySelector('.nc-tool-stack-summary-ok') as HTMLElement).textContent = 'some failed';
   }
 
+  private compactProcessForTurn(turnId: string | undefined) {
+    if (!turnId) return;
+    const uis = this.session.messages
+      .filter(m => m.role === 'assistant' && m.turnId === turnId)
+      .map(m => this.msgUIs.get(m.id))
+      .filter((ui): ui is MsgUI => !!ui);
+    const processUis = uis.filter(ui => {
+      const hasProcessTools = (ui.msg.toolEvents ?? []).some(ev => ev.name !== 'attempt_completion');
+      const hasReasoning = !!ui.msg.reasoningContent?.trim();
+      const hasBodyText = !!ui.msg.content?.trim();
+      return hasProcessTools || (hasReasoning && !hasBodyText);
+    });
+    if (processUis.length < 2) return;
+
+    const first = processUis[0];
+    // Collapsed process rows are the visible start of this assistant turn, so
+    // they must keep the Glossa role even if the first segment was a preamble
+    // or continuation whose role is normally hidden.
+    first.wrap.classList.add('nc-process-has-role');
+    first.wrap.querySelector(':scope > .nc-process-summary')?.remove();
+    for (const ui of processUis) {
+      ui.wrap.classList.remove('nc-process-folded-away', 'nc-process-anchor', 'nc-process-expanded');
+    }
+
+    const reasoningCount = processUis.filter(ui => ui.msg.reasoningContent?.trim()).length;
+    const toolCount = processUis.reduce((n, ui) => n + (ui.msg.toolEvents?.length ?? 0), 0);
+    const summary = el('button', { className: 'nc-process-summary' });
+    const roleRow = first.wrap.querySelector(':scope > .nc-msg-role');
+    first.wrap.insertBefore(summary, roleRow?.nextSibling ?? first.wrap.firstChild);
+    const label = `Process · ${reasoningCount} reasoning · ${toolCount} tools`;
+    summary.innerHTML = `<span class="nc-process-dot"></span><span>${label}</span><span class="nc-process-chev">▸</span>`;
+
+    const setExpanded = (expanded: boolean) => {
+      summary.classList.toggle('expanded', expanded);
+      const chev = summary.querySelector('.nc-process-chev') as HTMLElement | null;
+      if (chev) chev.textContent = expanded ? '▾' : '▸';
+      for (let i = 0; i < processUis.length; i++) {
+        const ui = processUis[i];
+        ui.wrap.classList.toggle('nc-process-expanded', expanded);
+        ui.wrap.classList.toggle('nc-process-anchor', !expanded && i === 0);
+        ui.wrap.classList.toggle('nc-process-folded-away', !expanded && i > 0);
+      }
+    };
+    summary.onclick = () => setExpanded(!summary.classList.contains('expanded'));
+    setExpanded(false);
+  }
+
+  private compactAllProcessGroups() {
+    const seen = new Set<string>();
+    for (const m of this.session.messages) {
+      if (m.role === 'assistant' && m.turnId && !seen.has(m.turnId)) {
+        seen.add(m.turnId);
+        this.compactProcessForTurn(m.turnId);
+      }
+    }
+  }
+
   private renderMessageActions(wrap: HTMLElement, m: ChatMessage) {
     // Footer row: timestamp on the left + small action icons on the right,
     // ALWAYS visible (no hover gating). Mirrors the iMessage / Slack pattern.
@@ -1223,6 +1414,7 @@ export class GlossaView extends ItemView {
     if (this.currentAsstMsg && this.streamingMsgUI) {
       this.currentAsstMsg.content = this.streamingBuf;
       this.streamingMsgUI.wrap.classList.remove('streaming');
+      this.setTurnActivity(this.streamingMsgUI, '', 'idle');
       this.finalizeReasoningLabel(this.streamingMsgUI, this.currentAsstMsg);
       // Synchronously apply preamble/has-tools styling — fire-and-forget the
       // markdown re-render so we don't block the new text from showing.
@@ -1233,6 +1425,8 @@ export class GlossaView extends ItemView {
     this.streamingBuf = '';
     this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
     this.streamingMsgUI.wrap.classList.add('streaming');
+    this.currentActivityStartedAt = Date.now();
+    this.setTurnActivity(this.streamingMsgUI, 'Thinking...', 'thinking');
     this.streamingStartedAt = Date.now();    // per-segment timer
   }
 
@@ -1339,7 +1533,7 @@ export class GlossaView extends ItemView {
 
       /* --- "Always allow" rule selector --- */
       // Show only when the tool has a path-ish arg (so folder/path scopes make sense)
-      const path = (args?.path ?? args?.file_path) as string | undefined;
+      const path = (args?.path ?? args?.file_path ?? args?.target_path ?? args?.to ?? args?.from ?? args?.base_path ?? args?.template_path) as string | undefined;
       const folder = path ? path.split('/').slice(0, -1).join('/') : undefined;
       type RuleChoice = 'once' | 'session-tool' | 'always-tool' | 'always-folder' | 'always-path' | 'always-mcp-server';
       let ruleChoice: RuleChoice = 'once';
@@ -1447,6 +1641,12 @@ export class GlossaView extends ItemView {
         else if (elapsed < 60) elEl.textContent = `${elapsed.toFixed(1)}s`;
         else elEl.textContent = `${Math.floor(elapsed / 60)}m${(elapsed % 60).toFixed(0).padStart(2, '0')}s`;
       }
+    }
+    const activity = this.streamingMsgUI?.activityEl;
+    if (activity?.classList.contains('active')) {
+      const time = activity.querySelector('.nc-turn-activity-time') as HTMLElement | null;
+      const started = parseInt(activity.getAttribute('data-started-at') || String(this.currentActivityStartedAt || Date.now()));
+      if (time && started) time.textContent = formatElapsed(Date.now() - started);
     }
     if (!this.streamingMsgUI?.toolStack) return;
     const now = Date.now();
@@ -1629,6 +1829,7 @@ export class GlossaView extends ItemView {
    *  open against the SAME anchor, second click hides it (toggle). If open
    *  against a different anchor, switch to the new one. */
   private togglePopup(anchor: HTMLElement, items: PopupItem[]) {
+    this.closeHistoryPopover();
     if (this.popup.isOpen() && this.popup.currentAnchor() === anchor) {
       this.popup.hide();
       return;
@@ -1951,7 +2152,7 @@ export class GlossaView extends ItemView {
       });
     }
     if (items.length === 0) this.popup.hide();
-    else this.popup.show(this.inputEl, items);
+    else { this.closeHistoryPopover(); this.popup.show(this.inputEl, items); }
   }
 
   private showSlashPopup(query: string, tokenStart: number) {
@@ -1995,7 +2196,7 @@ export class GlossaView extends ItemView {
 
     const items = [...actionItems, ...templateItems];
     if (items.length === 0) this.popup.hide();
-    else this.popup.show(this.inputEl, items);
+    else { this.closeHistoryPopover(); this.popup.show(this.inputEl, items); }
   }
 
   private removeToken(tokenStart: number) {
@@ -2211,6 +2412,8 @@ export class GlossaView extends ItemView {
       clear(this.messagesEl);
       this.messagesEl.classList.add('no-anim');
       for (const m of this.session.messages) this.renderMessage(m);
+      this.compactAllProcessGroups();
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
       requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
       await this.flushPersistNow();
       quickNotice(`Compacted ${result.summarisedCount} msgs → 1 summary (~${formatTokenCount(result.tokensSaved)} tok saved)`);
@@ -2228,6 +2431,8 @@ export class GlossaView extends ItemView {
     clear(this.messagesEl);
     this.messagesEl.classList.add('no-anim');
     for (const m of this.session.messages) this.renderMessage(m);
+    this.compactAllProcessGroups();
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
     await this.flushPersistNow();
     quickNotice('Restored pre-compact history.');
@@ -2286,9 +2491,10 @@ export class GlossaView extends ItemView {
     // reactive (context_overflow) compaction inside loop.ts is suppressed for
     // this turn — otherwise we'd burn TWO compaction LLM calls back-to-back.
     let preSubmitCompacted = false;
+    const effectiveWindow = this.effectiveContextWindow(epReady.model);
     if (this.plugin.settings.autoCompactEnabled) {
       const used = estimateSessionTokens(this.session);
-      const budget = this.plugin.settings.maxContextTokens;
+      const budget = effectiveWindow.maxCtx;
       const threshold = budget * (this.plugin.settings.autoCompactThresholdPct / 100);
       if (used > threshold) {
         await this.runAutoCompact(epReady, 'auto');
@@ -2337,6 +2543,7 @@ export class GlossaView extends ItemView {
 
     // Start a new assistant message — fresh turnId for this user turn.
     this.currentTurnId = uid();
+    const turnIdForThisRun = this.currentTurnId;
     this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId };
     this.session.messages.push(this.currentAsstMsg);
     this.streamingBuf = '';
@@ -2348,6 +2555,8 @@ export class GlossaView extends ItemView {
     this.updateSubmitBtn();
     this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
     this.streamingMsgUI.wrap.classList.add('streaming');
+    this.currentActivityStartedAt = Date.now();
+    this.setTurnActivity(this.streamingMsgUI, 'Thinking...', 'thinking');
     this.streamingStartedAt = Date.now();
 
     // Wrap everything that follows in try/finally — any thrown error (provider
@@ -2355,14 +2564,19 @@ export class GlossaView extends ItemView {
     // streaming flag. Without this guard the flag stays stuck on `true` and
     // every subsequent submit() returns early at the top check, giving the
     // "model stopped answering after one bad turn" symptom the user reported.
+    let loopHadError = false;
     try {
 
     const vaultRoot = (this.app.vault.adapter as any).basePath as string | undefined;
     const provider = buildProvider(epReady, this.plugin.settings.globalProxy, vaultRoot);
-    // Hard cap = a hair below the absolute context window so we leave room for the
-    // system prompt + the assistant's response. Soft cap is the user's settings value.
-    const softCap = this.plugin.settings.maxContextTokens;
-    const hardCap = Math.floor(softCap * 0.92);
+    // Hard cap = a hair below the effective model window so we leave room for
+    // the system prompt + assistant response. The previous code displayed the
+    // model window in the footer but still budgeted attachments against the
+    // settings cap, which let a 128k model receive a 1M-sized prompt.
+    const historyBudgetTokens = estimateSessionTokens(this.session);
+    const responseReserve = Math.min(16_000, Math.max(4_000, Math.floor(effectiveWindow.maxCtx * 0.06)));
+    const softCap = Math.max(1, Math.floor(effectiveWindow.maxCtx * 0.92) - historyBudgetTokens - responseReserve);
+    const hardCap = Math.max(1, Math.floor(effectiveWindow.maxCtx * 0.98) - historyBudgetTokens - responseReserve);
     const { text: ctxBlock, dropped, forcedDrops } = this.ctx.asPromptBlock(softCap, hardCap);
     if (dropped.length > 0) {
       quickNotice(`Context budget: dropped ${dropped.length} unpinned item(s) (${dropped.map(d => d.label).join(', ').slice(0, 80)}) to fit ${formatTokenCount(softCap)} tokens. Pin to keep.`);
@@ -2478,6 +2692,8 @@ export class GlossaView extends ItemView {
           this.session.messages.push(this.currentAsstMsg);
           this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
           this.streamingMsgUI.wrap.classList.add('streaming');
+          this.currentActivityStartedAt = Date.now();
+          this.setTurnActivity(this.streamingMsgUI, 'Compacted, retrying...', 'thinking');
         }
         // Rebuild the message array for the loop from the compacted session, excluding
         // the assistant placeholder + the user turn itself (the loop appends both).
@@ -2501,6 +2717,7 @@ export class GlossaView extends ItemView {
         if (!live()) return;
         if (!this.currentAsstMsg) return;
         this.currentAsstMsg.reasoningContent = (this.currentAsstMsg.reasoningContent ?? '') + delta;
+        this.setTurnActivity(this.streamingMsgUI, 'Thinking...', 'thinking');
         this.scheduleReasoningRender();
       },
       onToolStart: (ev) => {
@@ -2509,6 +2726,8 @@ export class GlossaView extends ItemView {
         this.currentAsstMsg.toolEvents = this.currentAsstMsg.toolEvents ?? [];
         if (!this.currentAsstMsg.toolEvents.find(t => t.id === ev.id)) this.currentAsstMsg.toolEvents.push(ev);
         this.upsertToolEvent(this.streamingMsgUI, ev);
+        this.currentActivityStartedAt = ev.startedAt || Date.now();
+        this.setTurnActivity(this.streamingMsgUI, activityDescriptionFor(ev.name, ev.args), 'tool');
         this.streamingMsgUI.wrap.classList.add('has-tools');
         this.lastChunkWasTool = true;
       },
@@ -2520,6 +2739,13 @@ export class GlossaView extends ItemView {
         if (idx >= 0) list[idx] = ev; else list.push(ev);
         this.currentAsstMsg.toolEvents = list;
         this.upsertToolEvent(this.streamingMsgUI, ev);
+        if (ev.status === 'running' || ev.status === 'pending') {
+          this.currentActivityStartedAt = ev.startedAt || Date.now();
+          this.setTurnActivity(this.streamingMsgUI, activityDescriptionFor(ev.name, ev.args), 'tool');
+        } else {
+          this.currentActivityStartedAt = Date.now();
+          this.setTurnActivity(this.streamingMsgUI, ev.status === 'success' ? 'Processing result...' : 'Handling tool result...', 'thinking');
+        }
         if (ev.name === 'todo_write' && Array.isArray(ev.args?.items)) {
           this.updatePlanBoard(ev.args.items);
         }
@@ -2530,6 +2756,7 @@ export class GlossaView extends ItemView {
         if (this.currentAsstMsg && this.streamingMsgUI) {
           this.currentAsstMsg.content = this.streamingBuf;
           this.streamingMsgUI.wrap.classList.remove('streaming');
+          this.setTurnActivity(this.streamingMsgUI, '', 'idle');
           this.finalizeReasoningLabel(this.streamingMsgUI, this.currentAsstMsg);
           await this.finalizeAsstRender(this.streamingMsgUI, this.currentAsstMsg);
         }
@@ -2542,10 +2769,13 @@ export class GlossaView extends ItemView {
         this.lastChunkWasTool = false;
         this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
         this.streamingMsgUI.wrap.classList.add('streaming');
+        this.currentActivityStartedAt = Date.now();
+        this.setTurnActivity(this.streamingMsgUI, 'Thinking...', 'thinking');
         this.streamingStartedAt = Date.now();
       },
       onError: (err) => {
         if (!live()) return;
+        loopHadError = true;
         this.streamingBuf += `\n\n**[error]** ${err}`;
         if (this.currentAsstMsg) this.currentAsstMsg.content = this.streamingBuf;
         this.scheduleStreamingRender();
@@ -2568,11 +2798,13 @@ export class GlossaView extends ItemView {
     if (this.currentAsstMsg && this.streamingMsgUI) {
       this.currentAsstMsg.content = this.streamingBuf;
       this.streamingMsgUI.wrap.classList.remove('streaming');
+      this.setTurnActivity(this.streamingMsgUI, '', 'idle');
       this.finalizeReasoningLabel(this.streamingMsgUI, this.currentAsstMsg);
       await this.finalizeAsstRender(this.streamingMsgUI, this.currentAsstMsg);
     }
     for (const ui of this.msgUIs.values()) {
       ui.wrap.classList.remove('streaming');
+      this.setTurnActivity(ui, '', 'idle');
       this.finalizeReasoningLabel(ui, ui.msg);
       // Belt-and-suspenders: any tool card left in 'running' / 'pending' state
       // (because the provider was SIGTERM'd mid-flight) gets marked 'denied'
@@ -2586,13 +2818,9 @@ export class GlossaView extends ItemView {
         }
       }
     }
-    // If the plan has an in_progress item but we terminated abnormally, mark it as
-    // blocked so the user sees the agent gave up rather than is "still running".
-    if (this.session.plan?.some(p => p.status === 'in_progress')) {
-      this.session.plan = this.session.plan.map(p =>
-        p.status === 'in_progress' ? { ...p, content: `${p.content} (stopped)`, status: 'pending' as const } : p);
-      this.renderPlanBoard();
-    }
+    const cancelled = !!this.abortCtl?.signal.aborted;
+    this.closeOpenPlanItems(loopHadError || cancelled ? 'stopped' : 'completed');
+    this.compactProcessForTurn(turnIdForThisRun);
 
     this.renderCostBar();
     this.session.updatedAt = Date.now();
@@ -2610,6 +2838,7 @@ export class GlossaView extends ItemView {
     if (needsTitle && text.trim()) this.session.title = text.slice(0, 60);
     await this.flushPersistNow();
     } catch (err: any) {
+      this.closeOpenPlanItems('stopped');
       // Surface the error to the user AND release the streaming lock.
       console.error('[Glossa] submit failed', err);
       quickNotice(bi(`Error: ${err?.message ?? err}`, `出错：${err?.message ?? err}`));
@@ -2628,6 +2857,7 @@ export class GlossaView extends ItemView {
     } finally {
       this.stopElapsedTicker();
       this.streaming = false;
+      this.setTurnActivity(this.streamingMsgUI, '', 'idle');
       // Drop the view-root streaming class so the act pulse stops animating
       // (paired with .add() at submit start).
       this.rootEl?.classList.remove('glossa-streaming');
@@ -2740,10 +2970,8 @@ export class GlossaView extends ItemView {
     // model id — that's what users compare against (Codex's own UI displays
     // 256k for codex-cli, not the plugin's 1M soft cap). Fall back to the
     // settings maximum when the model is unknown.
-    const settingsMax = this.plugin.settings.maxContextTokens;
     const active = this.activeEndpoint();
-    const inferred = modelContextWindow(active?.model);
-    const maxCtx = inferred ?? settingsMax;
+    const { maxCtx, inferred, settingsMax, source } = this.effectiveContextWindow(active?.model);
     const hardCap = Math.floor(maxCtx * 0.92);
 
     // Session/history contribution
@@ -2766,10 +2994,12 @@ export class GlossaView extends ItemView {
       const pct = Math.min(100, (totalPromptTokens / maxCtx) * 100);
       const overHard = totalPromptTokens > hardCap;
       const tooltip = [
-        `Context bar: ${formatTokenCount(ctxTokens)}`,
+        `Current attachments: ${formatTokenCount(ctxTokens)}`,
         `History: ${formatTokenCount(sessionCtxTokens)}`,
         `Total: ${formatTokenCount(totalPromptTokens)} / ${formatTokenCount(maxCtx)} (${pct.toFixed(0)}%)`,
-        `Hard cap: ${formatTokenCount(hardCap)} — items get force-dropped beyond this`,
+        `Window source: ${source === 'model' ? `model table (${active?.model ?? 'unknown'})` : `settings fallback (${formatTokenCount(settingsMax)})`}`,
+        inferred && inferred !== maxCtx ? `Model window: ${formatTokenCount(inferred)}; settings cap: ${formatTokenCount(settingsMax)}` : '',
+        `Soft hard-cap marker: ${formatTokenCount(hardCap)} — attachments are dropped/compaction is attempted before sending`,
       ].join('\n');
       const bar = el('div', { className: 'nc-budget-bar', parent: this.costBar, title: tooltip });
       // Sub-segments to show ctx vs. history split
@@ -2789,12 +3019,12 @@ export class GlossaView extends ItemView {
         const marker = el('div', { className: 'nc-budget-hard-cap', parent: bar });
         marker.style.left = ((hardCap / maxCtx) * 100).toFixed(1) + '%';
       }
-      const label = `${formatTokenCount(totalPromptTokens)} / ${formatTokenCount(maxCtx)}`;
+      const label = `ctx ${formatTokenCount(totalPromptTokens)} / ${formatTokenCount(maxCtx)}`;
       const lbl = el('span', { className: 'nc-budget-label' + (overHard ? ' over' : ''), text: label, parent: this.costBar });
       lbl.title = tooltip;
     }
     if (hasUsage) {
-      el('span', { text: `in ${formatTokenCount(this.sessionInputTokens)}`, parent: this.costBar });
+      el('span', { text: `usage in ${formatTokenCount(this.sessionInputTokens)}`, parent: this.costBar });
       el('span', { text: `out ${formatTokenCount(this.sessionOutputTokens)}`, parent: this.costBar });
       if (this.sessionCostUSD > 0) el('span', { text: `$${this.sessionCostUSD.toFixed(4)}`, parent: this.costBar });
     }
@@ -2857,6 +3087,8 @@ export class GlossaView extends ItemView {
       // normally again.
       this.messagesEl.classList.add('no-anim');
       for (const m of this.session.messages) this.renderMessage(m);
+      this.compactAllProcessGroups();
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
       requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
     }
     this.rebuildPlanFromSession();
@@ -2869,9 +3101,10 @@ export class GlossaView extends ItemView {
   private _persistTimer: any = null;
   private persistSession() {
     if (this._persistTimer) return;
+    const session = this.session;
     this._persistTimer = setTimeout(() => {
       this._persistTimer = null;
-      this.plugin.store.saveSession(this.session);
+      this.plugin.store.saveSession(session);
     }, 1000);
   }
   /** Force-write the current session now (bypasses debounce). Use at stream
@@ -2986,6 +3219,8 @@ export class GlossaView extends ItemView {
     else {
       this.messagesEl.classList.add('no-anim');
       for (const m of this.session.messages) this.renderMessage(m);
+      this.compactAllProcessGroups();
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
       requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
     }
     // Persist the trimmed history before re-submit. Without this, an Obsidian

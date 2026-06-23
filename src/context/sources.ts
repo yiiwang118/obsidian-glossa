@@ -1,6 +1,8 @@
 import { App, TFile, TFolder, MarkdownView, FileView, getAllTags, normalizePath } from 'obsidian';
 import { estimateTokens } from '../utils/tokens';
 import { uid } from '../utils/dom';
+import { fetchWithSafeRedirects, parseHttpUrl } from '../utils/safe_web';
+import { extractPdfTextFromArrayBuffer } from '../utils/pdf';
 import type { ContextItem } from '../types';
 
 /* ============================================================
@@ -26,7 +28,7 @@ export function getCurrentSelection(app: App): SelectionInfo | null {
   // 2) Generic DOM selection — covers PDF.js text layer, HTML view, canvas text, web view, etc.
   const winSel = window.getSelection();
   if (winSel && winSel.toString().trim()) {
-    const view = app.workspace.activeLeaf?.view;
+    const view = app.workspace.getMostRecentLeaf()?.view;
     let source: SelectionInfo['source'] = 'unknown';
     const vt = view?.getViewType?.();
     if (vt === 'pdf') source = 'pdf';
@@ -53,6 +55,9 @@ const IMAGE_MIME: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
   gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml',
 };
+const MAX_PDF_BYTES = 50 * 1024 * 1024;
+const PDF_CONTEXT_MAX_PAGES = 80;
+const PDF_CONTEXT_MAX_CHARS = 100_000;
 
 export async function resolveFile(app: App, file: TFile): Promise<ContextItem> {
   const ext = (file.extension || '').toLowerCase();
@@ -107,6 +112,43 @@ export async function resolveFile(app: App, file: TFile): Promise<ContextItem> {
       tokens: estimateTokens(content),
       pinned: false,
     };
+  }
+
+  if (ext === 'pdf') {
+    const size = file.stat?.size ?? (await app.vault.adapter.stat(file.path))?.size ?? 0;
+    if (size > MAX_PDF_BYTES) {
+      return {
+        id: uid(), kind: 'file', label: file.basename + '.pdf',
+        detail: file.path,
+        content: `### PDF (skipped): ${file.path}\n\n${humanSize(size)} exceeds ${humanSize(MAX_PDF_BYTES)} cap. Use a smaller PDF or extract selected pages.`,
+        tokens: 0, pinned: false,
+      };
+    }
+    try {
+      const buf = await app.vault.readBinary(file);
+      const res = await extractPdfTextFromArrayBuffer(buf, {
+        maxPages: PDF_CONTEXT_MAX_PAGES,
+        maxChars: PDF_CONTEXT_MAX_CHARS,
+      });
+      const warnings = res.warnings.length ? `\n\nWarnings:\n${res.warnings.map(w => `- ${w}`).join('\n')}` : '';
+      const content = `### PDF: ${file.path}\n\n${res.text}${warnings}`;
+      return {
+        id: uid(),
+        kind: 'file',
+        label: file.basename + '.pdf',
+        detail: `${file.path} · ${res.pageCount} pages · read ${res.pageLabel}`,
+        content,
+        tokens: estimateTokens(content),
+        pinned: false,
+      };
+    } catch (e: any) {
+      return {
+        id: uid(), kind: 'file', label: file.basename + '.pdf',
+        detail: file.path,
+        content: `### PDF extraction failed: ${file.path}\n\n${e?.message ?? e}`,
+        tokens: 0, pinned: false,
+      };
+    }
   }
 
   // Unknown / binary (PDF, audio, video, etc.) — attach metadata only.
@@ -173,51 +215,12 @@ export async function resolveTag(app: App, tag: string): Promise<ContextItem> {
   };
 }
 
-/**
- * Validate a URL the user (or model) wants to attach. Rejects:
- * - non-http(s) schemes (file:, data:, javascript:, gopher:, etc.)
- * - loopback / link-local / private RFC1918 hostnames (SSRF defence)
- * - opaque IPv6 link-local (fe80::)
- *
- * Returns the parsed URL or throws an Error whose `.message` is safe to
- * surface to the user.
- *
- * Note: this is a best-effort check at attach time. A malicious DNS that
- * resolves a public hostname to 127.0.0.1 (DNS rebinding) could still bypass
- * this — for a complete fix we'd need to resolve in the renderer and pin the
- * IP. For now we cover the common static-payload cases.
- */
-function validateAttachUrl(raw: string): URL {
-  let u: URL;
-  try { u = new URL(raw); }
-  catch { throw new Error(`Not a valid URL: ${raw.slice(0, 80)}`); }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-    throw new Error(`Refusing ${u.protocol} URL. Only http(s) is allowed.`);
-  }
-  const host = u.hostname.toLowerCase();
-  // Loopback
-  if (host === 'localhost' || host === '0.0.0.0' || host === '::1') {
-    throw new Error(`Refusing loopback URL: ${host}`);
-  }
-  // RFC1918 private IPv4
-  if (/^127\./.test(host) ||
-      /^10\./.test(host) ||
-      /^192\.168\./.test(host) ||
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
-      /^169\.254\./.test(host) ||
-      /^fe80:/i.test(host) ||
-      /^fc00:/i.test(host)) {
-    throw new Error(`Refusing private/internal URL: ${host}`);
-  }
-  return u;
-}
-
 const WEB_FETCH_BYTE_CAP = 80_000;
 const WEB_FETCH_TIMEOUT_MS = 15_000;
 
 export async function resolveWebUrl(url: string): Promise<ContextItem> {
   let validated: URL;
-  try { validated = validateAttachUrl(url); }
+  try { validated = parseHttpUrl(url); }
   catch (e: any) {
     return {
       id: uid(), kind: 'web', label: 'rejected', detail: url,
@@ -227,11 +230,7 @@ export async function resolveWebUrl(url: string): Promise<ContextItem> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), WEB_FETCH_TIMEOUT_MS);
   try {
-    const r = await fetch(validated.href, {
-      headers: { 'User-Agent': 'Glossa/0.3 (+obsidian-plugin)' },
-      signal: ctl.signal,
-      redirect: 'follow',
-    });
+    const r = await fetchWithSafeRedirects(validated.href, ctl.signal);
     let text = await r.text();
     // crude readability: strip script/style + tags
     text = text.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -285,6 +284,38 @@ const TEXT_EXT = /\.(md|markdown|txt|json|csv|tsv|log|py|js|ts|jsx|tsx|css|html|
 
 export async function resolveDroppedFile(f: File): Promise<ContextItem> {
   if (f.type.startsWith('image/')) return resolveImageFile(f);
+  if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
+    if (f.size > MAX_PDF_BYTES) {
+      return {
+        id: uid(), kind: 'file', label: f.name,
+        detail: `${humanSize(f.size)} · PDF`,
+        content: `### PDF (skipped): ${f.name}\n\n${humanSize(f.size)} exceeds ${humanSize(MAX_PDF_BYTES)} cap. Use a smaller PDF or extract selected pages.`,
+        tokens: 0, pinned: false,
+      };
+    }
+    try {
+      const res = await extractPdfTextFromArrayBuffer(await f.arrayBuffer(), {
+        maxPages: PDF_CONTEXT_MAX_PAGES,
+        maxChars: PDF_CONTEXT_MAX_CHARS,
+      });
+      const warnings = res.warnings.length ? `\n\nWarnings:\n${res.warnings.map(w => `- ${w}`).join('\n')}` : '';
+      const content = `### PDF: ${f.name}\n\n${res.text}${warnings}`;
+      return {
+        id: uid(), kind: 'file', label: f.name,
+        detail: `${humanSize(f.size)} · PDF · ${res.pageCount} pages · read ${res.pageLabel}`,
+        content,
+        tokens: estimateTokens(content),
+        pinned: false,
+      };
+    } catch (e: any) {
+      return {
+        id: uid(), kind: 'file', label: f.name,
+        detail: `${humanSize(f.size)} · PDF`,
+        content: `### PDF extraction failed: ${f.name}\n\n${e?.message ?? e}`,
+        tokens: 0, pinned: false,
+      };
+    }
+  }
   if (TEXT_EXT.test(f.name) || f.type.startsWith('text/') || f.type === 'application/json') {
     const text = await f.text();
     const trimmed = text.slice(0, 100_000);

@@ -19,6 +19,16 @@ exports.run = async (t, loadModule) => {
   // Args might use `path` instead of `file_path`
   t.ok(mod.matchPermissionRule(rulePath, 'file_edit', { path: 'Foo.md' }), 'path match: reads .path fallback');
 
+  const ruleRenameFolder = { tool: 'rename_note', scope: 'folder', value: 'Notes', behavior: 'allow', addedAt: 0 };
+  t.ok(mod.matchPermissionRule(ruleRenameFolder, 'rename_note', { from: 'Inbox/Foo.md', to: 'Notes/Foo.md' }), 'folder match: reads rename to path');
+  t.ok(mod.matchPermissionRule(ruleRenameFolder, 'rename_note', { from: 'Notes/Foo.md', to: 'Archive/Foo.md' }), 'folder match: reads rename from path');
+
+  const ruleTargetPath = { tool: 'templater_render', scope: 'path', value: 'Daily/Today.md', behavior: 'allow', addedAt: 0 };
+  t.ok(mod.matchPermissionRule(ruleTargetPath, 'templater_render', { template_path: 'Templates/Daily.md', target_path: 'Daily/Today.md' }), 'path match: reads target_path');
+
+  const rulePathArray = { tool: 'custom_tool', scope: 'folder', value: 'Projects', behavior: 'allow', addedAt: 0 };
+  t.ok(mod.matchPermissionRule(rulePathArray, 'custom_tool', { paths: ['Archive/Old.md', 'Projects/New.md'] }), 'folder match: reads path arrays');
+
   // Session-scoped rule
   const ruleSession = { tool: 'file_edit', scope: 'global', behavior: 'allow', addedAt: 0, scopedToSessionId: 'abc' };
   t.ok(mod.matchPermissionRule(ruleSession, 'file_edit', {}, 'abc'), 'session: matches when in session');

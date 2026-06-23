@@ -1,5 +1,5 @@
 import { App } from 'obsidian';
-import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, normalizeToolResult, type ToolImpl, type ToolRunResult } from './tools';
+import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, isReadOnlyTool, normalizeToolResult, type ToolImpl, type ToolRunResult } from './tools';
 import { askApproval, type ApprovalResult } from './approval';
 import { CheckpointManager, pathsTouchedByTool } from './checkpoint';
 import { McpHub } from './mcp';
@@ -19,7 +19,10 @@ import { persistLargeResult } from './tool_result_store';
  *  refinement here. */
 function toolsForPermission(level: PermissionLevel): ToolSpec[] {
   const visible = listToolSpecs();
-  if (level === 'read-only') return visible.filter(spec => !TOOLS[spec.name]?.dangerous);
+  if (level === 'read-only') return visible.filter(spec => {
+    const tool = TOOLS[spec.name];
+    return tool ? isReadOnlyTool(tool, {}) : false;
+  });
   return visible;
 }
 
@@ -168,7 +171,12 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
   let tools: ToolSpec[] | undefined = undefined;
   if (opts.enableTools) {
     const base = toolsForPermission(opts.permissionLevel);
-    let filtered = opts.runMode === 'plan' ? base.filter(s => !TOOLS[s.name]?.dangerous) : base;
+    let filtered = opts.runMode === 'plan'
+      ? base.filter(s => {
+        const tool = TOOLS[s.name];
+        return tool ? isReadOnlyTool(tool, {}) : false;
+      })
+      : base;
     // Codex envelope-only edit mode: when the active endpoint is codex-cli in
     // fullAgent mode, codex itself trains better on `apply_patch` envelopes
     // than on our piecewise `file_edit` / `write_note` tools. Drop the
@@ -178,7 +186,9 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       filtered = filtered.filter(s => !codexEnvelopeExclude.has(s.name));
     }
     // Append MCP tools (if any) — namespaced by `<server>__<tool>`
-    const mcpSpecs = opts.mcp?.asToolSpecs() ?? [];
+    const mcpSpecs = (opts.permissionLevel === 'read-only' || opts.runMode === 'plan')
+      ? []
+      : (opts.mcp?.asToolSpecs() ?? []);
     tools = [...filtered, ...mcpSpecs];
   }
   // Compose system prompt: base + agent suffix + budget-aware skill listing.
@@ -371,7 +381,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       const hasDangerous = toolCalls.some(c => {
         if (c.name === 'attempt_completion') return false;
         const t = getTool(c.name);
-        return t?.dangerous ?? false;
+        return t ? !isReadOnlyTool(t, c.args) : true;
       });
       if (hasDangerous) {
         for (const c of toolCalls) {
@@ -466,9 +476,56 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           continue;
         }
       }
-      const dangerous = tool ? tool.dangerous : true;
+      let effectiveArgs = call.args;
+      let forceApproval = false;
+      let toolPermissionAllows = false;
+      if (tool?.checkPermissions) {
+        try {
+          const perm = await tool.checkPermissions(opts.app, effectiveArgs);
+          if ('updatedInput' in perm && perm.updatedInput !== undefined) {
+            effectiveArgs = perm.updatedInput;
+            if (tool.backfillObservableInput && effectiveArgs && typeof effectiveArgs === 'object') {
+              try {
+                observableArgs = { ...effectiveArgs };
+                tool.backfillObservableInput(observableArgs);
+              } catch (e) {
+                console.warn(`[tool] backfillObservableInput threw for ${call.name}`, e);
+                observableArgs = effectiveArgs;
+              }
+            } else {
+              observableArgs = effectiveArgs;
+            }
+            ev.args = observableArgs;
+          }
+          if (perm.behavior === 'deny') {
+            opts.onPermissionDecision?.({
+              at: Date.now(), tool: call.name, args: JSON.stringify(observableArgs ?? {}).slice(0, 200),
+              decision: 'denied-by-rule',
+              scope: perm.decisionReason ?? 'tool-check',
+            });
+            prepared.push({ call, ev, tool, mcpEntry, effectiveArgs, rewriteToWriteNote: false,
+              resolved: { status: 'denied', result: perm.message } });
+            continue;
+          }
+          forceApproval = perm.behavior === 'ask';
+          toolPermissionAllows = perm.behavior === 'allow';
+        } catch (e: any) {
+          prepared.push({ call, ev, tool, mcpEntry, effectiveArgs, rewriteToWriteNote: false,
+            resolved: { status: 'error', result: `Permission check failed for ${call.name}: ${e?.message ?? e}` } });
+          continue;
+        }
+      }
+
+      const readOnly = tool ? isReadOnlyTool(tool, effectiveArgs) : false;
+      const dangerous = !readOnly;
+      if ((opts.permissionLevel === 'read-only' || opts.runMode === 'plan') && dangerous) {
+        prepared.push({ call, ev, tool, mcpEntry, effectiveArgs, rewriteToWriteNote: false,
+          resolved: { status: 'denied', result: `Tool "${call.name}" is not allowed in ${opts.runMode === 'plan' ? 'plan' : 'read-only'} mode.` } });
+        continue;
+      }
+
       if (opts.neverApproveTools.includes(call.name)) {
-        prepared.push({ call, ev, tool, mcpEntry, effectiveArgs: call.args, rewriteToWriteNote: false,
+        prepared.push({ call, ev, tool, mcpEntry, effectiveArgs, rewriteToWriteNote: false,
           resolved: { status: 'denied', result: `Tool "${call.name}" is in never-approve list.` } });
         continue;
       }
@@ -486,7 +543,8 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           resolved: { status: 'denied', result: `Denied by persisted rule (${matchingRule.scope}${matchingRule.value ? ': ' + matchingRule.value : ''}).` } });
         continue;
       }
-      const ruleAllows = matchingRule?.behavior === 'allow';
+      const ruleForcesAsk = matchingRule?.behavior === 'ask';
+      const ruleAllows = !forceApproval && !ruleForcesAsk && matchingRule?.behavior === 'allow';
       if (ruleAllows) {
         opts.onPermissionDecision?.({
           at: Date.now(), tool: call.name, args: JSON.stringify(call.args ?? {}).slice(0, 200),
@@ -507,8 +565,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         });
       }
 
-      const needsApproval = dangerous && !ruleAllows && !allowedBySkill && !opts.autoApproveTools.includes(call.name);
-      let effectiveArgs = call.args;
+      const needsApproval = forceApproval || ruleForcesAsk || (dangerous && !ruleAllows && !toolPermissionAllows && !allowedBySkill && !opts.autoApproveTools.includes(call.name));
       let rewriteToWriteNote = false;
       if (needsApproval) {
         const previewTool: ToolImpl = tool ?? ({
@@ -591,6 +648,10 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       }
 
       ev.status = 'running'; opts.onToolEnd({ ...ev });
+      // Give the renderer one macrotask to paint the running state before a
+      // synchronous-heavy tool (large file edit, markdown diff, etc.) starts.
+      // Without this, the sidebar can look frozen until the tool returns.
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
 
       try {
         // Stale-write guard: if user toggled per-line in approval, we captured a file

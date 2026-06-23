@@ -88,6 +88,7 @@ class HistoryPopover {
     // session rows as listbox items.
     this.listEl.setAttribute('role', 'listbox');
     this.listEl.setAttribute('aria-label', 'Chat sessions');
+    this.listEl.addEventListener('mouseleave', () => this.setKbdIdx(-1));
     this.renderList();
 
     // Document-level keyboard navigation (capture phase, stopPropagation when
@@ -163,9 +164,7 @@ class HistoryPopover {
         this.kbdSessions.push(s);
       }
     }
-    // Pre-select the top row so the first ArrowDown / Enter feels responsive.
-    if (this.kbdRows.length) this.setKbdIdx(0);
-    else this.kbdIdx = -1;
+    this.setKbdIdx(-1);
   }
 
   private renderRow(s: ChatSession): HTMLElement | null {
@@ -183,8 +182,8 @@ class HistoryPopover {
     ago.title = new Date(s.updatedAt).toLocaleString();
 
     row.onclick = () => this.onPick(s);
-    // Mouse hover syncs the keyboard cursor → matches popup.ts convention,
-    // so hover + ArrowDown don't fight over which row is "current".
+    // Mouse hover syncs the keyboard cursor only after the pointer actually
+    // enters a row. Opening the popover itself does not pre-highlight row 0.
     row.addEventListener('mousemove', () => {
       const idx = this.kbdRows.indexOf(row);
       if (idx >= 0 && idx !== this.kbdIdx) this.setKbdIdx(idx);

@@ -24,11 +24,12 @@ Then in the host app: Settings → Community plugins → reload (or use the [hot
 
 ## Before opening a PR
 
-- [ ] `npm test` clean (60 in-tree + 1181 stress-suite assertions)
+- [ ] `npm test` clean
 - [ ] `npm run typecheck` clean
 - [ ] `npm run build` succeeds
+- [ ] `npm run release:check -- --allow-dirty` succeeds before release prep
 - [ ] No `console.log` / `console.error` left in production code paths (devtools-only is OK with a `// debug` comment)
-- [ ] If touching a tool: assertion in `tests/A_unit/` or `tests/E_security/` covering the new behavior
+- [ ] If touching a tool: focused coverage in `tests/*.test.cjs`
 - [ ] If touching UI: screenshot or short GIF in PR description
 - [ ] If touching settings schema: migration in `src/main.ts:onload` + bump `manifest.json` minor version
 
@@ -46,7 +47,7 @@ Then in the host app: Settings → Community plugins → reload (or use the [hot
 3. Set `isReadOnly` / `isDestructive` / `isConcurrencySafe` honestly — fail-closed defaults assume the worst
 4. Register in `src/agent/tools.ts:TOOLS`
 5. Add an entry to `pathsTouchedByTool` in `src/agent/checkpoint.ts` if it mutates files
-6. Add an entry to `tests/E_security/E2_path_traversal.test.cjs`'s `TOOL_PATHS` if it takes a path
+6. Add focused tests under `tests/` if it takes a path or changes permission behavior
 7. If the tool is rarely needed (plugin bridge, legacy), set `shouldDefer: true` so it's hidden from the default tool surface and only reachable via `tool_search`
 
 ## Adding a provider
@@ -54,21 +55,22 @@ Then in the host app: Settings → Community plugins → reload (or use the [hot
 1. Create `src/providers/your_provider.ts` implementing the `LLMProvider` interface
 2. Register in `src/providers/registry.ts:buildProvider`
 3. Add a settings UI section in `src/settings.ts:renderEndpointCard` for any kind-specific fields
-4. Add provider-parser tests in `tests/C_provider/` — at minimum: streaming basic / tool calls / errors
+4. Add focused provider-parser tests under `tests/` — at minimum: streaming basic / tool calls / errors
 
 ## Testing layers
 
 | When | Run |
 |---|---|
-| Quick feedback during dev | `npm test` (A B C E, ~5s) |
-| Full coverage | `npm run test:all` (A-G, ~10s + Puppeteer launch) |
-| Adding a new vault tool | `node tests/run.cjs E_security/E2_path_traversal.test.cjs` |
-| Adding a new provider | `node tests/run.cjs C` |
+| Quick feedback during dev | `npm test` |
+| Type/API safety | `npm run typecheck` |
+| Bundle verification | `npm run build` |
+| Release metadata | `npm run release:check -- --allow-dirty` |
 
 ## Release process (maintainer)
 
-1. Edit `manifest.json`, `package.json`, `versions.json` — bump version (no `v` prefix per Obsidian spec)
-2. Update `CHANGELOG.md` with the new section
-3. `git commit -am "release 0.X.Y" && git tag 0.X.Y && git push --tags`
-4. GitHub Action auto-builds and creates a release with `main.js / manifest.json / styles.css` attached
-5. For first community-plugin submission only: open PR to [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases)
+1. Edit `manifest.json`, `package.json`, `package-lock.json`, `versions.json` — bump version (no `v` prefix per Obsidian spec)
+2. Update `CHANGELOG.md`, `README.md`, `README.zh-CN.md`, `PRIVACY.md`, and screenshots if behavior changed
+3. Run `npm test`, `npm run typecheck`, `npm run build`, and `npm run release:check`
+4. Commit, tag the exact manifest version, and push: `git tag 0.X.Y && git push --tags`
+5. GitHub Action auto-builds and creates a release with `main.js / manifest.json / styles.css` attached
+6. For first community-plugin submission, use the current Obsidian plugin submission flow on <https://community.obsidian.md/> rather than the retired `obsidian-releases` PR flow

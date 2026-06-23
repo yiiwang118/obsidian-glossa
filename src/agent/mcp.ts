@@ -95,11 +95,10 @@ export class McpClient {
       this.status = 'failed';
       if (code) {
         this.lastError = `Process exited with code ${code}`;
-        // Non-zero exit: dump the captured stderr tail so a user / maintainer
-        // looking at devtools sees WHY the server died, without us spamming
-        // the console on every stderr line during normal operation.
-        const tail = this.stderrLog.slice(-20).join('\n');
-        console.warn(`[mcp:${this.cfg.name}] exited with code ${code}.${tail ? '\nstderr tail:\n' + tail : ''}`);
+        // Keep raw stderr out of devtools: third-party MCP servers can print
+        // tokens, local paths, or provider errors. The bounded stderr ring is
+        // still available from the MCP diagnostics UI when the user asks for it.
+        console.warn(`[mcp:${this.cfg.name}] exited with code ${code}. Open MCP diagnostics for recent stderr.`);
       }
       // Reject any in-flight RPC calls so callers don't hang forever.
       const exitErr = new Error('MCP process exited');

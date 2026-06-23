@@ -45,12 +45,9 @@ export class CheckpointManager {
         const dec = await this.plugin.decryptBlob(raw);
         const parsed = JSON.parse(dec);
         const entries: SessionCheckpoint[] = Array.isArray(parsed?.entries) ? parsed.entries : [];
-        // Drop checkpoints older than 7 days. Log how many we dropped so a user
-        // who notices missing rollback history sees the cause in devtools.
+        // Drop checkpoints older than 7 days.
         const cutoff = Date.now() - 7 * 24 * 3600_000;
         const kept = entries.filter(e => e.takenAt > cutoff);
-        const dropped = entries.length - kept.length;
-        if (dropped > 0) console.log(`[Glossa] checkpoint: purged ${dropped} entries older than 7 days (kept ${kept.length}).`);
         return kept;
       }
     } catch (e) {

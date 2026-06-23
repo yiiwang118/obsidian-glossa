@@ -11,7 +11,7 @@ import { CheckpointManager } from './agent/checkpoint';
 import { McpHub } from './agent/mcp';
 import { setLanguage, bi } from './utils/i18n';
 import { loadShellEnv } from './utils/env';
-import { GLOSSA_MARK_SVG } from './ui/icons';
+import { GLOSSA_MARK_SVG, GLOSSA_RIBBON_SVG } from './ui/icons';
 
 export default class GlossaPlugin extends Plugin {
   settings: GlossaSettings;
@@ -101,15 +101,13 @@ export default class GlossaPlugin extends Plugin {
       // Defer unlock prompt; user can trigger by clicking the ribbon or opening sidebar.
     }
 
-    // Glossa mark — the user-supplied cloud-moon-sparkles glyph. Cyan→blue→
-    // purple linear gradient burned into the stroke so the icon stays in
-    // brand colour everywhere it appears (ribbon, tab, role badge), regardless
-    // of light/dark theme. viewBox tightly cropped to the artwork so Obsidian
-    // renders it crisply at 16-24px.
+    // Glossa mark — keep the brand gradient for in-panel surfaces, but use a
+    // currentColor variant in Obsidian's ribbon so it matches host app icons.
     addIcon('glossa', GLOSSA_MARK_SVG);
+    addIcon('glossa-ribbon', GLOSSA_RIBBON_SVG);
 
     this.registerView(VIEW_TYPE_GLOSSA, (leaf) => new GlossaView(leaf, this));
-    this.addRibbonIcon('glossa', 'Open Glossa', () => this.activateView());
+    this.addRibbonIcon('glossa-ribbon', 'Open Glossa', () => this.activateView());
 
     this.addCommand({ id: 'open-glossa', name: 'Open sidebar', callback: () => this.activateView() });
     this.addCommand({ id: 'glossa-new-chat', name: 'New chat',
@@ -143,8 +141,7 @@ export default class GlossaPlugin extends Plugin {
 
     this.addCommand({
       id: 'inline-edit',
-      name: 'Inline edit (Cmd/Ctrl+K equivalent)',
-      hotkeys: [{ modifiers: ['Mod'], key: 'k' }],
+      name: 'Inline edit selection',
       editorCallback: async () => {
         const { runInlineEdit } = await import('./commands/inline_edit');
         await runInlineEdit(this);
@@ -488,6 +485,9 @@ class ChatStore {
     // One-time migration: strip any `content` from contextSnapshot[] entries (older
     // chats stored full file content there; new schema keeps metadata only).
     let migrated = false;
+    const beforeFilter = this.sessions.length;
+    this.sessions = this.sessions.filter(s => this.isMeaningfulSession(s));
+    if (this.sessions.length !== beforeFilter) migrated = true;
     for (const s of this.sessions) {
       for (const m of s.messages ?? []) {
         if (Array.isArray(m.contextSnapshot)) {
@@ -500,7 +500,6 @@ class ChatStore {
       }
     }
     if (migrated) {
-      console.log('[plugin] migrated legacy contextSnapshot bodies out of chat history.');
       await this.persist();
     }
   }
@@ -520,8 +519,22 @@ class ChatStore {
   }
 
   all(): ChatSession[] { return this.sessions; }
+  private isMeaningfulSession(s: ChatSession): boolean {
+    return (s.messages ?? []).some(m =>
+      (m.content ?? '').trim().length > 0 ||
+      (m.displayContent ?? '').trim().length > 0 ||
+      (m.reasoningContent ?? '').trim().length > 0 ||
+      ((m.toolEvents ?? []).length > 0));
+  }
   async saveSession(s: ChatSession) {
     const idx = this.sessions.findIndex(x => x.id === s.id);
+    if (!this.isMeaningfulSession(s)) {
+      if (idx >= 0) {
+        this.sessions.splice(idx, 1);
+        await this.persist();
+      }
+      return;
+    }
     if (idx >= 0) this.sessions[idx] = s; else this.sessions.push(s);
     this.sessions = this.sessions.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100);
     await this.persist();

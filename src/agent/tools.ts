@@ -26,6 +26,7 @@ import { todoWrite } from './tools/todo_write';
 import { attemptCompletion } from './tools/attempt_completion';
 import { semanticSearch } from './tools/semantic_search';
 import { viewImage } from './tools/view_image';
+import { readPdf } from './tools/read_pdf';
 import { webFetch } from './tools/web_fetch';
 import { skillTool } from './tools/skill';
 import { toolSearchTool } from './tools/tool_search';
@@ -100,6 +101,7 @@ export const TOOLS: Record<string, ToolImpl> = {
 
   semantic_search: semanticSearch,
   view_image: viewImage,
+  read_pdf: readPdf,
   web_fetch: webFetch,
   // Unified skill tool (P0-3) — supersedes the legacy pair below, which remain
   // registered with [deprecated] markers so old sessions / docs still work.

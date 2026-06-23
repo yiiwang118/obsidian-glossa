@@ -26,25 +26,24 @@
    this block just makes them available everywhere else.
    ============================================================ */
 :root {
-  --aurora-violet:  #8b5cf6;
-  --aurora-purple:  #a855f7;
-  --aurora-fuchsia: #d946ef;
-  --aurora-indigo:  #6366f1;
-  --aurora-cyan:    #22d3ee;
+  --aurora-violet:  #2f6fed;
+  --aurora-purple:  #0f9f8f;
+  --aurora-fuchsia: #8a7a45;
+  --aurora-indigo:  #3b5f73;
+  --aurora-cyan:    #0ea5a3;
 
   --aurora-gradient: linear-gradient(
     120deg,
-    #8b5cf6 0%,
-    #a855f7 28%,
-    #d946ef 50%,
-    #6366f1 78%,
-    #8b5cf6 100%
+    #2f6fed 0%,
+    #0f9f8f 38%,
+    #6f8f62 68%,
+    #8a7a45 100%
   );
 
-  --aurora-tint-04: rgba(139, 92, 246, 0.04);
-  --aurora-tint-08: rgba(139, 92, 246, 0.08);
-  --aurora-tint-14: rgba(139, 92, 246, 0.14);
-  --aurora-tint-22: rgba(139, 92, 246, 0.22);
+  --aurora-tint-04: rgba(47, 111, 237, 0.04);
+  --aurora-tint-08: rgba(47, 111, 237, 0.08);
+  --aurora-tint-14: rgba(47, 111, 237, 0.12);
+  --aurora-tint-22: rgba(47, 111, 237, 0.18);
 
   /* Motion & sizing tokens that body-level popups also reference. */
   --ease-spring:    cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -144,11 +143,11 @@
      ============================================================ */
 
   /* ----- Aurora spectrum (5 anchors) ----- */
-  --aurora-violet:  #8b5cf6;   /* primary brand purple */
-  --aurora-purple:  #a855f7;   /* warm-side mid */
-  --aurora-fuchsia: #d946ef;   /* hot accent */
-  --aurora-indigo:  #6366f1;   /* cool ballast */
-  --aurora-cyan:    #22d3ee;   /* success-state ping only */
+  --aurora-violet:  #2f6fed;   /* primary action */
+  --aurora-purple:  #0f9f8f;   /* cool secondary */
+  --aurora-fuchsia: #8a7a45;   /* warm note */
+  --aurora-indigo:  #3b5f73;   /* structural accent */
+  --aurora-cyan:    #0ea5a3;   /* completion ping */
 
   /* Composite gradient — drives wordmark, orb halo,
      conic-border base. Use background-size:240% + flow animation
@@ -163,10 +162,10 @@
   );
 
   /* Common rgba helpers for glow / wash overlays */
-  --aurora-tint-04: rgba(139, 92, 246, 0.04);
-  --aurora-tint-08: rgba(139, 92, 246, 0.08);
-  --aurora-tint-14: rgba(139, 92, 246, 0.14);
-  --aurora-tint-22: rgba(139, 92, 246, 0.22);
+  --aurora-tint-04: rgba(47, 111, 237, 0.04);
+  --aurora-tint-08: rgba(47, 111, 237, 0.08);
+  --aurora-tint-14: rgba(47, 111, 237, 0.12);
+  --aurora-tint-22: rgba(47, 111, 237, 0.18);
 
   /* ----- Glossa scales — fresh, locked steps -----
      Spacing keeps the existing 4/8/12/16/24 rhythm; radii get a
@@ -207,19 +206,17 @@
 
   /* ----- Glass surfaces (light) -----
      Tunable per-theme override below. */
-  --glass-bg:        rgba(255, 255, 255, 0.62);
-  --glass-bg-tile:   rgba(255, 255, 255, 0.50);
-  --glass-bg-hover:  rgba(255, 255, 255, 0.78);
-  --glass-blur:      blur(18px) saturate(180%);
-  --glass-blur-tile: blur(14px) saturate(170%);
+  --glass-bg:        color-mix(in srgb, var(--background-primary) 92%, white);
+  --glass-bg-tile:   color-mix(in srgb, var(--background-secondary) 88%, white);
+  --glass-bg-hover:  color-mix(in srgb, var(--background-secondary) 78%, white);
+  --glass-blur:      none;
+  --glass-blur-tile: none;
 
   /* Aurora glow shells — focus, streaming, hover lift */
-  --aurora-glow-soft: 0 0 0 4px var(--aurora-tint-14),
-                      0 0 24px var(--aurora-tint-14);
-  --aurora-glow-hard: 0 0 0 4px var(--aurora-tint-22),
-                      0 0 32px var(--aurora-tint-22);
-  --aurora-lift: 0 4px 16px rgba(0, 0, 0, 0.08),
-                 0 1px 2px  rgba(0, 0, 0, 0.06);
+  --aurora-glow-soft: 0 0 0 3px var(--aurora-tint-08);
+  --aurora-glow-hard: 0 0 0 3px var(--aurora-tint-14);
+  --aurora-lift: 0 8px 24px rgba(15, 23, 42, 0.08),
+                 0 1px 2px rgba(15, 23, 42, 0.05);
 }
 
 .theme-dark .glossa-view {
@@ -230,12 +227,12 @@
   /* Glass surfaces tuned for dark canvases — slightly lower
      opacity + cooler tint so blurred content underneath still
      reads, while the glass remains visibly a surface. */
-  --glass-bg:        rgba(38, 36, 52, 0.55);
-  --glass-bg-tile:   rgba(48, 46, 68, 0.48);
-  --glass-bg-hover:  rgba(60, 58, 84, 0.66);
+  --glass-bg:        color-mix(in srgb, var(--background-primary) 86%, #101418);
+  --glass-bg-tile:   color-mix(in srgb, var(--background-secondary) 84%, #101418);
+  --glass-bg-hover:  color-mix(in srgb, var(--background-secondary) 76%, #182026);
 
-  --aurora-lift: 0 4px 18px rgba(0, 0, 0, 0.32),
-                 0 1px 2px  rgba(0, 0, 0, 0.22);
+  --aurora-lift: 0 8px 26px rgba(0, 0, 0, 0.28),
+                 0 1px 2px rgba(0, 0, 0, 0.20);
 }
 
 /* Reduced-transparency: macOS/iOS users (and some Windows accessibility
@@ -612,6 +609,53 @@
 .nc-msg.assistant.preamble { margin-top: -2px; gap: 2px; }
 .nc-msg.assistant.preamble > .nc-msg-role { display: none; }
 .nc-msg.assistant.preamble > .nc-msg-actions { display: none; }
+.nc-msg.assistant.nc-process-anchor.nc-process-has-role > .nc-msg-role,
+.nc-msg.assistant.preamble.nc-process-anchor.nc-process-has-role > .nc-msg-role,
+.nc-msg.assistant.nc-asst-continuation.nc-process-anchor.nc-process-has-role > .nc-msg-role {
+  display: flex;
+}
+
+.nc-turn-activity {
+  display: none;
+  align-self: flex-start;
+  align-items: center;
+  gap: 7px;
+  min-height: 22px;
+  margin: 0 0 4px 0;
+  padding: 3px 9px 3px 8px;
+  border: 1px solid var(--nc-border);
+  border-radius: var(--g-radius-pill);
+  background: color-mix(in srgb, var(--nc-bg-soft) 84%, transparent);
+  color: var(--text-muted);
+  font-size: var(--g-text-sm);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.nc-turn-activity.active { display: inline-flex; }
+.nc-turn-activity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--aurora-gradient);
+  background-size: 220% 100%;
+  box-shadow: 0 0 8px var(--aurora-tint-22);
+  animation: nc-shimmer 2.4s linear infinite, nc-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.nc-turn-activity.tool {
+  border-color: color-mix(in srgb, var(--aurora-cyan) 26%, var(--nc-border));
+  background: color-mix(in srgb, var(--aurora-cyan) 7%, var(--nc-bg-soft));
+  color: var(--text-normal);
+}
+.nc-turn-activity-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(62vw, 420px);
+}
+.nc-turn-activity-time {
+  color: var(--text-faint);
+  font-size: 10px;
+}
 
 /* While streaming, an assistant message may have an EMPTY body (only reasoning
    or tool cards). When everything is empty (no body, no reasoning, no tool —
@@ -1041,11 +1085,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   background: rgba(139, 92, 246, 0.06);
 }
 .theme-dark .nc-history-pop-row { background: rgba(139, 92, 246, 0.10); }
-/* Same highlight pattern as .nc-popup-item: hover (instant CSS) and the
-   keyboard cursor (.kbd-selected, set by HistoryPopover.setKbdIdx) paint
-   identically so the two states are visually consistent. Aurora gradient
-   so the highlight reads as a brand-coloured selection band. */
-.nc-history-pop-row:hover,
+/* Keyboard cursor gets the aurora selection band. Plain hover stays lighter so
+   a newly opened popover never looks like it already selected row 0. */
 .nc-history-pop-row.kbd-selected {
   background: linear-gradient(
     90deg,
@@ -1053,7 +1094,6 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
     rgba(139, 92, 246, 0.10) 100%
   );
 }
-.theme-dark .nc-history-pop-row:hover,
 .theme-dark .nc-history-pop-row.kbd-selected {
   background: linear-gradient(
     90deg,
@@ -1061,7 +1101,6 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
     rgba(139, 92, 246, 0.14) 100%
   );
 }
-.nc-history-pop-row:hover::before,
 .nc-history-pop-row.kbd-selected::before {
   content: '';
   position: absolute;
@@ -1072,8 +1111,13 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   background-size: 200% 100%;
   box-shadow: 0 0 6px var(--aurora-tint-22);
 }
-.nc-history-pop-row:hover .nc-history-pop-row-title,
 .nc-history-pop-row.kbd-selected .nc-history-pop-row-title { color: var(--text-normal); }
+.nc-history-pop-row:hover {
+  background: var(--nc-bg-soft-hover);
+}
+.theme-dark .nc-history-pop-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
 .nc-history-pop-row-title {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1388,6 +1432,11 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   line-height: 1.45;
 }
 .nc-info-hint strong { color: var(--text-normal); }
+.nc-warning-hint {
+  color: color-mix(in srgb, var(--nc-danger) 78%, var(--text-normal));
+  background: color-mix(in srgb, var(--nc-danger) 10%, transparent);
+  border-left-color: var(--nc-danger);
+}
 
 /* Message footer — timestamp on the left, action icons on the right edge.
    Full message-width so the icons reach the right side of the card. */
@@ -1626,6 +1675,54 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 .nc-tool-stack-summary:hover .nc-tool-stack-summary-chev { transform: translateX(2px); }
 .nc-tool-events-stack > [data-tool-id].hidden { display: none; }
+
+/* Collapsed per-turn process group. Multiple assistant segments generated by
+   one agent turn (reasoning/tool/reasoning/tool...) compress to one row; click
+   expands the original cards in-place. */
+.nc-process-summary {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 4px;
+  padding: 4px 10px 4px 9px;
+  border-radius: var(--g-radius-pill);
+  border: 1px solid var(--nc-border);
+  background: var(--nc-bg-soft);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--g-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
+}
+.nc-process-summary:hover {
+  background: var(--aurora-tint-06);
+  border-color: var(--aurora-tint-18);
+  color: var(--text-normal);
+}
+.nc-process-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--aurora-gradient);
+  box-shadow: 0 0 8px var(--aurora-tint-22);
+  flex-shrink: 0;
+}
+.nc-process-chev {
+  color: var(--text-faint);
+  font-size: 9px;
+  margin-left: 2px;
+}
+.nc-process-anchor > .nc-thinking-card,
+.nc-process-anchor > .nc-msg-body,
+.nc-process-anchor > .nc-tool-events-stack,
+.nc-process-anchor > .nc-msg-footer {
+  display: none;
+}
+.nc-process-folded-away {
+  display: none;
+}
 /* When truncated, fade the LAST visible card. The fade is visual ONLY — we DON'T
    pull the next element up with negative margin (that caused the reasoning card
    below to slide into the faded area). */
@@ -2584,20 +2681,15 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 /* Aurora highlight — fired in three cases:
    • :hover         (mouse over the row)
    • .selected      (keyboard ArrowUp/Down cursor)
-   • .checked       (the option that is currently the active setting,
-                     e.g. "Workspace write" in the permission menu —
-                     we want the user to see at a glance which row IS
-                     the current value, not just an isolated ✓ glyph)
-   All three share the same gradient + 2px aurora left-rail, identical
-   to the history popover rows (.nc-history-pop-row:hover). The rail
+   .checked means "current value" and only uses the ✓ + stronger label;
+   it deliberately does not get the hover/keyboard background. The rail
    sits in ::before so it doesn't shift label text.
    We use EXPLICIT rgba (not var(--aurora-tint-*)) here to (a) match
    history's intensity 26→10% exactly and (b) belt-and-suspenders so
    the rule never silently drops if the cascade misses an aurora token
    the way the v0.4 popup originally regressed. */
 .nc-popup-item:hover,
-.nc-popup-item.selected,
-.nc-popup-item.checked {
+.nc-popup-item.selected {
   background: linear-gradient(
     90deg,
     rgba(139, 92, 246, 0.26) 0%,
@@ -2606,8 +2698,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   color: var(--text-normal);
 }
 .theme-dark .nc-popup-item:hover,
-.theme-dark .nc-popup-item.selected,
-.theme-dark .nc-popup-item.checked {
+.theme-dark .nc-popup-item.selected {
   background: linear-gradient(
     90deg,
     rgba(139, 92, 246, 0.36) 0%,
@@ -2615,8 +2706,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   );
 }
 .nc-popup-item:hover::before,
-.nc-popup-item.selected::before,
-.nc-popup-item.checked::before {
+.nc-popup-item.selected::before {
   content: '';
   position: absolute;
   left: 0; top: 6px; bottom: 6px;
@@ -2627,11 +2717,11 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   box-shadow: 0 0 6px var(--aurora-tint-22);
 }
 .nc-popup-item:hover .nc-popup-label,
-.nc-popup-item.selected .nc-popup-label,
-.nc-popup-item.checked .nc-popup-label { color: var(--text-normal); font-weight: 600; }
+.nc-popup-item.selected .nc-popup-label { color: var(--text-normal); font-weight: 600; }
 .nc-popup-item:hover .nc-popup-hint,
-.nc-popup-item.selected .nc-popup-hint,
-.nc-popup-item.checked .nc-popup-hint   { color: var(--text-muted); }
+.nc-popup-item.selected .nc-popup-hint { color: var(--text-muted); }
+.nc-popup-item.checked .nc-popup-label { color: var(--text-normal); font-weight: 600; }
+.nc-popup-item.checked .nc-popup-hint { color: var(--text-muted); }
 .nc-popup-item .nc-popup-check { color: var(--aurora-violet); }
 .nc-popup-item.danger .nc-popup-label { color: #fb7185; }
 .nc-popup-item.selected .nc-popup-icon,
@@ -3481,3 +3571,1148 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 
 /* Discreet tool-card chevron rotation — pairs with .collapsed toggle. */
 .nc-tool-event:not(.collapsed) .nc-tool-event-header { border-bottom: 1px solid var(--nc-border); }
+
+/* ============================================================
+   Calm UI refresh — neutral surfaces, restrained accents
+   ============================================================ */
+:root {
+  --glossa-accent: #2f6fed;
+  --glossa-accent-2: #0f9f8f;
+  --glossa-success: #2f8f57;
+  --glossa-warn: #b7791f;
+  --glossa-danger: #d94a4a;
+  --glossa-ink: var(--text-normal);
+  --glossa-muted: var(--text-muted);
+  --glossa-faint: var(--text-faint);
+  --glossa-surface-1: var(--background-primary);
+  --glossa-surface-2: color-mix(in srgb, var(--background-secondary) 88%, var(--background-primary));
+  --glossa-surface-3: color-mix(in srgb, var(--background-secondary) 76%, var(--background-primary));
+  --glossa-hover: color-mix(in srgb, var(--text-normal) 5%, var(--background-secondary));
+  --glossa-line: color-mix(in srgb, var(--background-modifier-border) 78%, var(--text-faint));
+  --glossa-line-soft: color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+  --glossa-accent-soft: color-mix(in srgb, var(--glossa-accent) 10%, transparent);
+  --glossa-accent-softer: color-mix(in srgb, var(--glossa-accent) 6%, transparent);
+  --glossa-user-bg: color-mix(in srgb, var(--text-normal) 7%, var(--background-secondary));
+  --glossa-user-bg-hover: color-mix(in srgb, var(--text-normal) 9%, var(--background-secondary));
+  --glossa-user-border: color-mix(in srgb, var(--text-faint) 30%, var(--background-modifier-border));
+  --glossa-success-soft: color-mix(in srgb, var(--glossa-success) 12%, transparent);
+  --glossa-warn-soft: color-mix(in srgb, var(--glossa-warn) 14%, transparent);
+  --glossa-danger-soft: color-mix(in srgb, var(--glossa-danger) 12%, transparent);
+  --glossa-shadow-popover: 0 18px 44px rgba(15, 23, 42, 0.14), 0 1px 2px rgba(15, 23, 42, 0.06);
+  --glossa-shadow-raised: 0 10px 30px rgba(15, 23, 42, 0.10), 0 1px 2px rgba(15, 23, 42, 0.05);
+  --glossa-shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --glossa-composer-bg: color-mix(in srgb, var(--background-primary) 78%, var(--background-secondary));
+  --glossa-composer-border: color-mix(in srgb, var(--glossa-accent) 18%, var(--glossa-line));
+  --glossa-composer-shadow: 0 12px 34px rgba(15, 23, 42, 0.075), 0 1px 2px rgba(15, 23, 42, 0.055);
+
+  --nc-bg-hard: var(--glossa-surface-1);
+  --nc-bg-soft: var(--glossa-surface-2);
+  --nc-bg-soft-hover: var(--glossa-hover);
+  --nc-border: var(--glossa-line);
+  --nc-border-strong: color-mix(in srgb, var(--glossa-line) 70%, var(--text-muted));
+  --nc-accent: var(--glossa-accent);
+  --nc-accent-soft: var(--glossa-accent-soft);
+  --nc-accent-strong: color-mix(in srgb, var(--glossa-accent) 22%, transparent);
+  --nc-success: var(--glossa-success);
+  --nc-danger: var(--glossa-danger);
+  --nc-warn: var(--glossa-warn);
+}
+
+.theme-dark {
+  --glossa-hover: color-mix(in srgb, var(--text-normal) 7%, var(--background-secondary));
+  --glossa-line: color-mix(in srgb, var(--background-modifier-border) 72%, var(--text-faint));
+  --glossa-line-soft: color-mix(in srgb, var(--background-modifier-border) 46%, transparent);
+  --glossa-accent-soft: color-mix(in srgb, var(--glossa-accent) 14%, transparent);
+  --glossa-accent-softer: color-mix(in srgb, var(--glossa-accent) 8%, transparent);
+  --glossa-user-bg: color-mix(in srgb, var(--text-normal) 10%, var(--background-secondary));
+  --glossa-user-bg-hover: color-mix(in srgb, var(--text-normal) 13%, var(--background-secondary));
+  --glossa-user-border: color-mix(in srgb, var(--text-faint) 34%, var(--background-modifier-border));
+  --glossa-shadow-popover: 0 18px 48px rgba(0, 0, 0, 0.42), 0 1px 2px rgba(0, 0, 0, 0.24);
+  --glossa-shadow-raised: 0 12px 34px rgba(0, 0, 0, 0.34), 0 1px 2px rgba(0, 0, 0, 0.22);
+  --glossa-shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --glossa-composer-bg: color-mix(in srgb, var(--background-secondary) 72%, var(--background-primary));
+  --glossa-composer-border: color-mix(in srgb, var(--glossa-accent) 24%, var(--glossa-line));
+  --glossa-composer-shadow: 0 14px 36px rgba(0, 0, 0, 0.26), 0 1px 2px rgba(0, 0, 0, 0.22);
+}
+
+.glossa-view {
+  --nc-radius: 8px;
+  --nc-radius-sm: 6px;
+  --nc-radius-xs: 4px;
+  --g-radius-sm: 6px;
+  --g-radius-md: 8px;
+  --g-radius-lg: 8px;
+  --g-radius-xl: 10px;
+  --nc-shadow-1: var(--glossa-shadow-soft);
+  --nc-shadow-2: var(--glossa-shadow-raised);
+  --nc-shadow-3: var(--glossa-shadow-popover);
+  background: var(--glossa-surface-1);
+}
+
+.glossa-view,
+.glossa-view * {
+  letter-spacing: 0;
+}
+
+.glossa-view .nc-messages {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--glossa-surface-2) 42%, transparent), transparent 120px),
+    var(--glossa-surface-1);
+}
+
+.nc-header {
+  height: 36px;
+  padding: 5px 10px;
+  gap: 4px;
+  background: color-mix(in srgb, var(--glossa-surface-1) 94%, transparent);
+  border-bottom: 1px solid var(--glossa-line-soft);
+  box-shadow: none;
+}
+
+@supports (backdrop-filter: blur(8px)) {
+  .nc-header {
+    background: color-mix(in srgb, var(--glossa-surface-1) 88%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+}
+
+.nc-icon-btn,
+.nc-msg-actions button.nc-icon-action,
+.nc-composer-icon-btn {
+  color: var(--glossa-muted);
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px;
+  box-shadow: none !important;
+}
+
+.nc-icon-btn:hover,
+.nc-msg-actions button.nc-icon-action:hover,
+.nc-composer-icon-btn:hover {
+  color: var(--glossa-ink);
+  background: var(--glossa-hover) !important;
+  border-color: var(--glossa-line-soft) !important;
+  transform: none;
+}
+
+.nc-icon-btn.active {
+  color: var(--glossa-accent);
+  background: var(--glossa-accent-softer) !important;
+  border-color: color-mix(in srgb, var(--glossa-accent) 18%, transparent) !important;
+}
+
+.nc-mode-seg {
+  min-width: 76px;
+  height: 27px;
+  padding: 2px;
+  background: var(--glossa-surface-2);
+  border: 1px solid var(--glossa-line-soft);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 28%, transparent);
+}
+
+.theme-dark .nc-mode-seg {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.nc-mode-seg::before,
+.nc-mode-seg::after {
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 4px);
+  box-shadow: none;
+}
+
+.nc-mode-seg::before {
+  background: var(--glossa-accent);
+}
+
+.nc-mode-seg::after {
+  background: var(--glossa-success);
+}
+
+.glossa-streaming .nc-mode-seg[data-mode="act"]::after {
+  animation: nc-calm-act-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes nc-calm-act-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--glossa-success) 24%, transparent); }
+  55% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--glossa-success) 0%, transparent); }
+}
+
+.nc-mode-seg-opt {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--glossa-muted);
+  text-shadow: none;
+}
+
+.nc-mode-seg[data-mode="plan"] .nc-mode-seg-opt[data-opt="plan"],
+.nc-mode-seg[data-mode="act"] .nc-mode-seg-opt[data-opt="act"],
+.nc-mode-seg[data-mode="plan"] .nc-mode-seg-opt[data-opt="plan"]:hover,
+.nc-mode-seg[data-mode="act"] .nc-mode-seg-opt[data-opt="act"]:hover {
+  color: #fff;
+  text-shadow: none;
+}
+
+.nc-token-badge,
+.nc-cost-bar {
+  color: var(--glossa-muted);
+}
+
+.nc-msg {
+  animation-duration: 180ms;
+}
+
+.nc-msg.user {
+  align-self: stretch;
+  max-width: none;
+  position: relative;
+  margin: 10px 8px 8px 24px;
+  padding: 12px 14px 10px 16px;
+  background: var(--glossa-user-bg) !important;
+  border: 1px solid var(--glossa-user-border);
+  border-radius: 8px;
+  color: var(--text-normal);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.055), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.nc-msg.user::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--glossa-accent) 54%, var(--text-muted));
+  opacity: 0.75;
+}
+
+.theme-dark .nc-msg.user {
+  background: var(--glossa-user-bg) !important;
+  border-color: var(--glossa-user-border);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24), 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.nc-msg.user:hover,
+.theme-dark .nc-msg.user:hover {
+  border-color: color-mix(in srgb, var(--text-faint) 42%, var(--background-modifier-border));
+  background: var(--glossa-user-bg-hover) !important;
+}
+
+.nc-msg.user > .nc-msg-body {
+  padding-left: 5px;
+  font-weight: 500;
+  color: var(--text-normal);
+}
+
+.nc-msg.user > .nc-msg-footer {
+  padding-left: 5px;
+  margin-top: 7px;
+  color: var(--text-muted);
+}
+
+.nc-msg.user .nc-msg-actions button.nc-icon-action {
+  color: var(--text-muted);
+}
+
+.nc-msg.user .nc-msg-actions button.nc-icon-action:hover {
+  color: var(--text-normal);
+  background: var(--glossa-hover) !important;
+  border-color: var(--glossa-line-soft) !important;
+}
+
+.nc-msg.assistant {
+  padding: 0 10px;
+}
+
+.nc-msg.assistant .nc-msg-role,
+.nc-msg.assistant:not(.streaming) > .nc-msg-role .nc-role-name {
+  color: var(--glossa-accent);
+}
+
+.nc-msg-role {
+  color: var(--glossa-muted);
+  font-weight: 650;
+}
+
+.nc-msg-role .nc-role-icon {
+  filter: none;
+}
+
+.nc-msg.assistant.streaming > .nc-msg-role .nc-role-name {
+  background: linear-gradient(90deg, var(--glossa-accent), var(--glossa-accent-2), var(--glossa-accent));
+  background-size: 180% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.nc-msg-body {
+  color: var(--glossa-ink);
+}
+
+.nc-msg-body pre,
+.nc-tool-event-body pre {
+  background: color-mix(in srgb, var(--glossa-surface-2) 82%, var(--glossa-surface-1));
+  border: 1px solid var(--glossa-line-soft);
+  border-radius: 8px;
+}
+
+.nc-msg-body code {
+  background: color-mix(in srgb, var(--glossa-surface-2) 76%, transparent);
+  border-radius: 4px;
+}
+
+.nc-msg-body blockquote {
+  border-left-color: color-mix(in srgb, var(--glossa-accent) 38%, var(--glossa-line));
+  background: var(--glossa-accent-softer);
+}
+
+.nc-msg-body table {
+  border-color: var(--glossa-line-soft);
+  border-radius: 8px;
+}
+
+.nc-msg-body table th,
+.nc-msg-body table td {
+  border-color: var(--glossa-line-soft);
+}
+
+.nc-msg-body table th {
+  background: var(--glossa-surface-2);
+}
+
+.nc-turn-activity {
+  color: var(--glossa-muted);
+}
+
+.nc-turn-activity::before,
+.nc-compact-loading::before,
+.nc-process-dot,
+.nc-tool-stack-summary-icon {
+  background: var(--glossa-accent);
+  box-shadow: 0 0 0 3px var(--glossa-accent-soft);
+}
+
+.nc-thinking-card,
+.nc-selection-echo,
+.nc-tool-event,
+.nc-process-summary,
+.nc-tool-stack-summary,
+.nc-compact-loading {
+  background: var(--glossa-surface-2);
+  border: 1px solid var(--glossa-line-soft);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.nc-thinking-card[open],
+.nc-selection-echo[open],
+.nc-tool-event:hover,
+.nc-process-summary:hover,
+.nc-tool-stack-summary:hover {
+  background: var(--glossa-surface-3);
+  border-color: var(--glossa-line);
+  box-shadow: var(--glossa-shadow-soft);
+  transform: none;
+}
+
+.nc-thinking-summary,
+.nc-selection-echo-summary,
+.nc-tool-event-header,
+.nc-process-summary,
+.nc-tool-stack-summary {
+  color: var(--glossa-muted);
+}
+
+.nc-thinking-summary:hover,
+.nc-selection-echo-summary:hover,
+.nc-tool-event-header:hover,
+.nc-process-summary:hover,
+.nc-tool-stack-summary:hover {
+  color: var(--glossa-ink);
+}
+
+.nc-thinking-body,
+.nc-selection-echo-body,
+.nc-tool-event-body {
+  color: var(--glossa-ink);
+}
+
+.nc-tool-event-status {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 650;
+}
+
+.nc-tool-event-status.success {
+  color: var(--glossa-success);
+  background: var(--glossa-success-soft);
+  border-color: color-mix(in srgb, var(--glossa-success) 18%, transparent);
+}
+
+.nc-tool-event-status.error {
+  color: var(--glossa-danger);
+  background: var(--glossa-danger-soft);
+  border-color: color-mix(in srgb, var(--glossa-danger) 18%, transparent);
+}
+
+.nc-tool-event-status.running {
+  color: var(--glossa-accent);
+  background: var(--glossa-accent-soft);
+  border-color: color-mix(in srgb, var(--glossa-accent) 18%, transparent);
+}
+
+.nc-tool-event-status.pending,
+.nc-tool-event-status.denied {
+  color: var(--glossa-muted);
+  background: color-mix(in srgb, var(--glossa-muted) 8%, transparent);
+  border-color: var(--glossa-line-soft);
+}
+
+.nc-empty {
+  max-width: 340px;
+  color: var(--glossa-muted);
+}
+
+.nc-empty-icon {
+  margin-bottom: 12px;
+}
+
+.nc-empty-orb .g-orb-halo-wrap {
+  opacity: 0.62;
+  animation-duration: 7s;
+}
+
+.nc-empty-title {
+  background: linear-gradient(90deg, var(--glossa-accent), var(--glossa-accent-2), var(--glossa-success));
+  background-size: 160% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation-duration: 14s;
+}
+
+.nc-example-chip {
+  padding: 8px 11px;
+  background: var(--glossa-surface-2);
+  border: 1px solid var(--glossa-line-soft);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.nc-example-chip:hover {
+  background: var(--glossa-surface-3);
+  border-color: var(--glossa-line);
+  transform: translateY(-1px);
+  box-shadow: var(--glossa-shadow-soft);
+}
+
+.nc-example-chip-cmd {
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  color: var(--glossa-accent);
+}
+
+.nc-example-chip:hover .nc-example-chip-arrow {
+  color: var(--glossa-accent);
+}
+
+.nc-input-wrap {
+  margin: 8px 10px 10px;
+  padding: 9px 10px 10px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, white 18%, transparent), transparent 36px),
+    var(--glossa-composer-bg);
+  border: 1px solid var(--glossa-composer-border);
+  border-radius: 8px;
+  box-shadow: var(--glossa-composer-shadow);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.theme-dark .nc-input-wrap {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 38px),
+    var(--glossa-composer-bg);
+}
+
+.nc-input-wrap::before {
+  display: none;
+}
+
+.nc-input-wrap:focus-within,
+.nc-input-wrap.streaming {
+  border-color: color-mix(in srgb, var(--glossa-accent) 46%, var(--glossa-line));
+  box-shadow: 0 0 0 3px var(--glossa-accent-soft);
+}
+
+.nc-input-wrap:hover:not(:focus-within):not(.streaming) {
+  border-color: color-mix(in srgb, var(--glossa-accent) 28%, var(--glossa-line));
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.09), 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.theme-dark .nc-input-wrap:hover:not(:focus-within):not(.streaming) {
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.32), 0 1px 2px rgba(0, 0, 0, 0.24);
+}
+
+.nc-input-wrap.streamed {
+  animation: nc-calm-streamed-ping 760ms ease-out;
+}
+
+@keyframes nc-calm-streamed-ping {
+  0% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--glossa-success) 22%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--glossa-success) 0%, transparent); }
+}
+
+.nc-input {
+  min-height: 54px;
+  color: var(--glossa-ink);
+}
+
+.nc-input::placeholder {
+  color: var(--glossa-faint);
+  opacity: 0.9;
+}
+
+.nc-pill,
+.nc-model-chip,
+.nc-composer-pill {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--glossa-muted);
+  box-shadow: none !important;
+}
+
+.nc-pill:hover,
+.nc-model-chip:hover,
+.nc-composer-pill:hover,
+.nc-model-chip:focus,
+.nc-model-chip:focus-visible,
+.nc-composer-pill:focus,
+.nc-composer-pill:focus-visible {
+  background: var(--glossa-hover) !important;
+  border-color: var(--glossa-line-soft) !important;
+  color: var(--glossa-ink);
+  transform: none;
+}
+
+.nc-pill.pinned,
+.nc-pill.current {
+  background: color-mix(in srgb, var(--glossa-accent) 10%, var(--glossa-surface-1)) !important;
+  border-color: color-mix(in srgb, var(--glossa-accent) 30%, var(--glossa-line-soft)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 24%, transparent), 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+.nc-pill.pinned .nc-pill-icon,
+.nc-pill.current .nc-pill-icon,
+.nc-composer-pill .nc-pill-sub {
+  color: var(--glossa-accent);
+}
+
+.nc-composer-pill .nc-pill-sub {
+  background: var(--glossa-accent-softer);
+  border-radius: 4px;
+}
+
+.nc-selection-preview {
+  background: var(--glossa-surface-3);
+  border: 1px solid var(--glossa-line-soft);
+  border-radius: 8px;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 9px 6px 11px;
+}
+
+.theme-dark .nc-selection-preview,
+.nc-selection-preview:hover,
+.theme-dark .nc-selection-preview:hover {
+  background: var(--glossa-surface-3);
+  border-color: var(--glossa-line);
+}
+
+.nc-selection-preview::before {
+  background: var(--glossa-accent);
+  box-shadow: none;
+  left: 4px;
+  top: 7px;
+  bottom: 7px;
+}
+
+.nc-selection-preview-icon,
+.nc-selection-preview-close:hover {
+  color: var(--glossa-accent);
+}
+
+.nc-selection-preview-icon {
+  width: 13px;
+  height: 13px;
+  margin-top: 0;
+  align-self: center;
+}
+
+.nc-selection-preview-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nc-selection-preview-head {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.nc-selection-preview-title {
+  color: var(--text-normal);
+  font-size: 11.5px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nc-selection-preview-text {
+  display: block;
+  max-height: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.nc-selection-preview-meta {
+  margin-top: 0;
+  gap: 5px;
+  font-size: 9.5px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.nc-selection-preview-source,
+.theme-dark .nc-selection-preview-source {
+  color: var(--glossa-accent);
+  background: var(--glossa-accent-soft);
+  padding: 0 6px;
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+}
+
+.nc-selection-preview-close {
+  align-self: center;
+}
+
+.nc-submit-btn {
+  width: 30px;
+  height: 30px;
+  background: var(--glossa-accent);
+  color: #fff;
+  border-radius: 999px;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--glossa-accent) 22%, transparent);
+}
+
+.nc-submit-btn:hover {
+  filter: none;
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 3px var(--glossa-accent-soft);
+}
+
+.nc-submit-btn:active {
+  transform: translateY(0) scale(0.97);
+}
+
+.nc-submit-btn.stop {
+  background: var(--glossa-danger);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--glossa-danger) 24%, transparent);
+}
+
+.nc-submit-btn.stop:hover {
+  box-shadow: 0 0 0 3px var(--glossa-danger-soft);
+}
+
+.nc-submit-btn.stop::after {
+  border-color: color-mix(in srgb, var(--glossa-danger) 30%, transparent);
+}
+
+.nc-send-flyout {
+  background: color-mix(in srgb, var(--glossa-accent) 9%, var(--background-primary));
+  border: 1px solid color-mix(in srgb, var(--glossa-accent) 14%, var(--glossa-line));
+  border-radius: 8px;
+  box-shadow: var(--glossa-shadow-raised);
+}
+
+.nc-cost-bar {
+  padding: 2px 14px 8px;
+}
+
+.nc-budget-bar {
+  height: 3px;
+  background: color-mix(in srgb, var(--text-faint) 20%, transparent);
+}
+
+.nc-budget-fill {
+  background: linear-gradient(90deg, var(--glossa-accent), var(--glossa-accent-2));
+}
+
+.nc-budget-fill.nc-budget-history {
+  background: color-mix(in srgb, var(--text-muted) 58%, transparent);
+}
+
+.nc-budget-bar.warn .nc-budget-fill {
+  background: linear-gradient(90deg, var(--glossa-warn), #d89032);
+}
+
+.nc-budget-bar.danger .nc-budget-fill {
+  background: linear-gradient(90deg, var(--glossa-warn), var(--glossa-danger));
+}
+
+.nc-budget-label.over {
+  color: var(--glossa-danger);
+}
+
+.nc-plan-board {
+  background: color-mix(in srgb, var(--glossa-surface-2) 68%, var(--glossa-surface-1));
+  border-bottom: 1px solid var(--glossa-line-soft);
+  box-shadow: none;
+}
+
+.nc-plan-header {
+  color: var(--glossa-muted);
+}
+
+.nc-plan-progress {
+  color: var(--glossa-accent);
+  background: var(--glossa-accent-soft);
+}
+
+.nc-plan-item {
+  border-radius: 6px;
+}
+
+.nc-plan-item:hover {
+  background: var(--glossa-hover);
+}
+
+.nc-plan-item.in_progress {
+  background: var(--glossa-accent-softer);
+  color: var(--glossa-ink);
+}
+
+.nc-plan-item.completed {
+  color: var(--glossa-faint);
+}
+
+.nc-plan-item.stopped {
+  color: var(--glossa-muted);
+}
+
+.nc-popup,
+.nc-history-popover,
+.modal.nc-add-modal {
+  background-color: var(--glossa-surface-1);
+  background-image: none;
+  border: 1px solid var(--glossa-line);
+  border-radius: 10px;
+  box-shadow: var(--glossa-shadow-popover);
+}
+
+.nc-history-popover {
+  isolation: isolate;
+  contain: paint;
+  background-color: color-mix(in srgb, var(--background-primary) 96%, #ffffff) !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.theme-dark .nc-history-popover {
+  background-color: color-mix(in srgb, var(--background-primary) 94%, #111418) !important;
+  background-image: none !important;
+}
+
+.nc-popup {
+  z-index: 2147483000;
+  isolation: isolate;
+  contain: paint;
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--background-primary) 96%, #ffffff) !important;
+  background-image: none !important;
+}
+
+.theme-dark .nc-popup {
+  background-color: color-mix(in srgb, var(--background-primary) 94%, #111418) !important;
+  background-image: none !important;
+}
+
+.theme-dark .nc-popup,
+.theme-dark .nc-history-popover {
+  background-color: var(--glossa-surface-1);
+  background-image: none;
+  box-shadow: var(--glossa-shadow-popover);
+}
+
+.nc-popup-item,
+.nc-history-pop-row,
+.nc-history-row {
+  border-radius: 7px;
+  color: var(--glossa-ink);
+}
+
+.nc-popup-item:hover,
+.nc-popup-item.selected,
+.theme-dark .nc-popup-item:hover,
+.theme-dark .nc-popup-item.selected,
+.nc-history-pop-row:hover,
+.theme-dark .nc-history-pop-row:hover,
+.nc-history-pop-row.kbd-selected,
+.theme-dark .nc-history-pop-row.kbd-selected,
+.nc-history-row:hover {
+  background: var(--glossa-hover);
+  color: var(--glossa-ink);
+}
+
+.nc-popup-item:hover::before,
+.nc-popup-item.selected::before,
+.nc-history-pop-row.kbd-selected::before {
+  background: var(--glossa-accent);
+  box-shadow: none;
+}
+
+.nc-popup-item .nc-popup-check,
+.nc-popup-item.selected .nc-popup-icon,
+.nc-popup-item.checked .nc-popup-icon {
+  color: var(--glossa-accent);
+}
+
+.nc-popup-item.danger .nc-popup-label {
+  color: var(--glossa-danger);
+}
+
+.nc-popup-section {
+  color: var(--glossa-faint);
+  letter-spacing: 0.08em;
+}
+
+.nc-history-pop-search,
+.nc-history-search-wrap,
+.nc-history-rename-input,
+.nc-add-form-row input,
+.nc-add-form-row select,
+.nc-add-form-row textarea,
+.nc-history-search,
+.nc-history-pop-search-input {
+  background: var(--glossa-surface-2) !important;
+  border-color: var(--glossa-line-soft) !important;
+  border-radius: 8px;
+  box-shadow: none !important;
+}
+
+.nc-history-pop-search:focus-within,
+.nc-history-search-wrap:focus-within,
+.nc-history-rename-input:focus,
+.nc-add-form-row input:focus,
+.nc-add-form-row select:focus,
+.nc-add-form-row textarea:focus {
+  border-color: color-mix(in srgb, var(--glossa-accent) 46%, var(--glossa-line)) !important;
+  box-shadow: 0 0 0 3px var(--glossa-accent-soft) !important;
+}
+
+.nc-history-pop-more,
+.nc-history-row-actions button,
+.nc-add-form-row .nc-row-with-btn button,
+.nc-history-modal-footer button,
+.nc-add-endpoint-btn {
+  border-radius: 7px;
+  border-color: var(--glossa-line-soft);
+  background: var(--glossa-surface-2);
+  box-shadow: none;
+}
+
+.nc-history-pop-more:hover,
+.nc-history-row-actions button:hover,
+.nc-add-form-row .nc-row-with-btn button:hover,
+.nc-history-modal-footer button:hover,
+.nc-add-endpoint-btn:hover {
+  background: var(--glossa-hover);
+  border-color: var(--glossa-line);
+}
+
+.nc-kind-card,
+.nc-preset-chip,
+.nc-settings .nc-endpoint-card,
+.nc-permission-rule {
+  background: var(--glossa-surface-2);
+  border: 1px solid var(--glossa-line-soft);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.nc-kind-card:hover,
+.nc-preset-chip:hover,
+.nc-settings .nc-endpoint-card:hover {
+  background: var(--glossa-surface-3);
+  border-color: var(--glossa-line);
+  transform: none;
+  box-shadow: var(--glossa-shadow-soft);
+}
+
+.nc-kind-card.selected {
+  border-color: color-mix(in srgb, var(--glossa-accent) 48%, var(--glossa-line));
+  background: var(--glossa-accent-softer);
+}
+
+.nc-kind-card .nc-kind-title-badge,
+.nc-endpoint-card-header .nc-endpoint-kind-badge {
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+  color: var(--glossa-muted);
+  border-radius: 999px;
+}
+
+.nc-settings-tabs {
+  gap: 2px;
+  border-bottom-color: var(--glossa-line-soft);
+}
+
+.nc-settings-tab {
+  border-radius: 7px;
+  border: 1px solid transparent;
+}
+
+.nc-settings-tab:hover {
+  color: var(--glossa-ink);
+  background: var(--glossa-hover);
+}
+
+.nc-settings-tab.active {
+  color: var(--glossa-accent);
+  background: var(--glossa-accent-softer);
+  border-color: color-mix(in srgb, var(--glossa-accent) 18%, transparent);
+}
+
+.glossa-view button:focus-visible,
+.glossa-view [tabindex]:focus-visible,
+.nc-popup-item:focus-visible,
+.nc-history-pop-row:focus-visible,
+.nc-history-row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--glossa-accent) 52%, transparent);
+  outline-offset: 2px;
+  border-radius: 7px;
+}
+
+.nc-history-pop-row:not(:hover):not(.kbd-selected),
+.theme-dark .nc-history-pop-row:not(:hover):not(.kbd-selected) {
+  background: transparent;
+}
+
+.nc-inline-approval,
+.nc-approval-diff-wrap,
+.nc-codex-diag-timeline,
+.nc-codex-diag-pre,
+.nc-mcp-row,
+.nc-mcp-cmd,
+.nc-mcp-url-chip {
+  background: var(--glossa-surface-2);
+  border: 1px solid var(--glossa-line-soft);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.nc-inline-approval {
+  background: color-mix(in srgb, var(--glossa-accent) 4%, var(--glossa-surface-2));
+}
+
+.nc-inline-approval-icon,
+.nc-codex-diag-tl-type {
+  color: var(--glossa-accent);
+}
+
+.nc-inline-approval-hints kbd,
+.nc-inline-rule-select,
+.nc-mcp-search {
+  background: var(--glossa-surface-1);
+  border: 1px solid var(--glossa-line-soft);
+  border-radius: 6px;
+}
+
+.nc-inline-approval-actions button,
+.nc-approval-actions button,
+.nc-mcp-import-btn,
+.nc-mcp-chip,
+.nc-endpoint-test-btn {
+  background: var(--glossa-surface-2);
+  border: 1px solid var(--glossa-line-soft);
+  border-radius: 7px;
+  color: var(--glossa-muted);
+  box-shadow: none;
+}
+
+.nc-inline-approval-actions button:hover,
+.nc-approval-actions button:hover,
+.nc-mcp-import-btn:hover,
+.nc-mcp-chip:hover,
+.nc-endpoint-test-btn:hover {
+  background: var(--glossa-hover);
+  border-color: var(--glossa-line);
+  color: var(--glossa-ink);
+  filter: none;
+  transform: none;
+}
+
+.nc-inline-approve,
+.nc-mcp-chip.active {
+  background: var(--glossa-accent) !important;
+  border-color: var(--glossa-accent) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+.nc-inline-approve:hover {
+  background: color-mix(in srgb, var(--glossa-accent) 88%, black) !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 3px var(--glossa-accent-soft) !important;
+}
+
+.nc-inline-deny:hover {
+  background: var(--glossa-danger-soft) !important;
+  border-color: color-mix(in srgb, var(--glossa-danger) 32%, transparent) !important;
+  color: var(--glossa-danger) !important;
+}
+
+.nc-inline-approval-warning,
+.nc-approval-warning {
+  color: var(--glossa-warn);
+  background: var(--glossa-warn-soft);
+  border-color: color-mix(in srgb, var(--glossa-warn) 22%, var(--glossa-line-soft));
+}
+
+.nc-approval-diff,
+.nc-diff-box {
+  background: var(--glossa-surface-1);
+  border-radius: 8px;
+}
+
+.nc-approval-file,
+.nc-approval-stats {
+  background: var(--glossa-surface-2);
+  border-color: var(--glossa-line-soft);
+}
+
+.nc-diff-line.add {
+  background: color-mix(in srgb, var(--glossa-success) 12%, transparent);
+  color: color-mix(in srgb, var(--glossa-success) 84%, var(--text-normal));
+  border-left-color: var(--glossa-success);
+}
+
+.nc-diff-line.del {
+  background: color-mix(in srgb, var(--glossa-danger) 12%, transparent);
+  color: color-mix(in srgb, var(--glossa-danger) 84%, var(--text-normal));
+  border-left-color: var(--glossa-danger);
+}
+
+.nc-diff-line.eq {
+  color: var(--glossa-muted);
+}
+
+.nc-drop-overlay {
+  background: var(--glossa-accent-soft);
+  border-color: var(--glossa-accent);
+  color: var(--glossa-accent);
+  border-radius: 8px;
+}
+
+.nc-pill.image {
+  border-radius: 8px;
+}
+
+.nc-pill-thumb {
+  border-color: var(--glossa-line-soft);
+  border-radius: 5px;
+}
+
+.nc-mcp-cat,
+.nc-mcp-cat-ext {
+  color: var(--glossa-accent) !important;
+  background: var(--glossa-accent-soft) !important;
+  border-radius: 999px;
+}
+
+.nc-mcp-row:hover {
+  background: var(--glossa-surface-3);
+  border-color: var(--glossa-line);
+}
+
+.nc-mcp-url-chip button:hover {
+  color: var(--glossa-danger);
+}
+
+.nc-endpoint-test-status.ok::before {
+  background: var(--glossa-success);
+  box-shadow: 0 0 0 3px var(--glossa-success-soft);
+}
+
+.nc-endpoint-test-status.fail {
+  color: var(--glossa-danger);
+}
+
+.nc-endpoint-test-status.fail::before {
+  background: var(--glossa-danger);
+  box-shadow: 0 0 0 3px var(--glossa-danger-soft);
+}
+
+.nc-codex-diag-verdict {
+  border-radius: 8px;
+}
+
+.nc-codex-diag-verdict.ok {
+  background: var(--glossa-success-soft);
+  color: var(--glossa-success);
+  border: 1px solid color-mix(in srgb, var(--glossa-success) 24%, transparent);
+}
+
+.nc-codex-diag-verdict.warn {
+  background: var(--glossa-warn-soft);
+  color: var(--glossa-warn);
+  border: 1px solid color-mix(in srgb, var(--glossa-warn) 24%, transparent);
+}
+
+.nc-codex-diag-verdict.fail {
+  background: var(--glossa-danger-soft);
+  color: var(--glossa-danger);
+  border: 1px solid color-mix(in srgb, var(--glossa-danger) 24%, transparent);
+}
+
+.nc-codex-diag-row,
+.nc-codex-diag-tl-row,
+.nc-approval-file-section,
+.nc-inline-file-section {
+  border-color: var(--glossa-line-soft);
+}
+
+.nc-approval-op-pill {
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+}
+
+.nc-approval-op-pill.add {
+  background: var(--glossa-success-soft);
+  color: var(--glossa-success);
+}
+
+.nc-approval-op-pill.update {
+  background: var(--glossa-accent-soft);
+  color: var(--glossa-accent);
+}
+
+.nc-approval-op-pill.delete {
+  background: var(--glossa-danger-soft);
+  color: var(--glossa-danger);
+}

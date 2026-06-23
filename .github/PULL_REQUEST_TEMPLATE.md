@@ -17,10 +17,10 @@
 - [ ] `npm test` passes locally
 - [ ] `npm run typecheck` passes
 - [ ] `npm run build` produces a working `main.js`
-- [ ] Added or updated tests in `tests/` (A/B/C/D/E/F/G as appropriate)
+- [ ] Added or updated focused tests in `tests/*.test.cjs` as appropriate
 - [ ] No `console.log` / `console.error` left in production paths
 - [ ] If UI changed: screenshot or GIF in the PR description
-- [ ] If new tool added: registered in `src/agent/tools.ts`, has `assertVaultPath` guard for any path arg, has an entry in `tests/A_unit/` or `tests/E_security/`
+- [ ] If new tool added: registered in `src/agent/tools.ts`, has `assertVaultPath` guard for any path arg, and has focused tests under `tests/`
 - [ ] If `manifest.json.version` changed: `versions.json` updated too
 - [ ] If config schema changed: added a migration in `src/main.ts:onload`
 

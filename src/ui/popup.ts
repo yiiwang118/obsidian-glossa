@@ -14,15 +14,17 @@ export interface PopupItem {
 }
 
 export class Popup {
+  private static instances = new Set<Popup>();
   private el: HTMLElement;
   private itemEls: HTMLElement[] = [];
-  private selectedIdx = 0;
+  private selectedIdx = -1;
   private items: PopupItem[] = [];
   private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private anchor: HTMLElement | null = null;
 
   constructor() {
+    Popup.instances.add(this);
     this.el = el('div', { className: 'nc-popup' });
     this.el.style.display = 'none';
     document.body.appendChild(this.el);
@@ -34,6 +36,7 @@ export class Popup {
     // ArrowDown/Up rebuilds `.selected` via render() so the cursor
     // resumes naturally from wherever it was.
     this.el.addEventListener('mouseleave', () => {
+      this.selectedIdx = -1;
       for (const item of this.itemEls) item.classList.remove('selected');
     });
   }
@@ -41,13 +44,15 @@ export class Popup {
   destroy() {
     this.removeOutsideHandler();
     this.removeKeyHandler();
+    Popup.instances.delete(this);
     this.el.remove();
   }
 
   show(anchor: HTMLElement, items: PopupItem[]) {
+    this.hidePeers();
     this.items = items;
     this.anchor = anchor;
-    this.selectedIdx = 0;
+    this.selectedIdx = -1;
     this.render();
     this.el.style.display = 'block';
 
@@ -75,8 +80,6 @@ export class Popup {
       this.el.style.left = left + 'px';
       this.el.style.top  = top  + 'px';
     });
-
-    this.scrollSelectedIntoView();
     this.installOutsideHandler();
     this.installKeyHandler();
   }
@@ -89,6 +92,17 @@ export class Popup {
     this.removeKeyHandler();
   }
 
+  /** Body-level popups are shared visual chrome. Only one should ever be
+   *  visible; otherwise model/context/slash menus can visually overlap. */
+  private hidePeers() {
+    for (const popup of Popup.instances) {
+      if (popup !== this) popup.hide();
+    }
+    for (const node of Array.from(document.querySelectorAll<HTMLElement>('.nc-popup'))) {
+      if (node !== this.el) node.style.display = 'none';
+    }
+  }
+
   isOpen() { return this.el.style.display !== 'none'; }
   /** The DOM element this popup is currently anchored to (set on show()).
    *  Callers compare it via identity to implement click-the-same-trigger-to-
@@ -98,10 +112,16 @@ export class Popup {
 
   onKey(e: KeyboardEvent): boolean {
     if (!this.isOpen()) return false;
-    if (e.key === 'ArrowDown') { this.selectedIdx = Math.min(this.items.length - 1, this.selectedIdx + 1); this.render(); this.scrollSelectedIntoView(); return true; }
-    if (e.key === 'ArrowUp')   { this.selectedIdx = Math.max(0, this.selectedIdx - 1); this.render(); this.scrollSelectedIntoView(); return true; }
+    if (e.key === 'ArrowDown') {
+      this.selectedIdx = this.selectedIdx < 0 ? 0 : Math.min(this.items.length - 1, this.selectedIdx + 1);
+      this.render(); this.scrollSelectedIntoView(); return true;
+    }
+    if (e.key === 'ArrowUp') {
+      this.selectedIdx = this.selectedIdx < 0 ? this.items.length - 1 : Math.max(0, this.selectedIdx - 1);
+      this.render(); this.scrollSelectedIntoView(); return true;
+    }
     if (e.key === 'Enter' || e.key === 'Tab') {
-      const it = this.items[this.selectedIdx];
+      const it = this.items[this.selectedIdx >= 0 ? this.selectedIdx : 0];
       if (it) { it.onSelect(); this.hide(); }
       return true;
     }
@@ -174,8 +194,9 @@ export class Popup {
       });
       row.addEventListener('mousemove', () => {
         if (this.selectedIdx === i) return;
+        if (this.selectedIdx >= 0) this.itemEls[this.selectedIdx]?.classList.remove('selected');
         this.selectedIdx = i;
-        for (let k = 0; k < this.itemEls.length; k++) this.itemEls[k].classList.toggle('selected', k === i);
+        this.itemEls[i]?.classList.add('selected');
       });
       row.addEventListener('mousedown', (ev) => {
         ev.preventDefault();

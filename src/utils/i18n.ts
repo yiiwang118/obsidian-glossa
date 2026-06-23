@@ -76,8 +76,8 @@ const D: Dict = {
   'cli_binary_path_desc':      { en: 'Absolute path. "auto" probes common locations.',
                                   zh: '绝对路径。"auto" 自动搜索常见位置。' },
   'cli_full_agent':            { en: 'Full agent',        zh: '完整 agent' },
-  'cli_full_agent_desc':       { en: 'CLI runs its own tools. Off = single-shot.',
-                                  zh: 'CLI 自己跑工具。关闭则单次调用。' },
+  'cli_full_agent_desc':       { en: 'CLI runs its own tools outside Glossa approvals/checkpoints. Off = single-shot.',
+                                  zh: 'CLI 在 Glossa 审批/checkpoint 之外自己跑工具。关闭则单次调用。' },
 
   /* ----- Reasoning effort ----- */
   'reasoning_effort':          { en: 'Reasoning',         zh: '思考强度' },
@@ -93,11 +93,11 @@ const D: Dict = {
 
   /* ----- Codex-specific ----- */
   'codex_sandbox':             { en: 'Sandbox',           zh: '沙箱' },
-  'codex_sandbox_desc':        { en: '-c sandbox_mode',
-                                  zh: '-c sandbox_mode' },
+  'codex_sandbox_desc':        { en: '-c sandbox_mode. Default: read-only.',
+                                  zh: '-c sandbox_mode。默认 read-only。' },
   'codex_approval':            { en: 'Approval',          zh: '审批' },
-  'codex_approval_desc':       { en: '-c approval_policy',
-                                  zh: '-c approval_policy' },
+  'codex_approval_desc':       { en: '-c approval_policy. Default: never only in read-only; otherwise on-request.',
+                                  zh: '-c approval_policy。默认只在 read-only 下 never；否则 on-request。' },
   'codex_use_oss':             { en: 'OSS (--oss)',       zh: 'OSS (--oss)' },
   'codex_config_overrides':    { en: '-c overrides',      zh: '-c 覆盖' },
   'codex_config_overrides_desc':{ en: 'One per line. e.g. model_reasoning_effort="xhigh"',

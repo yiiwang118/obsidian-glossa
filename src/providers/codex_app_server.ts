@@ -56,6 +56,14 @@ interface AppServerOptions {
   env: NodeJS.ProcessEnv;
   configOverrides: string[];     // `key=value` pairs passed as repeated `-c`
   debug: boolean;
+  autoApproveServerApprovals: boolean;
+}
+
+function redactStderr(text: string): string {
+  return text
+    .replace(/\b(sk-[A-Za-z0-9_-]{12,})\b/g, 'sk-[redacted]')
+    .replace(/\b(api[_-]?key|token|authorization)\s*[:=]\s*["']?[^"'\s]+/gi, '$1=[redacted]')
+    .replace(/\b(Bearer)\s+[A-Za-z0-9._-]+/gi, '$1 [redacted]');
 }
 
 /** A minimal JSON-RPC client over stdio for codex app-server. */
@@ -68,10 +76,12 @@ class AppServerClient {
   private errorHandler: ((err: Error) => void) | null = null;
   private stderrTail = '';
   private debug: boolean;
+  private autoApproveServerApprovals: boolean;
   closed = false;
 
   constructor(opts: AppServerOptions) {
     this.debug = opts.debug;
+    this.autoApproveServerApprovals = opts.autoApproveServerApprovals;
     const args = ['app-server', '--listen', 'stdio://'];
     for (const kv of opts.configOverrides) args.push('-c', kv);
     this.proc = spawn(opts.binaryPath, args, {
@@ -84,13 +94,13 @@ class AppServerClient {
     this.proc.stderr.on('data', (chunk) => {
       const s = chunk.toString('utf-8');
       this.stderrTail = (this.stderrTail + s).slice(-2000);
-      if (this.debug) console.log('[Glossa] codex app-server stderr:', s);
+      if (this.debug) console.debug('[Glossa] codex app-server stderr:', redactStderr(s));
     });
     this.proc.on('exit', (code) => {
       this.closed = true;
       // Fail any pending requests with a useful message.
       for (const [, p] of this.pending) {
-        p.reject(new Error(`codex app-server exited (code=${code}) before response. stderr tail: ${this.stderrTail.slice(-400)}`));
+        p.reject(new Error(`codex app-server exited (code=${code}) before response. stderr tail: ${redactStderr(this.stderrTail.slice(-400))}`));
       }
       this.pending.clear();
     });
@@ -127,10 +137,10 @@ class AppServerClient {
       }
       // JSON-RPC notification or server-initiated request
       if (msg.method) {
-        if (this.debug) console.log('[Glossa] app-server notif:', msg.method);
-        // Server-initiated request (has id) — auto-acknowledge with empty result
-        // so codex doesn't block waiting for approval. Approvals are NOT
-        // surfaced as interactive prompts in v1 (sandbox already constrains).
+        if (this.debug) console.debug('[Glossa] app-server notif:', msg.method);
+        // Server-initiated request (has id) — answer so Codex doesn't block.
+        // Approval requests default to deny unless the user explicitly chose
+        // approval_policy="never" for this endpoint.
         if (msg.id != null) {
           this.send({ jsonrpc: '2.0', id: msg.id, result: this.autoAck(msg.method) });
           continue;
@@ -142,9 +152,11 @@ class AppServerClient {
 
   /** Provide a reasonable default response for server-initiated approval requests. */
   private autoAck(method: string): any {
-    // Default: allow / approve. Sandbox already limits damage in non-fullAgent mode.
-    // For commandExecution/fileChange/applyPatch approval reviews, we say "allow".
-    if (/approval|approveGuardian/i.test(method)) return { decision: 'approve' };
+    if (/approval|approveGuardian/i.test(method)) {
+      return this.autoApproveServerApprovals
+        ? { decision: 'approve' }
+        : { decision: 'deny', reason: 'Glossa does not auto-approve Codex app-server tool approvals. Set approval_policy="never" explicitly to let Codex approve internally.' };
+    }
     return null;
   }
 
@@ -236,10 +248,23 @@ export async function* streamViaAppServer(
   if (ep.reasoningEffort && ep.reasoningEffort !== 'off') {
     configOverrides.push(`model_reasoning_effort="${ep.reasoningEffort}"`);
   }
+  const sandbox: SandboxMode = ep.cliFullAgent
+    ? (ep.codexSandboxMode ?? 'read-only')
+    : 'read-only';
+  let approvalPolicy = ep.cliFullAgent
+    ? (ep.codexApprovalPolicy ?? (sandbox === 'read-only' ? 'never' : 'on-request'))
+    : 'never';
+  configOverrides.push(`approval_policy="${approvalPolicy}"`);
   // Free-form overrides
   for (const line of (ep.codexConfigOverrides ?? '').split('\n')) {
     const t = line.trim();
-    if (t && t.includes('=')) configOverrides.push(t);
+    if (t && t.includes('=')) {
+      const m = t.match(/^approval_policy\s*=\s*["']?([^"']+)["']?$/);
+      if (m && ['untrusted', 'on-failure', 'on-request', 'never'].includes(m[1])) {
+        approvalPolicy = m[1] as typeof approvalPolicy;
+      }
+      configOverrides.push(t);
+    }
   }
   // OSS provider
   if (ep.codexUseOss) configOverrides.push('model_provider="oss"');
@@ -266,6 +291,7 @@ export async function* streamViaAppServer(
     env: makeChildEnv(proxy),
     configOverrides,
     debug,
+    autoApproveServerApprovals: approvalPolicy === 'never',
   });
 
   // Channel: server-side notifications get pushed onto a queue the generator
@@ -294,7 +320,7 @@ export async function* streamViaAppServer(
   let capturedUsage: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | null = null;
 
   client.setNotifyHandler((method, params) => {
-    if (debug) console.log('[Glossa] notif:', method, JSON.stringify(params).slice(0, 200));
+    if (debug) console.debug('[Glossa] notif:', method, JSON.stringify(params).slice(0, 200));
     switch (method) {
       case 'item/agentMessage/delta': {
         const itemId: string = params.itemId ?? 'agent';
@@ -412,11 +438,8 @@ export async function* streamViaAppServer(
       capabilities: null,
     }, 10_000);
 
-    // 2. Fresh thread. Sandbox mirrors the codex_cli legacy rules:
-    //   non-fullAgent → forced read-only; fullAgent → user-configured (default workspace-write)
-    const sandbox: SandboxMode = ep.cliFullAgent
-      ? (ep.codexSandboxMode ?? 'workspace-write')
-      : 'read-only';
+    // 2. Fresh thread. Sandbox mirrors the codex_cli rules:
+    //   non-fullAgent → forced read-only; fullAgent → user-configured (default read-only)
     const threadResp = await client.request('thread/start', {
       sandbox,
       model: (ep.model ?? '').trim() || null,

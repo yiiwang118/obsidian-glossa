@@ -23,7 +23,7 @@ export const listFiles: ToolImpl = buildTool({
     name: 'list_files',
     description: [
       'List files inside a vault folder. Returns FULL vault-relative paths (one per line)',
-      'so you can pass them directly to read_note / file_edit / apply_patch.',
+      'so you can pass them directly to read_note / read_pdf / file_edit / apply_patch.',
       '',
       'Args:',
       '- folder (optional): vault-relative folder path. Empty or "/" means vault root.',

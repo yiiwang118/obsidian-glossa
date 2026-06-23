@@ -7,7 +7,7 @@
 [![CI](https://github.com/yiiwang118/obsidian-glossa/actions/workflows/ci.yml/badge.svg)](https://github.com/yiiwang118/obsidian-glossa/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/yiiwang118/obsidian-glossa?display_name=tag&sort=semver)](https://github.com/yiiwang118/obsidian-glossa/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1181_passed-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-96_passed-brightgreen)](tests/)
 [![en](https://img.shields.io/badge/English-README-blue)](README.md)
 
 </div>
@@ -16,9 +16,9 @@
 
 ## 是什么
 
-Glossa 是一个跑在桌面知识库主机里的侧栏助手。它对接多个 LLM provider（OpenAI、Anthropic、任意 OpenAI 兼容网关、Codex CLI），通过 `@` 提及读取你的选区 / 当前笔记 / 任意文件，在 vault 上跑工具型 agent（每个动作都要显式批准），需要安静的时候不打扰你。
+Glossa 是一个跑在 Obsidian 桌面端里的侧栏助手。它对接多个 LLM provider（OpenAI、Anthropic、兼容网关、Codex CLI、本地 CLI bridge），通过 `@` 提及读取你的选区 / 当前笔记 / 任意文件，在 vault 上跑工具型 agent（每个动作都要显式批准），需要安静的时候不打扰你。
 
-它**不是**云服务。Glossa 是本地插件；唯一的网络调用流向**你自己配置的** provider 端点。
+它**不是**云服务。Glossa 是本地插件；网络调用只会流向你配置的 provider、你选择的 embedding 端点、你附加/批准的公开 URL，以及你显式启用的 MCP 或本地 CLI 工具。
 
 ## 特性
 
@@ -36,7 +36,7 @@ Glossa 是一个跑在桌面知识库主机里的侧栏助手。它对接多个 
 
 ## 截图
 
-> 待补 — 见 `docs/screenshots/`。
+截图放在 `docs/screenshots/`，用于 release 和社区提交。构建插件不依赖这些图片。
 
 ## 安装
 
@@ -70,7 +70,7 @@ curl -L -o styles.css    https://github.com/yiiwang118/obsidian-glossa/releases/
 
 1. 打开侧栏（ribbon 图标或命令面板 → "Open sidebar"）
 2. 设置 → Providers → **Add endpoint** → 粘贴 API key
-3. 选模式 pill：**Plan**（只读，建议性）或 **Act**（允许跑工具）
+3. 新安装默认是 **Plan** + **read-only**。只有在你希望 agent 写文件时，再切到 **Act** 或提高权限。
 4. 直接输入，或 `@` 附加上下文，或 `/` 触发斜杠命令
 5. Shift-Enter 换行，Enter 发送
 
@@ -82,13 +82,14 @@ curl -L -o styles.css    https://github.com/yiiwang118/obsidian-glossa/releases/
 | Anthropic | ✅ | ✅ | ✅ (extended thinking) | ✅ |
 | Codex CLI（legacy `exec --json`） | ✅ | ✅ | ✅ (xhigh effort) | ✅ 临时文件 |
 | Codex App-Server（stdio JSON-RPC） | ✅ | ✅ | ✅ | ✅ |
+| Claude Code CLI（本地，实验性） | ✅ | ✅ | ✅ | 看配置 |
 | 自定义（任意 HTTP 网关） | ✅ | ✅ | 看实现 | 看实现 |
 
 在企业代理 / GFW 后面用 Obsidian 系统代理模式（`useObsidianFetch`）。
 
 ## Agent 模式
 
-三档权限：
+新安装默认是 **Plan** 模式和 **read-only** 权限。可用三档权限：
 
 - **read-only** — 只有标记 `isReadOnly: true` 的工具（read_note、search_vault、semantic_search…）能跑
 - **workspace-write** — 读 + 写工具（file_edit、write_note、patch_note、apply_patch…）；破坏性调用进 approval modal
@@ -103,8 +104,9 @@ curl -L -o styles.css    https://github.com/yiiwang118/obsidian-glossa/releases/
 **简述**：
 1. 你的对话 / prompt / 附带 context 发给**你配置的 provider**。Glossa 作者看不到。
 2. RAG / 嵌入重建会**把每个 markdown 文件的内容上传**到你选的嵌入端点。首次构建前有一次性 consent 弹窗。
-3. API 密钥默认在 `data.json` 里明文存储。需要 unlock 时输入密码？去 设置 → Security 打开加密。
-4. MCP 子进程继承一个**过滤后**的 env（LLM 凭据已剥离）。如果你要让 MCP 用其它密钥（GitHub PAT、AWS key），请填到该 MCP 服务自己的 env 配置里，而不是 shell rc。
+3. API 密钥默认在 `data.json` 里明文存储。需要密码保护请到 设置 → Security 打开加密。
+4. 本地 CLI endpoint（`codex`、`claude`）会启动子进程，并可能继承白名单内的 shell 代理/API-key 环境变量，以便从 Obsidian 桌面端正常工作。
+5. MCP 子进程继承一个**过滤后**的 env（LLM 凭据已剥离）。如果你要让 MCP 用其它密钥（GitHub PAT、AWS key），请填到该 MCP 服务自己的 env 配置里，而不是 shell rc。
 
 ## Skills
 
@@ -150,28 +152,27 @@ npm install
 npm run dev        # 保存时重新构建
 npm run build      # 生产打包 (main.js)
 npm run typecheck  # tsc --noEmit
-npm test           # 单元 + 集成（60 + 1181 断言）
+npm test           # 仓库内 Node 测试
+npm run release:check -- --allow-dirty
 ```
 
 ## 测试
 
-7 层测试套件在 `tests/`：
+当前 `tests/` 是聚焦的仓库内 Node 测试：
 
-| 套件 | 范围 | 环境 |
-|---|---|---|
-| A 单元 | crypto、parser、permission、token、tool_search、slash、markdown、vault path | Node |
-| B 集成 | mock provider 驱动 agent loop、approval 优先级、checkpoint 并发、compact、加密生命周期、file_index | Node + mock |
-| C provider | SSE / NDJSON / JSON-RPC fuzz | Node |
-| D perf | 嵌入搜索、渲染、file_index micro-bench | Node |
-| E 安全 | SSRF、18 工具 × 10 攻击路径穿越、MCP env 隔离、namespace 碰撞、marketplace 命令注入 | Node |
-| F e2e | 长会话渲染、流式、session race、模式切换、cancel cycle、加密循环、MCP 重连、对抗模型 | happy-dom |
-| G chromium | 真 Chromium via Puppeteer | headless Chromium |
+| 范围 | 覆盖文件 |
+|---|---|
+| 权限 / MCP 规则 | `permission_rule.test.cjs`, `agent_permission.test.cjs` |
+| patch envelope / glob / stable stringify | `patch_envelope.test.cjs`, `list_files_glob.test.cjs`, `stable_stringify.test.cjs` |
+| compact / model context / PDF 提取 | `compact.test.cjs`, `model_context.test.cjs`, `pdf_extract.test.cjs` |
+| Codex CLI 参数安全 | `codex_cli_args.test.cjs` |
+| 发布默认值 / 大 diff 保护 | `release_readiness.test.cjs` |
 
 ```bash
-npm test              # A + B + C + E (~5s)
-npm run test:e2e      # F (happy-dom, ~6s)
-npm run test:render   # G (real Chromium, ~1s)
-npm run test:all      # 全套 (~10s)
+npm test              # 10 个测试文件，本版本 96 条断言
+npm run typecheck
+npm run build
+npm run release:check -- --allow-dirty
 ```
 
 ## Roadmap
@@ -188,8 +189,8 @@ npm run test:all      # 全套 (~10s)
 
 欢迎 PR。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。开 PR 前请：
 
-1. `npm test` 和 `npm run typecheck` 通过
-2. 新工具自带 `tests/A_unit/` 或 `tests/E_security/` 用例
+1. `npm test`、`npm run typecheck`、`npm run build` 通过
+2. 新工具自带聚焦的 `tests/*.test.cjs` 用例
 3. UI 改动 PR 描述里附截图
 4. 生产路径不留 `console.log`
 

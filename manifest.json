@@ -1,9 +1,9 @@
 {
   "id": "glossa",
   "name": "Glossa",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "minAppVersion": "1.4.0",
-  "description": "AI sidebar with multi-provider chat, @-context, semantic search (RAG), agent mode with sandboxed file edits, MCP bridge, encrypted keys, and Codex CLI integration",
+  "description": "AI sidebar with multi-provider chat, @-context, semantic search (RAG), agent mode with sandboxed file edits, MCP bridge, encrypted keys, and Codex CLI integration.",
   "author": "yiiwang",
   "authorUrl": "https://github.com/yiiwang118",
   "isDesktopOnly": true

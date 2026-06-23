@@ -214,6 +214,34 @@ export function normalizeMcpServerName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_]/g, '_');
 }
 
+const PERMISSION_PATH_KEYS = new Set([
+  'path',
+  'paths',
+  'file_path',
+  'base_path',
+  'target_path',
+  'template_path',
+  'from',
+  'to',
+]);
+
+function permissionRulePaths(args: any): string[] {
+  if (!args || typeof args !== 'object') return [];
+  const out: string[] = [];
+  const add = (v: unknown) => {
+    if (typeof v !== 'string') return;
+    const s = v.trim();
+    if (s) out.push(s);
+  };
+  for (const [key, value] of Object.entries(args)) {
+    const pathLike = PERMISSION_PATH_KEYS.has(key) || key.endsWith('_path') || key.endsWith('Path');
+    if (!pathLike) continue;
+    if (Array.isArray(value)) for (const item of value) add(item);
+    else add(value);
+  }
+  return Array.from(new Set(out));
+}
+
 /** Match an MCP rule (tool name like 'mcp:weather:*' or 'mcp:*') against a tool call. */
 function mcpRuleMatches(rule: PermissionRule, toolName: string): boolean {
   if (!rule.tool.startsWith('mcp:')) return false;
@@ -231,12 +259,12 @@ export function matchPermissionRule(rule: PermissionRule, toolName: string, args
     if (!mcpRuleMatches(rule, toolName)) return false;
   } else if (rule.tool !== toolName) return false;
   if (rule.scope === 'global') return true;
-  const path = String(args?.path ?? args?.file_path ?? '');
-  if (!path) return false;
-  if (rule.scope === 'path') return path === rule.value;
+  const paths = permissionRulePaths(args);
+  if (paths.length === 0) return false;
+  if (rule.scope === 'path') return paths.some(path => path === rule.value);
   if (rule.scope === 'folder') {
     const folder = (rule.value ?? '').replace(/\/$/, '');
-    return path === folder || path.startsWith(folder + '/');
+    return paths.some(path => path === folder || path.startsWith(folder + '/'));
   }
   return false;
 }
@@ -340,8 +368,8 @@ export const DEFAULT_SETTINGS: GlossaSettings = {
   agentMaxSteps: 20,
   agentAlwaysApproveTools: ['search_vault', 'grep_vault', 'semantic_search', 'read_note', 'list_files', 'get_active_file', 'get_selection', 'query_metadata', 'search_by_tag', 'todo_write', 'view_image', 'discover_skills', 'run_skill'],
   agentNeverApproveTools: ['delete_note'],
-  permissionLevel: 'workspace-write',
-  runMode: 'act',
+  permissionLevel: 'read-only',
+  runMode: 'plan',
   loadProjectContext: true,
   chatsFolder: 'Chats',
   globalProxy: '',
@@ -411,48 +439,58 @@ export function effectiveProxy(ep: Endpoint, globalProxy: string): string | unde
   return globalProxy || undefined;
 }
 
-/** Heuristic context-window lookup keyed on substrings of the model id. Used
- *  by the cost bar so the denominator reflects what the actual provider
- *  accepts — showing "/ 1000k" was misleading on a 128k gpt-4o or 64k DeepSeek
- *  chat. Match longest-prefix first; returns `null` when unknown so the caller
- *  can fall back to the user's settings ceiling. */
+/** Context-window lookup keyed on substrings of the model id. Keep this table
+ *  conservative: only return a value when the provider documents the family or
+ *  the model id is specific enough. Unknown models return `null` so UI/prompt
+ *  budgeting can fall back to the user's settings ceiling instead of showing a
+ *  precise-looking guess. */
 export function modelContextWindow(model: string | undefined | null): number | null {
   if (!model) return null;
   const m = model.toLowerCase();
-  // Anthropic Claude 4.x — 1M context tier
+
+  // Anthropic Claude: current Opus/Sonnet 4.6+ tier is 1M; older Claude 3.x /
+  // 4.5 and Haiku remain 200k.
   if (/claude-(opus|sonnet)-4-7/.test(m)) return 1_000_000;
   if (/claude-(opus|sonnet)-4-6/.test(m)) return 1_000_000;
-  // Claude 3.5 / 3.7 / 4.5 — 200k
   if (/claude-(3[\.-]5|3[\.-]7|sonnet-4-5|haiku-4-5)/.test(m)) return 200_000;
-  if (/claude/.test(m)) return 200_000;   // any other claude → 200k
-  // OpenAI o-series + GPT-5
-  if (/^o[1-5](\b|-)/.test(m) || /gpt-5/.test(m)) return 200_000;
-  // GPT-4-turbo / 4o
-  if (/gpt-4o|gpt-4-turbo|gpt-4\.1/.test(m)) return 128_000;
+  if (/claude/.test(m)) return 200_000;
+
+  // OpenAI. GPT-4.1 is the long-context 1M family; GPT-4o / 4 Turbo are 128k.
+  // GPT-5.4/5.5 full models are 1M; mini/nano/current base GPT-5 variants use
+  // a smaller 400k-class window. o-series remains 200k.
+  if (/gpt-5\.(4|5)(?!.*(?:mini|nano))/.test(m)) return 1_000_000;
+  if (/gpt-5/.test(m)) return 400_000;
+  if (/^o[1-5](\b|-)/.test(m)) return 200_000;
+  if (/gpt-4\.1/.test(m)) return 1_000_000;
+  if (/gpt-4o|gpt-4-turbo/.test(m)) return 128_000;
   if (/gpt-4-32k/.test(m)) return 32_000;
   if (/gpt-4/.test(m)) return 8_192;
   if (/gpt-3\.5-turbo-16k/.test(m)) return 16_384;
   if (/gpt-3\.5/.test(m)) return 16_384;
-  // Codex CLI default (the user's screenshot showed 258k)
-  if (/codex/.test(m) || /gpt-5\.4/.test(m)) return 256_000;
-  // DeepSeek — v4 / v3 / chat / coder / reasoner / R1 etc all share 128k for v4+,
-  // older variants are 64k. Default any unknown deepseek to 128k since current
-  // releases all use that.
+
+  // DeepSeek: official V4 Flash/Pro tier is 1M; older V3/R1 public ids are 64k.
+  // Ambiguous aliases such as "deepseek-chat" change over time, so leave them
+  // unknown unless the id names a documented family.
+  if (/deepseek-v4|deepseek.*v4/.test(m)) return 1_000_000;
   if (/deepseek-v3/.test(m)) return 64_000;
   if (/deepseek-r1/.test(m)) return 64_000;
-  if (/deepseek/.test(m)) return 128_000;
-  // Qwen
-  if (/qwen.*-72b|qwen2\.5-72b|qwen3|qwen-?max/.test(m)) return 128_000;
-  if (/qwen/.test(m)) return 32_000;
-  // GLM
-  if (/glm-4|glm-?5/.test(m)) return 128_000;
-  if (/glm/.test(m)) return 128_000;
-  // Gemini
-  if (/gemini-1\.5|gemini-2|gemini-3/.test(m)) return 1_000_000;
-  if (/gemini/.test(m)) return 1_000_000;
-  // MiniMax abab
+  if (/deepseek/.test(m)) return null;
+
+  // Qwen / Alibaba Model Studio. Qwen3-Max is 262,144; current Plus/Flash
+  // long-context variants are 1M. Older bare Qwen ids vary, so fall back.
+  if (/qwen3?-max|qwen-max/.test(m)) return 262_144;
+  if (/qwen.*(plus|flash|long)/.test(m)) return 1_000_000;
+  if (/qwen/.test(m)) return null;
+
+  // Gemini input token limits are 1,048,576 for current 2.5/3.x models; 1.5
+  // Pro had a 2M window.
+  if (/gemini-1\.5-pro/.test(m)) return 2_000_000;
+  if (/gemini-1\.5|gemini-2|gemini-3/.test(m)) return 1_048_576;
+  if (/gemini/.test(m)) return 1_048_576;
+
+  // GLM / MiniMax / open-source families vary by hosted endpoint; keep only
+  // stable broad defaults where the family is generally advertised that way.
   if (/abab|minimax/.test(m)) return 256_000;
-  // Mistral / Llama / open-source defaults
   if (/llama-3|llama3|llama-4/.test(m)) return 128_000;
   if (/llama|mistral|mixtral/.test(m)) return 32_000;
   return null;
