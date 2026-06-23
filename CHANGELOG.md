@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] — 2026-06-23
+
+Release follow-up for the community plugin submission.
+
+### Fixed
+- Cleared the remaining Obsidian-specific ESLint findings from the release-readiness pass.
+- Reworked trusted inline SVG rendering so icons render correctly without `innerHTML`.
+- Preserved release-safe UI text while keeping CLI flags, URLs, and brand names readable.
+
+### Changed
+- Release workflow now builds root-level artifacts and attaches provenance attestations for `main.js`, `manifest.json`, and `styles.css`.
+
 ## [0.4.1] — 2026-06-23
 
 Release-readiness pass for Obsidian community submission.
@@ -67,6 +79,7 @@ First open-source release. Focuses on hardening: 6 high/medium-severity findings
 
 Last pre-open-source version. Internal-only. Not published.
 
+[0.4.2]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.4.2
 [0.4.1]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.4.1
 [0.4.0]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.4.0
 [0.3.0]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.3.0
