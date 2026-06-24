@@ -1694,13 +1694,24 @@ export class GlossaView extends ItemView {
     setStyle(this.selectionPreviewEl, { display: 'none' });
     this.contextBarEl = el('div', { className: 'nc-context-bar', parent: wrap });
 
+    const inputId = `glossa-input-${uid()}`;
+    const labelId = `${inputId}-label`;
+    el('label', {
+      className: 'nc-sr-only',
+      text: bi('Glossa message input', 'Glossa 消息输入框'),
+      parent: wrap,
+      attrs: { id: labelId, for: inputId },
+    });
+
     this.inputEl = el('textarea', {
       className: 'nc-input', parent: wrap,
       attrs: {
+        id: inputId,
         placeholder: t('placeholder_input'),
-        // a11y: explicit label + role so screen readers announce the
-        // composer purpose rather than just "textarea".
-        'aria-label': t('placeholder_input'),
+        // Avoid aria-label here: Obsidian's tooltip system may surface it as
+        // a hover bubble over the composer. The hidden label keeps screen
+        // reader support without creating an in-app tooltip.
+        'aria-labelledby': labelId,
         role: 'textbox',
         'aria-multiline': 'true',
       },

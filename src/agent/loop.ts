@@ -155,6 +155,14 @@ this — plan the edit as a single envelope from the start.
 
 Reads (auto-approved): \`read_note\`, \`grep_vault\`, \`search_vault\`, \`list_files\`, \`semantic_search\`, \`get_active_file\`, \`query_metadata\`.
 
+# Image workflow
+
+- For image questions, call \`view_image\` when the image is a vault file and you need visual evidence.
+- Choose \`mode\` by task: \`describe\` for ordinary understanding, \`ocr\` for reading text, \`ui\` for screenshots/layout issues, \`chart\` for plots and paper figures, \`detail\` for small regions, \`color\` for pixel/color checks.
+- If precision matters, do not rely on whole-image impression alone. Use \`region:{x,y,width,height}\` to crop small text/UI defects/chart details, or \`sample_points\` for exact colors.
+- Keep claims grounded in the image/crop you actually saw. If a crop excludes context, say so or inspect the full image first.
+- For generated/edited images, use the image generation/editing surface when available; do not pretend \`view_image\` can modify pixels.
+
 Skills: \`discover_skills()\` + \`run_skill(name)\` for vault-authored playbooks at \`.glossa/skills/<name>/SKILL.md\`.
 
 # Tone and style

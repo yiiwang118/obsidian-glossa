@@ -2,7 +2,8 @@ import { App, TFile, TFolder, MarkdownView, FileView, getAllTags, normalizePath 
 import { estimateTokens } from '../utils/tokens';
 import { uid } from '../utils/dom';
 import { fetchWithSafeRedirects, parseHttpUrl } from '../utils/safe_web';
-import { extractPdfTextFromArrayBuffer } from '../utils/pdf';
+import { extractPdfTextFromArrayBuffer, formatPdfDiagnosticMarkdown } from '../utils/pdf';
+import { bytesToBase64 } from '../utils/image';
 import type { ContextItem } from '../types';
 
 /* ============================================================
@@ -77,12 +78,7 @@ export async function resolveFile(app: App, file: TFile): Promise<ContextItem> {
         };
       }
       const bytes = new Uint8Array(buf);
-      let bin = '';
-      const chunk = 0x8000;
-      for (let i = 0; i < bytes.length; i += chunk) {
-        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk) as any);
-      }
-      const dataUri = `data:${IMAGE_MIME[ext] ?? 'image/png'};base64,${btoa(bin)}`;
+      const dataUri = `data:${IMAGE_MIME[ext] ?? 'image/png'};base64,${bytesToBase64(bytes)}`;
       return {
         id: uid(), kind: 'image', label: file.basename + '.' + ext,
         detail: file.path,
@@ -129,9 +125,10 @@ export async function resolveFile(app: App, file: TFile): Promise<ContextItem> {
       const res = await extractPdfTextFromArrayBuffer(buf, {
         maxPages: PDF_CONTEXT_MAX_PAGES,
         maxChars: PDF_CONTEXT_MAX_CHARS,
+        task: 'auto',
       });
       const warnings = res.warnings.length ? `\n\nWarnings:\n${res.warnings.map(w => `- ${w}`).join('\n')}` : '';
-      const content = `### PDF: ${file.path}\n\n${res.text}${warnings}`;
+      const content = `### PDF: ${file.path}\n\n${formatPdfDiagnosticMarkdown(res)}\n\n---\n${res.text}${warnings}`;
       return {
         id: uid(),
         kind: 'file',
@@ -297,9 +294,10 @@ export async function resolveDroppedFile(f: File): Promise<ContextItem> {
       const res = await extractPdfTextFromArrayBuffer(await f.arrayBuffer(), {
         maxPages: PDF_CONTEXT_MAX_PAGES,
         maxChars: PDF_CONTEXT_MAX_CHARS,
+        task: 'auto',
       });
       const warnings = res.warnings.length ? `\n\nWarnings:\n${res.warnings.map(w => `- ${w}`).join('\n')}` : '';
-      const content = `### PDF: ${f.name}\n\n${res.text}${warnings}`;
+      const content = `### PDF: ${f.name}\n\n${formatPdfDiagnosticMarkdown(res)}\n\n---\n${res.text}${warnings}`;
       return {
         id: uid(), kind: 'file', label: f.name,
         detail: `${humanSize(f.size)} · PDF · ${res.pageCount} pages · read ${res.pageLabel}`,
@@ -345,13 +343,7 @@ export async function resolveImageFile(f: File): Promise<ContextItem> {
   const buf = await f.arrayBuffer();
   // Convert to base64 (chunked to avoid call-stack overflow on large files)
   const bytes = new Uint8Array(buf);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as any);
-  }
-  const base64 = btoa(binary);
-  const dataUri = `data:${f.type || 'image/png'};base64,${base64}`;
+  const dataUri = `data:${f.type || 'image/png'};base64,${bytesToBase64(bytes)}`;
   return {
     id: uid(), kind: 'image', label: f.name,
     detail: `${humanSize(f.size)} · ${f.type || 'image'}`,

@@ -61,6 +61,18 @@
   --g-text-md: 13px;
 }
 
+.nc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ============================================================
    Glossa — sidebar styles (v0.4 "Aurora")
    ============================================================
@@ -1368,6 +1380,18 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   margin: 10px 0;
   border: 1px solid var(--nc-border);
 }
+.nc-msg-body pre.nc-has-code-actions {
+  padding-right: 96px;
+}
+/* Obsidian's MarkdownRenderer may inject a native copy-code button directly
+   into <pre>. It uses host/theme button styles, which can become a large
+   rounded control inside Glossa. We hide that native control and keep only
+   Glossa's compact .nc-code-actions toolbar. */
+.glossa-view .nc-msg-body pre > button:not(.nc-code-action),
+.glossa-view .nc-msg-body pre .copy-code-button,
+.glossa-view .nc-msg-body pre .code-copy-button {
+  display: none !important;
+}
 .nc-msg-body code {
   background: var(--nc-bg-soft);
   padding: 1px 4px; border-radius: 3px;
@@ -1375,20 +1399,47 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 .nc-msg-body pre code { background: none; padding: 0; }
 .nc-code-actions {
-  position: absolute; top: 6px; right: 6px;
-  display: flex; gap: 3px;
-  opacity: 0; transition: opacity 0.15s;
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--glossa-line-soft, var(--nc-border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--glossa-surface-1, var(--nc-bg-hard)) 92%, transparent);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+  opacity: 0;
+  transform: translateY(-1px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
 }
-.nc-msg-body pre:hover .nc-code-actions { opacity: 1; }
+.nc-msg-body pre:hover .nc-code-actions,
+.nc-code-actions:focus-within {
+  opacity: 1;
+  transform: translateY(0);
+}
 .nc-code-actions button {
-  background: var(--nc-bg-hard);
-  border: 1px solid var(--nc-border);
-  border-radius: 4px;
-  font-size: 10px;
-  padding: 2px 7px;
+  width: 24px;
+  height: 24px;
+  min-width: 24px !important;
+  min-height: 24px !important;
+  max-width: 24px;
+  max-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 0 !important;
+  margin: 0 !important;
   cursor: pointer;
   color: var(--nc-muted);
   transition: all 0.15s;
+}
+.nc-code-actions button svg {
+  width: 13px;
+  height: 13px;
 }
 .nc-code-actions button:hover { color: var(--text-normal); background: var(--nc-bg-soft-hover); }
 
@@ -1457,9 +1508,15 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 .nc-msg-actions {
   display: flex;
-  gap: 0px;
+  gap: 2px;
   margin-left: auto;
   flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+.nc-msg:hover > .nc-msg-footer .nc-msg-actions,
+.nc-msg:focus-within > .nc-msg-footer .nc-msg-actions {
+  opacity: 1;
 }
 /* Hide footer ONLY while streaming or on preamble (intermediate) messages.
    Previously we also hid it on `.has-tools`, but codex CLI messages almost
@@ -1475,9 +1532,17 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   outline: none !important;
   cursor: pointer;
   color: var(--text-muted);
-  width: 22px; height: 22px;
-  padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px !important;
+  min-height: 22px !important;
+  max-width: 22px;
+  max-height: 22px;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 4px;
   transition: color 0.12s, opacity 0.12s;
   position: relative;

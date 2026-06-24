@@ -1,6 +1,6 @@
 import { TFile } from 'obsidian';
-import { setStyle, setVars } from '../../utils/dom';
-import { extractPdfTextFromArrayBuffer } from '../../utils/pdf';
+import { setStyle } from '../../utils/dom';
+import { extractPdfTextFromArrayBuffer, formatPdfDiagnosticMarkdown, type PdfExtractionResult, type PdfReadTask } from '../../utils/pdf';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
 const READ_PDF_MAX_PAGES = 120;
@@ -71,14 +71,21 @@ export const readPdf: ToolImpl = buildTool({
   spec: {
     name: 'read_pdf',
     description: [
-      'Extract text from a PDF file in the vault. Use this for PDF attachments, papers, reports, and books.',
-      'Returns text grouped by page. For scanned/image-only PDFs it may return little or no text.',
+      'Browse a PDF file in the vault using a task-aware pipeline. Use this for PDF attachments, papers, reports, and books.',
+      'Pipeline: first classify the PDF text layer (text/scanned/mixed/complex), keep page numbers, then extract only the minimum useful pages for the task.',
+      'Modes: inspect/rename reads the first page and title candidates; summarize reads front matter plus ending pages; search locates query hit pages and returns snippets; pages/full return page-grouped text.',
+      'For scanned/image-only PDFs or complex visual layouts, this tool reports that rendering/OCR or visual inspection is needed instead of pretending the text layer is complete.',
       'Use pages for targeted reads, e.g. "1-3", "5", or "1-3,8".',
     ].join('\n'),
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Vault-relative path to a PDF file.' },
+        mode: {
+          type: 'string',
+          description: 'Optional task mode: auto, inspect, rename, summarize, search, pages, or full. Default auto.',
+        },
+        query: { type: 'string', description: 'Optional search phrase. Use with mode=search or when locating specific details.' },
         pages: { type: 'string', description: 'Optional page range, e.g. "1-3", "5", or "1-3,8". Default reads from page 1 up to max_pages.' },
         max_pages: { type: 'number', description: `Maximum pages to extract. Default ${READ_PDF_MAX_PAGES}.` },
         max_chars: { type: 'number', description: `Maximum extracted characters. Default ${READ_PDF_CHAR_CAP}.` },
@@ -106,10 +113,16 @@ export const readPdf: ToolImpl = buildTool({
         pages: args.pages,
         maxPages,
         maxChars,
+        task: normalizeMode(args.mode),
+        query: typeof args.query === 'string' ? args.query : undefined,
         signal: ctx?.signal,
       });
       const warnings = res.warnings.length ? `\n\nWarnings:\n${res.warnings.map(w => `- ${w}`).join('\n')}` : '';
-      return `PDF: ${path} (${res.pageCount} pages, read ${res.pageLabel}, ${res.chars} chars)\n\n---\n${res.text}${warnings}`;
+      const diagnostic = formatPdfDiagnosticMarkdown(res);
+      const body = shouldUseSearchSnippets(res, args.query)
+        ? formatSearchSnippets(res)
+        : res.text;
+      return `PDF: ${path} (${res.pageCount} pages, read ${res.pageLabel}, ${res.chars} chars)\n\n${diagnostic}\n\n---\n${body || '[No extracted text returned for this mode]'}${warnings}`;
     } catch (e: any) {
       return `Error extracting PDF text from ${path}: ${e?.message ?? e}`;
     }
@@ -125,4 +138,36 @@ function humanSize(b: number): string {
   if (b < 1024) return b + 'B';
   if (b < 1024 * 1024) return (b / 1024).toFixed(1) + 'KB';
   return (b / (1024 * 1024)).toFixed(1) + 'MB';
+}
+
+function normalizeMode(value: unknown): PdfReadTask {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (raw === 'inspect' || raw === 'rename' || raw === 'summarize' || raw === 'search' || raw === 'pages' || raw === 'full') return raw;
+  if (raw === 'summary') return 'summarize';
+  if (raw === 'metadata' || raw === 'title') return 'inspect';
+  return 'auto';
+}
+
+function shouldUseSearchSnippets(res: PdfExtractionResult, query: unknown): boolean {
+  return res.task === 'search' && typeof query === 'string' && query.trim().length > 0;
+}
+
+function formatSearchSnippets(res: PdfExtractionResult): string {
+  if (!res.searchHits.length) {
+    return [
+      '### Search result',
+      'No exact page-level hit was found in the extracted text.',
+      '',
+      'Use a different query, broaden the page range, or visually inspect/OCR the PDF if the diagnostic reports sparse text.',
+    ].join('\n');
+  }
+
+  const lines = ['### Search result'];
+  for (const hit of res.searchHits.slice(0, 20)) {
+    lines.push('', `#### Page ${hit.page} (${hit.count} hit${hit.count === 1 ? '' : 's'})`);
+    for (const snippet of hit.snippets.slice(0, 4)) {
+      lines.push(`- ${snippet}`);
+    }
+  }
+  return lines.join('\n');
 }

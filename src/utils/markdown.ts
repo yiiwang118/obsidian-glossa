@@ -1,4 +1,6 @@
 import { App, Component, MarkdownRenderer } from 'obsidian';
+import { ICON } from '../ui/icons';
+import { setTrustedSvg } from './dom';
 
 /**
  * Markdown rendering — Obsidian-native everywhere.
@@ -98,29 +100,47 @@ export function decorateCodeBlocks(
     // Belt + suspenders: also check the action-bar marker so older bubbles
     // re-rendered without the WeakSet entry don't double-decorate.
     if (pre.querySelector('.nc-code-actions')) { decoratedPres.add(pre); continue; }
+    // Obsidian's MarkdownRenderer can inject its own large copy-code button as
+    // a direct child of <pre>. Glossa provides a compact toolbar below, so
+    // remove the host button to avoid duplicate controls that themes may size
+    // as full buttons.
+    for (const child of Array.from(pre.children)) {
+      if (child.localName === 'button') child.remove();
+    }
 
     const codeEl = pre.querySelector('code');
     const code = codeEl?.textContent ?? '';
+    pre.classList.add('nc-has-code-actions');
 
     const bar = activeDocument.createElement('div');
     bar.className = 'nc-code-actions';
 
-    const copyBtn = activeDocument.createElement('button');
-    copyBtn.textContent = 'Copy';
-    copyBtn.onclick = (e) => { e.stopPropagation(); handlers.copy(code); copyBtn.textContent = '✓'; window.setTimeout(() => copyBtn.textContent = 'Copy', 1200); };
+    const makeButton = (icon: string, label: string, onClick: (button: HTMLButtonElement) => void) => {
+      const button = activeDocument.createElement('button');
+      button.type = 'button';
+      button.className = 'nc-code-action';
+      button.title = label;
+      button.setAttribute('aria-label', label);
+      setTrustedSvg(button, icon);
+      button.onclick = (e) => {
+        e.stopPropagation();
+        onClick(button);
+      };
+      return button;
+    };
+
+    const copyBtn = makeButton(ICON.copy, 'Copy code', (button) => {
+      handlers.copy(code);
+      setTrustedSvg(button, ICON.checkThick);
+      window.setTimeout(() => setTrustedSvg(button, ICON.copy), 1200);
+    });
     bar.appendChild(copyBtn);
 
     if (handlers.insert) {
-      const insertBtn = activeDocument.createElement('button');
-      insertBtn.textContent = '↳ ' + 'Insert';
-      insertBtn.onclick = (e) => { e.stopPropagation(); handlers.insert!(code); };
-      bar.appendChild(insertBtn);
+      bar.appendChild(makeButton(ICON.insert, 'Insert at cursor', () => handlers.insert!(code)));
     }
     if (handlers.apply) {
-      const applyBtn = activeDocument.createElement('button');
-      applyBtn.textContent = 'Apply';
-      applyBtn.onclick = (e) => { e.stopPropagation(); handlers.apply!(code); };
-      bar.appendChild(applyBtn);
+      bar.appendChild(makeButton(ICON.apply, 'Apply to selection', () => handlers.apply!(code)));
     }
     pre.appendChild(bar);
     decoratedPres.add(pre);
