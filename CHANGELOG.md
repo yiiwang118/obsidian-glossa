@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] — 2026-06-25
+
+Follow-up release after the initial community listing.
+
+### Added
+- Improved task-aware PDF browsing and image inspection guidance for agent workflows.
+- Added support for `xhigh` reasoning effort without silent fallback, so compatible proxy endpoints can expose the highest reasoning tier directly.
+
+### Fixed
+- Restricted automatic selection capture to actual file content and Glossa output, preventing unrelated Obsidian UI selections from appearing in the composer.
+- Improved custom API tool-call handling on non-streaming `requestUrl` endpoints.
+- Reduced stale hover/overlay and duplicate-style issues in the sidebar and endpoint settings UI.
+
+### Changed
+- Optimized provider stream parsing, trusted SVG rendering, code-block decoration, and several small runtime paths.
+- Cleaned unused code paths and tightened runtime polish around MCP, skills, context, and settings.
+
 ## [0.4.2] — 2026-06-23
 
 Release follow-up for the community plugin submission.
@@ -79,6 +96,7 @@ First open-source release. Focuses on hardening: 6 high/medium-severity findings
 
 Last pre-open-source version. Internal-only. Not published.
 
+[0.4.3]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.4.3
 [0.4.2]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.4.2
 [0.4.1]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.4.1
 [0.4.0]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.4.0
