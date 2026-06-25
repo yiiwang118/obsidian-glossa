@@ -38,6 +38,10 @@ export default class GlossaPlugin extends Plugin {
     const raw = (await this.loadData()) ?? {};
     const { __chats: legacy, ...settingsRaw } = raw as any;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, settingsRaw);
+    // Experimental PDF citation hover is currently hidden and hard-disabled.
+    // Keep the implementation files in-tree for later work, but never register
+    // its DOM listeners from the plugin lifecycle.
+    this.settings.citationHoverEnabled = false;
 
     // ---- Settings migrations ----
     // Tool name renames (old → new) that may be lingering in user's auto-approve list.
@@ -458,6 +462,7 @@ export default class GlossaPlugin extends Plugin {
   async saveSettings() {
     setLanguage(this.settings.uiLanguage);
     this.getView()?.refreshFromSettings?.();
+    this.settings.citationHoverEnabled = false;
     if (this._saveTimer) window.clearTimeout(this._saveTimer);
     this._saveTimer = window.setTimeout(() => { this.persistAll(); this._saveTimer = null; }, 300);
   }

@@ -326,6 +326,12 @@ export interface GlossaSettings {
   uiLanguage: 'en' | 'zh' | 'auto';
   /** Font size (px) for reasoning card body. Range 10–18. Default 12. */
   reasoningFontSize: number;
+  /** Show a Zotero-style local reference preview when hovering citations in PDFs. */
+  citationHoverEnabled: boolean;
+  /** Delay before showing the PDF citation preview. Long enough to avoid accidental popups. */
+  citationHoverDelayMs: number;
+  /** When true, citation previews only trigger while Alt/Option is held. */
+  citationHoverRequireModifier: boolean;
 
   // Workflows
   workflows: Workflow[];
@@ -415,6 +421,9 @@ export const DEFAULT_SETTINGS: GlossaSettings = {
   permissionLog: [],
   uiLanguage: 'en',
   reasoningFontSize: 13,
+  citationHoverEnabled: false,
+  citationHoverDelayMs: 700,
+  citationHoverRequireModifier: false,
   workflows: [],
 };
 
