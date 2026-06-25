@@ -49,15 +49,24 @@ export function setVars(
 
 export function setTrustedSvg(target: HTMLElement, svgText: string): void {
   clear(target);
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(svgText, 'image/svg+xml');
-  const svg = doc.documentElement;
-  if (svg.localName.toLowerCase() !== 'svg') return;
+  const svg = parsedTrustedSvg(svgText);
+  if (!svg) return;
   const cloned = cloneSvgElement(svg);
   if (cloned) target.appendChild(cloned);
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const trustedSvgCache = new Map<string, Element | null>();
+
+function parsedTrustedSvg(svgText: string): Element | null {
+  if (trustedSvgCache.has(svgText)) return trustedSvgCache.get(svgText) ?? null;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgText, 'image/svg+xml');
+  const svg = doc.documentElement;
+  const parsed = svg.localName.toLowerCase() === 'svg' ? svg : null;
+  trustedSvgCache.set(svgText, parsed);
+  return parsed;
+}
 
 function cloneSvgElement(source: Element): SVGElement | null {
   const cloned = activeDocument.createElementNS(SVG_NS, source.localName);

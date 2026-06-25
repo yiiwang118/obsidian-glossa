@@ -19,7 +19,7 @@
  * Mirrors upstream Claude Code's `executeForkedSkill` shape, scaled down.
  */
 import type { App } from 'obsidian';
-import type { LLMProvider, MessageInput } from '../providers/types';
+import type { LLMProvider } from '../providers/types';
 import type { PermissionLevel, PermissionRule, TokenUsage } from '../types';
 import type { CheckpointManager } from './checkpoint';
 import type { McpHub } from './mcp';

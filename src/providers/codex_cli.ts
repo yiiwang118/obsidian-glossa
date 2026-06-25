@@ -448,9 +448,6 @@ export class CodexCliProvider implements LLMProvider {
     let stderrBuf = '';
     proc.stderr.on('data', (d) => stderrBuf += d.toString());
 
-    const callIdFromAny = (ev: any): string =>
-      ev?.id || ev?.call_id || ev?.msg?.call_id || ev?.tool_call_id || `${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
-
     /* Codex 0.x stream-json events (canonical schema in
      * codex-rs/exec/src/exec_events.rs). Shapes:
      *   { "type": "thread.started", "thread_id": "..." }

@@ -1,4 +1,4 @@
-import { App, TFile, normalizePath, Notice, requestUrl } from 'obsidian';
+import { TFile, Notice, requestUrl } from 'obsidian';
 import type GlossaPlugin from '../main';
 import type { Endpoint } from '../types';
 

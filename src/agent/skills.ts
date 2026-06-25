@@ -8,7 +8,7 @@
  * We scan both roots so users who created skills under the old plugin name
  * (note-codex) don't lose them when the bundle renames to Glossa.
  */
-import type { App, TFile } from 'obsidian';
+import type { App } from 'obsidian';
 import { TFile as TFileCls, TFolder } from 'obsidian';
 
 /** Source of a skill — drives precedence (managed > user > project > legacy > bundled). */

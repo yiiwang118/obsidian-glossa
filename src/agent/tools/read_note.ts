@@ -1,5 +1,5 @@
 import { TFile } from 'obsidian';
-import { setStyle, setVars } from '../../utils/dom';
+import { setStyle } from '../../utils/dom';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
 const READ_BYTE_CAP = 50_000;

@@ -68,7 +68,6 @@ class ConfirmModal extends Modal {
 
 class PromptModal extends Modal {
   private decided = false;
-  private inputEl!: HTMLInputElement | HTMLTextAreaElement;
   constructor(
     app: App,
     private opts: { title: string; body?: string; placeholder?: string; defaultValue?: string; multiline?: boolean },
@@ -96,7 +95,6 @@ class PromptModal extends Modal {
     if (this.opts.placeholder) inputEl.placeholder = this.opts.placeholder;
     if (this.opts.defaultValue != null) inputEl.value = this.opts.defaultValue;
     window.setTimeout(() => inputEl.focus(), 0);
-    this.inputEl = inputEl;
 
     const row = contentEl.createEl('div', { cls: 'nc-prompt-actions' });
     setStyle(row, { display: 'flex' });

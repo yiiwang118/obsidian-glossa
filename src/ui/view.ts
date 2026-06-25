@@ -6,7 +6,7 @@ import { ContextManager } from '../context/manager';
 import {
   getCurrentSelection, resolveFile, resolveFolder, resolveTag, resolveWebUrl, resolveClipboard,
   resolveDroppedFile,
-  makeSelectionItem, makeCurrentFileItem,
+  makeCurrentFileItem,
   listFilesForPicker, listFoldersForPicker, listTagsForPicker,
 } from '../context/sources';
 import { BUILTIN_SLASH_COMMANDS, applySlashTemplate } from '../commands/slash';
@@ -16,7 +16,7 @@ import { el, clear, uid, debounce, setStyle, setVars, setTrustedSvg } from '../u
 import { formatTokenCount } from '../utils/tokens';
 import { buildProvider } from '../providers/registry';
 import type { ChatMessage, ContextItem, ContextItemRef, ChatSession, Endpoint, ToolEvent, PlanItem } from '../types';
-import { modelContextWindow } from '../types';
+import { modelContextWindow, reasoningOptionsForEndpoint } from '../types';
 import { CustomApiProvider } from '../providers/custom_api';
 import type { MessageInput } from '../providers/types';
 import { runAgentLoop } from '../agent/loop';
@@ -543,6 +543,7 @@ export class GlossaView extends ItemView {
     if (source === 'markdown') return 'Markdown';
     if (source === 'pdf') return 'PDF';
     if (source === 'html') return 'HTML';
+    if (source === 'glossa') return 'Glossa output';
     return 'Selection';
   }
 
@@ -557,6 +558,7 @@ export class GlossaView extends ItemView {
     if (tableLines >= 2) return 'Table selection';
     if (text.length > 1200 || lines.length > 12) return 'Large selection';
     if (source === 'PDF') return 'PDF selection';
+    if (source === 'Glossa output') return 'Glossa output';
     return 'Selected text';
   }
 
@@ -1862,27 +1864,17 @@ export class GlossaView extends ItemView {
     this.togglePopup(this.permPillEl, items);
   }
 
-  /** Reasoning effort levels actually supported by the active endpoint. Codex
-   *  supports the full set including 'xhigh'; OpenAI/Anthropic stop at 'high';
-   *  endpoints that don't surface a reasoning knob are filtered to ['off'] so
-   *  the pill greys out. */
+  /** Reasoning effort levels supported by the active endpoint/model. */
   private reasoningOptionsForActive(): { v: import('../types').ReasoningEffort; label: string }[] {
     const ep = this.activeEndpoint();
     if (!ep) return [];
-    const base = [
-      { v: 'off' as const,    label: t('effort_off') },
-      { v: 'low' as const,    label: t('effort_low') },
-      { v: 'medium' as const, label: t('effort_medium') },
-      { v: 'high' as const,   label: t('effort_high') },
-    ];
-    if (ep.kind === 'codex-cli') return [...base, { v: 'xhigh' as const, label: t('effort_xhigh') }];
-    return base;
+    return reasoningOptionsForEndpoint(ep).map(v => ({ v, label: t(`effort_${v}`) }));
   }
   private updateReasoningPill() {
     if (!this.reasoningPillEl) return;
     clear(this.reasoningPillEl);
     const ep = this.activeEndpoint();
-    const effort = (ep?.reasoningEffort ?? 'medium') as import('../types').ReasoningEffort;
+    const effort = (ep?.reasoningEffort ?? 'off') as import('../types').ReasoningEffort;
     const ic = el('span', { className: 'nc-pill-glyph', parent: this.reasoningPillEl });
     // Lucide `sparkles` — same icon ChatGPT and Cursor use for reasoning /
     // thinking. Universally readable, brand-neutral.
@@ -1897,7 +1889,7 @@ export class GlossaView extends ItemView {
   private async openReasoningMenu(_e: MouseEvent) {
     const ep = this.activeEndpoint();
     if (!ep) return;
-    const cur = ep.reasoningEffort ?? 'medium';
+    const cur = ep.reasoningEffort ?? 'off';
     const items: PopupItem[] = this.reasoningOptionsForActive().map(o => ({
       label: o.label,
       checked: cur === o.v,

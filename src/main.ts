@@ -1,11 +1,11 @@
-import { Plugin, WorkspaceLeaf, Notice, MarkdownView, addIcon } from 'obsidian';
+import { Plugin, WorkspaceLeaf, Notice, addIcon } from 'obsidian';
 import { GlossaView, VIEW_TYPE_GLOSSA } from './ui/view';
 import { GlossaSettingTab } from './settings';
 import { DEFAULT_SETTINGS, type GlossaSettings, type ChatSession, type Endpoint } from './types';
 import { BUILTIN_SLASH_COMMANDS, applySlashTemplate } from './commands/slash';
 import { getCurrentSelection } from './context/sources';
 import { askPassphrase } from './ui/passphrase_modal';
-import { deriveKey, encryptString, decryptString, decryptStringStrict, isEncrypted, makeVerifier, checkVerifier, type SubtleKeyHandle } from './utils/crypto';
+import { deriveKey, encryptString, decryptString, decryptStringStrict, isEncrypted, makeVerifier, type SubtleKeyHandle } from './utils/crypto';
 import { EmbeddingIndex } from './agent/embeddings';
 import { CheckpointManager } from './agent/checkpoint';
 import { McpHub } from './agent/mcp';

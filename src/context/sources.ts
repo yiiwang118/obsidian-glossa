@@ -1,4 +1,4 @@
-import { App, TFile, TFolder, MarkdownView, FileView, getAllTags, normalizePath } from 'obsidian';
+import { App, TFile, TFolder, MarkdownView, FileView, getAllTags } from 'obsidian';
 import { estimateTokens } from '../utils/tokens';
 import { uid } from '../utils/dom';
 import { fetchWithSafeRedirects, parseHttpUrl } from '../utils/safe_web';
@@ -12,31 +12,106 @@ import type { ContextItem } from '../types';
 
 export interface SelectionInfo {
   text: string;
-  source: 'markdown' | 'pdf' | 'html' | 'unknown';
+  source: 'markdown' | 'pdf' | 'html' | 'glossa' | 'unknown';
   file?: TFile;
+}
+
+const FILE_CONTENT_SELECTOR = [
+  '.markdown-source-view',
+  '.markdown-preview-view',
+  '.cm-editor',
+  '.cm-content',
+  '.pdf-viewer',
+  '.pdf-container',
+  '.pdfViewer',
+  '.textLayer',
+  '.canvas-wrapper',
+  '.canvas-node-content',
+  '.view-content',
+].join(',');
+
+const GLOSSA_OUTPUT_SELECTOR = [
+  '.glossa-view .nc-msg-body',
+  '.glossa-view .nc-thinking-body',
+  '.glossa-view .nc-tool-event-body',
+  '.glossa-view .nc-selection-echo-body',
+].join(',');
+
+function nodeToElement(node: Node | null): HTMLElement | null {
+  if (!node) return null;
+  return node.nodeType === Node.ELEMENT_NODE
+    ? node as HTMLElement
+    : node.parentElement;
+}
+
+function selectionElement(sel: Selection): HTMLElement | null {
+  const node = sel.rangeCount > 0 ? sel.getRangeAt(0).commonAncestorContainer : sel.anchorNode;
+  return nodeToElement(node);
+}
+
+function sourceForFileView(viewType: string | undefined, file?: TFile | null): SelectionInfo['source'] {
+  const ext = file?.extension?.toLowerCase();
+  if (viewType === 'pdf' || ext === 'pdf') return 'pdf';
+  if (viewType === 'markdown' || ext === 'md') return 'markdown';
+  if (viewType === 'html' || ext === 'html' || ext === 'htm') return 'html';
+  return 'unknown';
+}
+
+function selectionFileContext(app: App, el: HTMLElement): Pick<SelectionInfo, 'source' | 'file'> | null {
+  const contentEl = el.closest(FILE_CONTENT_SELECTOR);
+  if (!contentEl) return null;
+
+  const leaves = [app.workspace.getMostRecentLeaf()];
+  app.workspace.iterateAllLeaves(leaf => {
+    if (leaf !== leaves[0]) leaves.push(leaf);
+  });
+
+  for (const leaf of leaves) {
+    const view = leaf?.view;
+    const container = (view as any)?.containerEl as HTMLElement | undefined;
+    if (!view || !container || !container.contains(el) || !container.contains(contentEl)) continue;
+
+    const file = view instanceof FileView ? view.file : (view as any).file;
+    if (!file) continue;
+    return { source: sourceForFileView(view.getViewType?.(), file), file };
+  }
+
+  return null;
+}
+
+function selectionGlossaContext(el: HTMLElement): Pick<SelectionInfo, 'source' | 'file'> | null {
+  const outputEl = el.closest(GLOSSA_OUTPUT_SELECTOR);
+  return outputEl ? { source: 'glossa' } : null;
 }
 
 export function getCurrentSelection(app: App): SelectionInfo | null {
   const af = app.workspace.getActiveFile();
 
-  // 1) Markdown editor — most accurate
+  // 1) DOM selection — only accept real file content or Glossa's own message output.
+  // If there is an explicit DOM selection outside those surfaces, ignore it
+  // instead of falling through to a stale editor selection.
+  const winSel = activeDocument.getSelection?.() ?? window.getSelection();
+  const rawDomText = winSel?.toString() ?? '';
+  const domText = rawDomText.trim();
+  if (winSel && domText) {
+    const el = selectionElement(winSel);
+    if (!el) return null;
+
+    const glossa = selectionGlossaContext(el);
+    if (glossa) return { text: rawDomText, source: glossa.source };
+
+    const fileCtx = selectionFileContext(app, el);
+    if (fileCtx) return { text: rawDomText, source: fileCtx.source, file: fileCtx.file };
+
+    return null;
+  }
+
+  // 2) Markdown editor fallback — most accurate when CodeMirror owns the
+  // selection but the browser selection is not visible to activeDocument.
   const mdView = app.workspace.getActiveViewOfType(MarkdownView);
   if (mdView?.editor) {
     const sel = mdView.editor.getSelection();
     if (sel && sel.trim()) return { text: sel, source: 'markdown', file: af ?? undefined };
-  }
-
-  // 2) Generic DOM selection — covers PDF.js text layer, HTML view, canvas text, web view, etc.
-  const winSel = window.getSelection();
-  if (winSel && winSel.toString().trim()) {
-    const view = app.workspace.getMostRecentLeaf()?.view;
-    let source: SelectionInfo['source'] = 'unknown';
-    const vt = view?.getViewType?.();
-    if (vt === 'pdf') source = 'pdf';
-    else if (vt === 'markdown') source = 'markdown';
-    else if (vt === 'html' || (af && af.extension.toLowerCase() === 'html')) source = 'html';
-    else if (af?.extension?.toLowerCase() === 'pdf') source = 'pdf';
-    return { text: winSel.toString(), source, file: af ?? undefined };
   }
   return null;
 }

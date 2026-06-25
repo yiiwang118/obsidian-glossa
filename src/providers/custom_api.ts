@@ -1,5 +1,5 @@
 import { requestUrl } from 'obsidian';
-import type { Endpoint } from '../types';
+import { isDeepSeekEndpoint, mapOpenAIReasoningEffort, type Endpoint } from '../types';
 import type { LLMProvider, ChatRequest, ChatChunk } from './types';
 
 /** Strip the SYSTEM_PROMPT_DYNAMIC_BOUNDARY marker used by buildSystemPrompt() for the
@@ -28,6 +28,11 @@ function redactErrorBody(s: string): string {
     .replace(/(x-api-key["'\s:=]+)[A-Za-z0-9._\-]+/gi, '$1[REDACTED]');
 }
 
+function withReasoningEffortHint(ep: Endpoint, message: string): string {
+  if (ep.reasoningEffort !== 'xhigh') return message;
+  return `${message}\nReasoning xhigh was sent without fallback. If this endpoint rejects it, switch Reasoning to high or lower.`;
+}
+
 /** OpenAI-compatible + Anthropic-style endpoints. */
 export class CustomApiProvider implements LLMProvider {
   id: string;
@@ -49,6 +54,29 @@ export class CustomApiProvider implements LLMProvider {
     return true;
   }
   defaultModel() { return this.ep.model ?? ''; }
+
+  private applyOpenAIReasoning(body: any): void {
+    const effort = this.ep.reasoningEffort;
+    if (isDeepSeekEndpoint(this.ep)) {
+      if (effort === 'off') {
+        body.thinking = { type: 'disabled' };
+        return;
+      }
+      if (effort) body.thinking = { type: 'enabled' };
+    }
+    const mapped = mapOpenAIReasoningEffort(this.ep, effort);
+    if (mapped) body.reasoning_effort = mapped;
+  }
+
+  private applyAnthropicThinking(body: any): void {
+    if (!this.ep.reasoningEffort || this.ep.reasoningEffort === 'off') return;
+    const budgets: Record<string, number> = { low: 4_000, medium: 16_000, high: 32_000, xhigh: 64_000 };
+    const budget = budgets[this.ep.reasoningEffort] ?? 0;
+    if (budget > 0) {
+      body.thinking = { type: 'enabled', budget_tokens: budget };
+      if (body.max_tokens <= budget) body.max_tokens = budget + 4096;
+    }
+  }
 
   /** Lightweight connectivity probe — HEAD /models for OpenAI-style, or POST /messages
    *  with max_tokens:1 for Anthropic-only endpoints that don't expose /models. */
@@ -125,10 +153,14 @@ export class CustomApiProvider implements LLMProvider {
         } else if (m.role !== 'system') messages.push({ role: m.role, content: m.content });
       }
       const body: any = { model: req.model ?? this.ep.model, max_tokens: req.maxTokens ?? 4096, messages, stream: false };
+      this.applyAnthropicThinking(body);
       if (req.systemPrompt) body.system = stripBoundary(req.systemPrompt);
       try {
         const r = await requestUrl({ url, method: 'POST', headers, body: JSON.stringify(body), throw: false });
-        if (r.status >= 400) { yield { type: 'error', error: `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 300)}` }; return; }
+        if (r.status >= 400) {
+          yield { type: 'error', error: withReasoningEffortHint(this.ep, `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 300)}`) };
+          return;
+        }
         const j = r.json;
         const blocks: any[] = j.content ?? [];
         const text = blocks.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
@@ -175,9 +207,13 @@ export class CustomApiProvider implements LLMProvider {
       else messages.push({ role: m.role, content: m.content });
     }
     const body: any = { model: req.model ?? this.ep.model, messages, stream: false, temperature: req.temperature ?? 0.7 };
+    this.applyOpenAIReasoning(body);
     try {
       const r = await requestUrl({ url, method: 'POST', headers, body: JSON.stringify(body), throw: false });
-      if (r.status >= 400) { yield { type: 'error', error: `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 300)}` }; return; }
+      if (r.status >= 400) {
+        yield { type: 'error', error: withReasoningEffortHint(this.ep, `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 300)}`) };
+        return;
+      }
       const j = r.json;
       const msg = j.choices?.[0]?.message ?? {};
       const text = msg.content ?? '';
@@ -286,11 +322,7 @@ export class CustomApiProvider implements LLMProvider {
     if (req.tools?.length) body.tools = req.tools.map(t => ({
       type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters },
     }));
-    // OpenAI-style reasoning_effort (o-series + GPT-5 reasoning models). The API only
-    // accepts low/medium/high — our 'xhigh' is folded to 'high'.
-    if (this.ep.reasoningEffort && this.ep.reasoningEffort !== 'off') {
-      body.reasoning_effort = this.ep.reasoningEffort === 'xhigh' ? 'high' : this.ep.reasoningEffort;
-    }
+    this.applyOpenAIReasoning(body);
 
     let resp: Response;
     try {
@@ -305,7 +337,7 @@ export class CustomApiProvider implements LLMProvider {
         yield { type: 'context_overflow', message: `HTTP ${resp.status}: ${redactErrorBody(txt).slice(0, 200)}` };
         return;
       }
-      yield { type: 'error', error: `HTTP ${resp.status}: ${redactErrorBody(txt).slice(0, 400)}` };
+      yield { type: 'error', error: withReasoningEffortHint(this.ep, `HTTP ${resp.status}: ${redactErrorBody(txt).slice(0, 400)}`) };
       return;
     }
 
@@ -473,15 +505,7 @@ export class CustomApiProvider implements LLMProvider {
       messages,
       stream: true,
     };
-    // Anthropic extended-thinking — map our unified knob to a thinking budget.
-    if (this.ep.reasoningEffort && this.ep.reasoningEffort !== 'off') {
-      const budgets: Record<string, number> = { low: 4_000, medium: 16_000, high: 32_000, xhigh: 64_000 };
-      const budget = budgets[this.ep.reasoningEffort] ?? 0;
-      if (budget > 0) {
-        body.thinking = { type: 'enabled', budget_tokens: budget };
-        if (body.max_tokens <= budget) body.max_tokens = budget + 4096;
-      }
-    }
+    this.applyAnthropicThinking(body);
     // Anthropic prompt caching (ephemeral). Claude models: cache the system prompt,
     // the tool definitions, AND the last user message — mirrors upstream Claude Code,
     // which places one message-level marker per request on the last user msg.
@@ -534,7 +558,7 @@ export class CustomApiProvider implements LLMProvider {
         yield { type: 'context_overflow', message: `HTTP ${resp.status}: ${redactErrorBody(txt).slice(0, 200)}` };
         return;
       }
-      yield { type: 'error', error: `HTTP ${resp.status}: ${redactErrorBody(txt).slice(0, 400)}` };
+      yield { type: 'error', error: withReasoningEffortHint(this.ep, `HTTP ${resp.status}: ${redactErrorBody(txt).slice(0, 400)}`) };
       return;
     }
     const reader = resp.body!.getReader();

@@ -3,7 +3,7 @@ import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, isReadOnlyTool, n
 import { askApproval, type ApprovalResult } from './approval';
 import { CheckpointManager, pathsTouchedByTool } from './checkpoint';
 import { McpHub } from './mcp';
-import type { LLMProvider, MessageInput, ChatChunk, ToolSpec } from '../providers/types';
+import type { LLMProvider, MessageInput, ToolSpec } from '../providers/types';
 import type { TokenUsage, ToolEvent, PermissionLevel, PermissionRule } from '../types';
 import { matchPermissionRule, modelContextWindow } from '../types';
 import { uid } from '../utils/dom';
@@ -224,7 +224,6 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
   // skill-scoped allow, they configure it as a regular PermissionRule.
   clearSkillScopedAllowedTools();
 
-  let lastUsage: TokenUsage | undefined;
   let totalUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUSD: 0 };
   let compactRetriedThisTurn = false;
 
@@ -311,7 +310,6 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
             opts.onToolEnd(card);
           }
         } else if (ch.type === 'final') {
-          lastUsage = ch.usage;
           if (ch.reasoningContent && !assistantReasoning) assistantReasoning = ch.reasoningContent;
           if (ch.usage) {
             totalUsage.input = (totalUsage.input ?? 0) + (ch.usage.input ?? 0);

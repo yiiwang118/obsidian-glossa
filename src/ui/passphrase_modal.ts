@@ -1,5 +1,5 @@
 import { App, Modal } from 'obsidian';
-import { setStyle, setVars } from '../utils/dom';
+import { setStyle } from '../utils/dom';
 import { t } from '../utils/i18n';
 
 export function askPassphrase(app: App, mode: 'unlock' | 'set'): Promise<string | null> {

@@ -91,15 +91,6 @@ export function shellEnvSnapshot(): NodeJS.ProcessEnv { return _shellEnvCache ??
  *
  * Always augments PATH with common bin dirs and forces HOME to os.homedir().
  */
-/** Env vars that grant API access to the LLM provider. Spawning the official
- *  codex / claude CLIs requires these; spawning a third-party MCP server does
- *  NOT — and leaking them there would let a malicious or careless server
- *  exfiltrate the user's key. Keep this list narrow. */
-const LLM_CREDENTIAL_KEYS = new Set([
-  'OPENAI_API_KEY', 'OPENAI_BASE_URL',
-  'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL',
-]);
-
 export function makeChildEnv(proxy?: string): NodeJS.ProcessEnv {
   const cur = process.env.PATH ?? '';
   const augmented = [...new Set([...EXTRA_PATHS, ...cur.split(':')])].filter(Boolean).join(':');

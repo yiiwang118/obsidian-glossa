@@ -127,7 +127,7 @@ export class McpClient {
     this.proc.stdout?.on('data', (chunk: Buffer) => this.onData(chunk));
 
     // Initialize
-    const init = await this.request('initialize', {
+    await this.request('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
       clientInfo: { name: 'glossa', version: '0.3.0' },

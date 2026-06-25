@@ -9,7 +9,7 @@ export const getSelection: ToolImpl = buildTool({
   describe: () => 'get selection',
   spec: {
     name: 'get_selection',
-    description: 'Return the user\'s current text selection (from markdown / PDF / HTML view). Returns "" when nothing selected.',
+    description: 'Return the user\'s current text selection from file content or Glossa output. Returns "" when nothing relevant is selected.',
     parameters: { type: 'object', properties: {} },
   },
   run: async (app) => {

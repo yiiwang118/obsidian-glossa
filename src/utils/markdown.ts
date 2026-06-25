@@ -92,8 +92,8 @@ export function decorateCodeBlocks(
 ) {
   // Cheap early-out: skip the whole scan when the container has no <pre>.
   // Common case during streaming finalize on text-only messages.
-  if (!container.querySelector('pre')) return;
   const pres = container.querySelectorAll('pre');
+  if (pres.length === 0) return;
   for (let i = 0; i < pres.length; i++) {
     const pre = pres[i] as HTMLElement;
     if (decoratedPres.has(pre)) continue;

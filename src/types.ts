@@ -1,5 +1,3 @@
-import type { TFile } from 'obsidian';
-
 // Mode type kept for backwards-compat with persisted sessions, but the active
 // runtime now uses RunMode ('plan' / 'act') everywhere. MODE_LABELS /
 // MODE_DESCRIPTIONS were dead — referenced nowhere — and have been removed.
@@ -81,7 +79,7 @@ export interface ContextItem {
   kind: 'file' | 'folder' | 'tag' | 'selection' | 'web' | 'clipboard' | 'recent' | 'dataview' | 'image';
   label: string;
   detail?: string;
-  source?: 'markdown' | 'pdf' | 'html' | 'unknown';
+  source?: 'markdown' | 'pdf' | 'html' | 'glossa' | 'unknown';
   content: string;
   preview?: string;          // short preview for UI (selection text)
   tokens: number;
@@ -100,7 +98,9 @@ export interface SlashCommand {
 
 /** Unified reasoning-effort knob mapped per provider:
  *   - Anthropic API: thinking { type:'enabled', budget_tokens: N }
- *   - OpenAI / GPT-5 API: reasoning_effort: 'minimal'|'low'|'medium'|'high'
+ *   - OpenAI-compatible API: expose xhigh in Glossa, map to provider max when
+ *     known; otherwise send 'xhigh' and let the endpoint decide
+ *   - DeepSeek V4 API: reasoning_effort: 'high'|'max' (xhigh maps to max)
  *   - Codex CLI: `-c model_reasoning_effort="<value>"` — supports low/medium/high/xhigh
  *   - Claude Code CLI: `--thinking <value>` */
 export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'xhigh';
@@ -157,6 +157,30 @@ export interface Endpoint {
   // proxy
   proxy?: string;
   proxyMode?: 'global' | 'override' | 'none';
+}
+
+export function isDeepSeekEndpoint(ep: Partial<Pick<Endpoint, 'label' | 'baseUrl' | 'model'>>): boolean {
+  const haystack = `${ep.label ?? ''} ${ep.baseUrl ?? ''} ${ep.model ?? ''}`.toLowerCase();
+  return haystack.includes('deepseek');
+}
+
+export function reasoningOptionsForEndpoint(ep?: Endpoint | null): ReasoningEffort[] {
+  if (!ep) return [];
+  if (ep.kind === 'codex-cli') return ['off', 'low', 'medium', 'high', 'xhigh'];
+  if (ep.kind === 'claude-code-cli') return ['off', 'low', 'medium', 'high'];
+  if (ep.apiStyle === 'anthropic') return ['off', 'low', 'medium', 'high', 'xhigh'];
+  if (isDeepSeekEndpoint(ep)) return ['off', 'high', 'xhigh'];
+  return ['off', 'low', 'medium', 'high', 'xhigh'];
+}
+
+export function mapOpenAIReasoningEffort(ep: Endpoint, effort?: ReasoningEffort): string | null {
+  if (!effort || effort === 'off') return null;
+  if (isDeepSeekEndpoint(ep)) {
+    if (effort === 'xhigh') return 'max';
+    if (effort === 'low' || effort === 'medium') return 'high';
+    return effort;
+  }
+  return effort;
 }
 
 export interface CustomPrompt {

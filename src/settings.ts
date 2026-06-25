@@ -1,14 +1,15 @@
-import { App, PluginSettingTab, Setting, Notice, Modal, DropdownComponent } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
 import type GlossaPlugin from './main';
 import type { Endpoint, CustomPrompt, SlashCommand } from './types';
+import { reasoningOptionsForEndpoint } from './types';
 import { resolveBinary } from './utils/env';
-import { uid, setStyle, setVars } from './utils/dom';
+import { uid, setStyle } from './utils/dom';
 import { CustomApiProvider } from './providers/custom_api';
 import { buildProvider } from './providers/registry';
 import { MCP_CATALOG, MCP_CATEGORIES, fetchCatalog, type McpEntry } from './agent/mcp_marketplace';
 import { TOOLS } from './agent/tools';
 import { metaFor } from './agent/tool_meta';
-import { t, bi, onLanguageChange } from './utils/i18n';
+import { t, bi } from './utils/i18n';
 
 const HTTP_PROXY_PLACEHOLDER = ['http', '://127.0.0.1:7890'].join('');
 const HTTPS_API_PLACEHOLDER = ['https', '://api.example.com/v1'].join('');
@@ -831,14 +832,12 @@ export class GlossaSettingTab extends PluginSettingTab {
         .addText(tx => tx.setValue(ep.model ?? '').onChange(async v => { ep.model = v; await this.plugin.saveSettings(); }));
       new Setting(card).setName(t('reasoning_effort'))
         .setDesc(t('reasoning_effort_desc_cli'))
-        .addDropdown(d => d
-          .addOption('off',    t('effort_off'))
-          .addOption('low',    t('effort_low'))
-          .addOption('medium', t('effort_medium'))
-          .addOption('high',   t('effort_high'))
-          .addOption('xhigh',  t('effort_xhigh'))
-          .setValue(ep.reasoningEffort ?? 'off')
-          .onChange(async v => { ep.reasoningEffort = v as any; await this.plugin.saveSettings(); }));
+        .addDropdown(d => {
+          const opts = reasoningOptionsForEndpoint(ep);
+          for (const v of opts) d.addOption(v, t(`effort_${v}`));
+          d.setValue(opts.includes(ep.reasoningEffort ?? 'off') ? (ep.reasoningEffort ?? 'off') : 'off');
+          d.onChange(async v => { ep.reasoningEffort = v as any; await this.plugin.saveSettings(); });
+        });
       new Setting(card).setName(t('cli_working_dir')).setDesc(t('cli_working_dir_desc'))
         .addText(t => t.setValue(ep.cwd ?? '').onChange(async v => { ep.cwd = v; await this.plugin.saveSettings(); }))
         .addButton(b => b.setButtonText('Use vault').onClick(async () => {
@@ -994,7 +993,7 @@ export class GlossaSettingTab extends PluginSettingTab {
   }
 
   private renderModelRow(card: HTMLElement, ep: Endpoint) {
-    let inputComp: any, dropdownComp: DropdownComponent | null = null;
+    let inputComp: any;
 
     const setting = new Setting(card).setName('Model').setDesc(bi('Click "Detect" to fetch the supported model list from /v1/models.', '点击 "Detect" 从 /v1/models 拉取该端点支持的模型列表。'));
     setting.addText(t => { inputComp = t; t.setValue(ep.model ?? '').onChange(async v => { ep.model = v; await this.plugin.saveSettings(); }); });
@@ -1013,7 +1012,6 @@ export class GlossaSettingTab extends PluginSettingTab {
 
     if (ep.availableModels && ep.availableModels.length > 0) {
       new Setting(card).setName(bi('Pick model', '选择模型')).addDropdown(d => {
-        dropdownComp = d;
         d.addOption('', `(${ep.availableModels!.length})`);
         for (const m of ep.availableModels!) d.addOption(m, m);
         d.setValue(ep.model && ep.availableModels!.includes(ep.model) ? ep.model : '');
@@ -1024,14 +1022,12 @@ export class GlossaSettingTab extends PluginSettingTab {
     // Reasoning effort — unified across all three endpoint kinds
     new Setting(card).setName(t('reasoning_effort'))
       .setDesc(t('reasoning_effort_desc'))
-      .addDropdown(d => d
-        .addOption('off',    t('effort_off'))
-        .addOption('low',    t('effort_low'))
-        .addOption('medium', t('effort_medium'))
-        .addOption('high',   t('effort_high'))
-        .addOption('xhigh',  t('effort_xhigh'))
-        .setValue(ep.reasoningEffort ?? 'off')
-        .onChange(async v => { ep.reasoningEffort = v as any; await this.plugin.saveSettings(); }));
+      .addDropdown(d => {
+        const opts = reasoningOptionsForEndpoint(ep);
+        for (const v of opts) d.addOption(v, t(`effort_${v}`));
+        d.setValue(opts.includes(ep.reasoningEffort ?? 'off') ? (ep.reasoningEffort ?? 'off') : 'off');
+        d.onChange(async v => { ep.reasoningEffort = v as any; await this.plugin.saveSettings(); });
+      });
   }
 
   private renderSlashCmd(parent: HTMLElement, c: SlashCommand) {
@@ -1095,15 +1091,15 @@ class AddEndpointModal extends Modal {
   private formEl: HTMLElement;
   private detectStatusEl: HTMLElement;
   private modelInput: HTMLInputElement;
-  private modelDropdown: HTMLSelectElement | null = null;
 
-  constructor(app: App, private plugin: GlossaPlugin, private onSave: (ep: Endpoint, plainKey: string) => void) {
+  constructor(app: App, _plugin: GlossaPlugin, private onSave: (ep: Endpoint, plainKey: string) => void) {
     super(app);
   }
 
   onOpen() {
     const { contentEl, modalEl } = this;
     modalEl.addClass('nc-add-modal');
+    contentEl.addClass('nc-add-modal-content');
     contentEl.empty();
 
     const hdr = contentEl.createEl('div', { cls: 'nc-add-modal-header' });
@@ -1324,7 +1320,6 @@ class McpMarketplaceModal extends Modal {
   private listEl!: HTMLElement;
   private statusEl!: HTMLElement;
   private external: McpExternalEntry[] = [];   // entries fetched from user catalog URLs (this session)
-  private loading = false;
 
   constructor(private plugin: GlossaPlugin, private onChange: () => void) {
     super(plugin.app);
@@ -1418,7 +1413,6 @@ class McpMarketplaceModal extends Modal {
   private async loadSavedUrls() {
     const urls = this.plugin.settings.mcpCatalogUrls ?? [];
     if (urls.length === 0) return;
-    this.loading = true;
     this.statusEl.setText(`Loading ${urls.length} catalog${urls.length === 1 ? '' : 's'}…`);
     const merged: McpExternalEntry[] = [];
     const errors: string[] = [];
@@ -1431,7 +1425,6 @@ class McpMarketplaceModal extends Modal {
       }
     }
     this.external = merged;
-    this.loading = false;
     this.statusEl.setText(errors.length
       ? `Loaded ${merged.length} external entries · ${errors.length} failed`
       : `Loaded ${merged.length} external entries`);
