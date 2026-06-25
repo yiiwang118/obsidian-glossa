@@ -1250,7 +1250,7 @@ export class GlossaView extends ItemView {
     const copyBtn = mkBtn(ICON.copy, 'Copy', () => {
       navigator.clipboard.writeText(m.content);
       setTrustedSvg(copyBtn, ICON.checkThick);
-      setStyle(copyBtn, { color: '#3fb950' });
+      setStyle(copyBtn, { color: 'var(--glossa-success)' });
       window.setTimeout(() => { setTrustedSvg(copyBtn, ICON.copy); setStyle(copyBtn, { color: '' }); }, 900);
     });
     if (m.role === 'assistant') {

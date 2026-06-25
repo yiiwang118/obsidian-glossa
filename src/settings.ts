@@ -185,6 +185,15 @@ export class GlossaSettingTab extends PluginSettingTab {
     return heading;
   }
 
+  private createSettingsGroup(parent: HTMLElement, title: string, desc?: string, open = false): HTMLElement {
+    const details = parent.createEl('details', { cls: 'nc-settings-group' });
+    details.open = open;
+    const summary = details.createEl('summary', { cls: 'nc-settings-group-summary' });
+    summary.createEl('span', { cls: 'nc-settings-group-title', text: title });
+    if (desc) summary.createEl('span', { cls: 'nc-settings-group-desc', text: desc });
+    return details.createEl('div', { cls: 'nc-settings-group-body' });
+  }
+
   private renderAll(containerEl: HTMLElement): void {
 
     // Security banner — only shown when encryption is ON, so users in the
@@ -281,27 +290,6 @@ export class GlossaSettingTab extends PluginSettingTab {
     // can scrollIntoView this exact field without depending on the label text
     // — labels are translated and frequently renamed.
     proxySetting.settingEl.dataset.glossaId = 'global-proxy';
-    new Setting(containerEl)
-      .setName(bi('Test active endpoint', '测试当前 endpoint'))
-      .setDesc(bi('Runs the selected endpoint\'s own connection test.', '使用当前 endpoint 自带的连接测试，不固定请求 OpenAI。'))
-      .addButton(b => b.setButtonText(bi('Run', '运行')).onClick(async () => {
-        const activeId = this.plugin.settings.activeEndpointId;
-        const ep = this.plugin.settings.endpoints.find(e => e.id === activeId);
-        if (!ep) { new Notice(bi('No active endpoint selected.', '未选择当前 endpoint。')); return; }
-        b.setButtonText(bi('Running...', '运行中...')).setDisabled(true);
-        try {
-          const epDec = await this.plugin.getDecryptedEndpoint(ep);
-          if (!epDec) { new Notice(bi('Endpoint is locked.', 'Endpoint 已锁定。')); return; }
-          const provider: any = await this.buildProviderFor(epDec);
-          if (!provider?.testConnect) { new Notice(bi('This endpoint does not support connection tests.', '这个 endpoint 不支持连接测试。')); return; }
-          const r = await provider.testConnect();
-          new Notice(`${ep.label}: ${r.message}`, r.ok ? 4000 : 8000);
-        } catch (e: any) {
-          new Notice(`${ep.label}: ${e?.message ?? e}`, 8000);
-        } finally {
-          b.setButtonText(bi('Run', '运行')).setDisabled(false);
-        }
-      }));
 
     /* ----- Context ----- */
     this.renderHeading(containerEl, bi('Context', '上下文'), 'advanced');
@@ -342,7 +330,12 @@ export class GlossaSettingTab extends PluginSettingTab {
         .onChange(async v => { this.plugin.settings.loadProjectContext = v; await this.plugin.saveSettings(); }));
 
     /* Auto-approve checkboxes per tool */
-    const autoCard = containerEl.createEl('div', { cls: 'nc-endpoint-card' });
+    const autoGroup = this.createSettingsGroup(
+      containerEl,
+      bi('Auto-approve tools', '自动批准工具'),
+      bi('Advanced. Only enable tools you trust.', '高级项。只给可信工具开启。'),
+    );
+    const autoCard = autoGroup.createEl('div', { cls: 'nc-endpoint-card nc-settings-plain-card' });
     autoCard.createEl('div', { cls: 'nc-endpoint-card-header' }).createEl('span', { text: bi('Auto-approve', '自动批准') });
     // Single source of truth for the tool list — pulled from the live TOOLS registry,
     // so flag changes there propagate automatically (fixes #7 web_fetch mismatch).
@@ -366,15 +359,19 @@ export class GlossaSettingTab extends PluginSettingTab {
     }
 
     /* ----- Persisted permission rules (from "Always allow…" choices) ----- */
-    this.renderHeading(containerEl, bi('Persisted approval rules', '持久化批准规则'), 'agent');
-    containerEl.createEl('p', { cls: 'setting-item-description',
+    const ruleGroup = this.createSettingsGroup(
+      containerEl,
+      bi('Approval rules', '批准规则'),
+      bi('Saved “always allow” choices and audit log.', '保存的“始终允许”选择和审计日志。'),
+    );
+    ruleGroup.createEl('p', { cls: 'setting-item-description',
       text: 'Rules you saved by clicking "always allow…" in the inline approval. The agent loop consults these before prompting.' });
     const rules = this.plugin.settings.permissionRules ?? [];
     if (rules.length === 0) {
-      containerEl.createEl('p', { cls: 'setting-item-description', text: '(None yet)' });
+      ruleGroup.createEl('p', { cls: 'setting-item-description', text: '(None yet)' });
     } else {
       for (const r of rules) {
-        const row = containerEl.createEl('div', { cls: 'nc-permission-rule' });
+        const row = ruleGroup.createEl('div', { cls: 'nc-permission-rule' });
         const lab = row.createEl('span');
         lab.appendChild(activeDocument.createTextNode(`${r.behavior === 'allow' ? '✓' : '✗'} `));
         const codeEl = lab.appendChild(activeDocument.createElement('code'));
@@ -395,7 +392,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           this.display();
         };
       }
-      new Setting(containerEl).addButton(b => b.setButtonText('Clear all rules').setWarning().onClick(async () => {
+      new Setting(ruleGroup).addButton(b => b.setButtonText('Clear all rules').setWarning().onClick(async () => {
         this.plugin.settings.permissionRules = [];
         await this.plugin.saveSettings();
         this.display();
@@ -405,8 +402,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     /* ----- Approval audit log ----- */
     const log = this.plugin.settings.permissionLog ?? [];
     if (log.length > 0) {
-      this.renderHeading(containerEl, bi('Approval log', '批准日志'), 'agent');
-      const det = containerEl.createEl('details');
+      const det = ruleGroup.createEl('details', { cls: 'nc-settings-subdetails' });
       const summary = det.createEl('summary', { text: `Last ${log.length} decisions (most recent first)` });
       setStyle(summary, { cursor: 'pointer', fontSize: '12px', color: 'var(--text-muted)' });
       const tbl = det.createEl('div');
@@ -434,7 +430,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           setStyle(argsEl, { color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1' });
         }
       }
-      new Setting(containerEl).addButton(b => b.setButtonText('Clear log').onClick(async () => {
+      new Setting(ruleGroup).addButton(b => b.setButtonText('Clear log').onClick(async () => {
         this.plugin.settings.permissionLog = [];
         await this.plugin.saveSettings();
         this.display();
@@ -482,7 +478,12 @@ export class GlossaSettingTab extends PluginSettingTab {
           this.display();
         }));
     }
-    new Setting(containerEl).setName(bi('Purge checkpoints', '清空检查点'))
+    const maintenance = this.createSettingsGroup(
+      containerEl,
+      bi('Maintenance', '维护'),
+      bi('Dangerous cleanup actions. Usually unnecessary.', '危险清理操作。通常不需要。'),
+    );
+    new Setting(maintenance).setName(bi('Purge checkpoints', '清空检查点'))
       .setDesc('')
       .addButton(b => b.setButtonText(bi('Purge', '清空')).setWarning().onClick(async () => {
         const { confirmModal } = await import('./ui/confirm_modal');
@@ -496,7 +497,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         await this.plugin.checkpoint.purgeAll();
         new Notice(bi('Checkpoints purged.', '已清空检查点。'));
       }));
-    new Setting(containerEl).setName(bi('Purge embedding index', '清空嵌入索引'))
+    new Setting(maintenance).setName(bi('Purge embedding index', '清空嵌入索引'))
       .setDesc('')
       .addButton(b => b.setButtonText(bi('Purge', '清空')).setWarning().onClick(async () => {
         const { confirmModal } = await import('./ui/confirm_modal');
@@ -510,7 +511,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         try { await this.plugin.app.vault.adapter.remove(`${this.plugin.manifest.dir}/embeddings.json`); } catch { /* ignore */ }
         new Notice(bi('Embedding index removed.', '已删除嵌入索引。'));
       }));
-    new Setting(containerEl).setName(bi('Purge legacy chat content', '清理旧对话内容'))
+    new Setting(maintenance).setName(bi('Purge legacy chat content', '清理旧对话内容'))
       .setDesc('')
       .addButton(b => b.setButtonText(bi('Run', '运行')).onClick(async () => {
         const n = await this.plugin.store.purgeLegacyContext();
@@ -773,14 +774,21 @@ export class GlossaSettingTab extends PluginSettingTab {
     const codexWarn = codexSafetyWarning(ep);
     if (codexWarn) renderWarningHint(card, codexWarn);
 
-    new Setting(card).setName(bi('Label', '名称')).addText(t => t.setValue(ep.label).onChange(async v => { ep.label = v; await this.plugin.saveSettings(); }));
+    const basic = card.createEl('div', { cls: 'nc-endpoint-basic' });
+    const advanced = this.createSettingsGroup(
+      card,
+      bi('Advanced', '高级'),
+      bi('Headers, proxy, diagnostics, sandbox, and compatibility options.', '请求头、代理、诊断、沙盒与兼容选项。'),
+    );
+
+    new Setting(basic).setName(bi('Label', '名称')).addText(t => t.setValue(ep.label).onChange(async v => { ep.label = v; await this.plugin.saveSettings(); }));
 
     if (ep.kind === 'custom-api') {
-      new Setting(card).setName(bi('API style', 'API 风格'))
+      new Setting(basic).setName(bi('API style', 'API 风格'))
         .addDropdown(d => d.addOption('openai', 'OpenAI').addOption('anthropic', 'Anthropic')
           .setValue(ep.apiStyle ?? 'openai')
           .onChange(async v => { ep.apiStyle = v as any; await this.plugin.saveSettings(); }));
-      new Setting(card).setName(bi('Base URL', '地址')).addText(t => t.setValue(ep.baseUrl ?? '').onChange(async v => {
+      new Setting(basic).setName(bi('Base URL', '地址')).addText(t => t.setValue(ep.baseUrl ?? '').onChange(async v => {
         const trimmed = v.trim();
         if (trimmed) {
           // Reject anything that isn't http(s) — Electron's renderer fetch will
@@ -798,7 +806,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         ep.baseUrl = trimmed;
         await this.plugin.saveSettings();
       }));
-      new Setting(card).setName(bi('API Key', 'API Key'))
+      new Setting(basic).setName(bi('API Key', 'API Key'))
         .setDesc(ep.apiKey?.startsWith('NCENC1:') ? bi('✓ encrypted', '✓ 已加密') : (this.plugin.settings.encryptionEnabled ? bi('will encrypt on save', '保存时加密') : bi('plaintext', '明文')))
         .addText(t => {
           t.inputEl.type = 'password';
@@ -809,9 +817,9 @@ export class GlossaSettingTab extends PluginSettingTab {
         });
 
       // Model with detect button + dropdown of detected
-      this.renderModelRow(card, ep);
+      this.renderModelRow(basic, ep);
 
-      new Setting(card).setName(bi('Headers', '请求头')).setDesc(bi('Optional JSON. e.g. {"x-org-id":"abc"}', '可选 JSON。例：{"x-org-id":"abc"}'))
+      new Setting(advanced).setName(bi('Headers', '请求头')).setDesc(bi('Optional JSON. e.g. {"x-org-id":"abc"}', '可选 JSON。例：{"x-org-id":"abc"}'))
         .addTextArea(t => t.setValue(ep.headers ? JSON.stringify(ep.headers, null, 2) : '')
           .onChange(async v => {
             try { ep.headers = v.trim() ? JSON.parse(v) : undefined; await this.plugin.saveSettings(); } catch { /* ignore */ }
@@ -819,7 +827,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     }
 
     if (ep.kind === 'codex-cli' || ep.kind === 'claude-code-cli') {
-      new Setting(card).setName(t('cli_binary_path')).setDesc(t('cli_binary_path_desc'))
+      new Setting(basic).setName(t('cli_binary_path')).setDesc(t('cli_binary_path_desc'))
         .addText(tx => tx.setValue(ep.binaryPath ?? '').onChange(async v => { ep.binaryPath = v; await this.plugin.saveSettings(); }))
         .addButton(b => b.setButtonText('Auto').onClick(async () => {
           const name = ep.kind === 'codex-cli' ? 'codex' : 'claude';
@@ -827,10 +835,10 @@ export class GlossaSettingTab extends PluginSettingTab {
           if (p) { ep.binaryPath = p; await this.plugin.saveSettings(); this.display(); new Notice(`Found ${p}`); }
           else new Notice(`Not found. Install ${name} first.`);
         }));
-      new Setting(card).setName(t('cli_default_model'))
+      new Setting(basic).setName(t('cli_default_model'))
         .setDesc(t('cli_default_model_desc'))
         .addText(tx => tx.setValue(ep.model ?? '').onChange(async v => { ep.model = v; await this.plugin.saveSettings(); }));
-      new Setting(card).setName(t('reasoning_effort'))
+      new Setting(basic).setName(t('reasoning_effort'))
         .setDesc(t('reasoning_effort_desc_cli'))
         .addDropdown(d => {
           const opts = reasoningOptionsForEndpoint(ep);
@@ -838,14 +846,14 @@ export class GlossaSettingTab extends PluginSettingTab {
           d.setValue(opts.includes(ep.reasoningEffort ?? 'off') ? (ep.reasoningEffort ?? 'off') : 'off');
           d.onChange(async v => { ep.reasoningEffort = v as any; await this.plugin.saveSettings(); });
         });
-      new Setting(card).setName(t('cli_working_dir')).setDesc(t('cli_working_dir_desc'))
+      new Setting(basic).setName(t('cli_working_dir')).setDesc(t('cli_working_dir_desc'))
         .addText(t => t.setValue(ep.cwd ?? '').onChange(async v => { ep.cwd = v; await this.plugin.saveSettings(); }))
         .addButton(b => b.setButtonText('Use vault').onClick(async () => {
           const vaultPath = (this.app.vault.adapter as any).basePath;
           if (vaultPath) { ep.cwd = vaultPath; await this.plugin.saveSettings(); this.display(); new Notice('Set to vault root.'); }
         }));
 
-      new Setting(card).setName(t('cli_full_agent'))
+      new Setting(basic).setName(t('cli_full_agent'))
         .setDesc(t('cli_full_agent_desc'))
         .addToggle(tg => tg.setValue(!!ep.cliFullAgent).onChange(async v => { ep.cliFullAgent = v; await this.plugin.saveSettings(); this.display(); }));
 
@@ -854,13 +862,13 @@ export class GlossaSettingTab extends PluginSettingTab {
         // Banner reflecting the active mode. With app-server (default), tokens
         // truly stream — same protocol codex's native TUI uses. Legacy `codex exec`
         // mode arrives in chunks at completion.
-        const hint = card.createEl('div', { cls: 'nc-info-hint' });
+        const hint = advanced.createEl('div', { cls: 'nc-info-hint' });
         hint.createEl('strong', { text: appServerActive ? bi('app-server ✓', 'app-server ✓') : bi('legacy exec', 'legacy exec') });
         hint.appendText(appServerActive
           ? bi(' — token-level streaming.', ' — token 级流式。')
           : bi(' — completion only, no token stream.', ' — 整段返回，无 token 流。'));
 
-        new Setting(card)
+        new Setting(advanced)
           .setName(bi('app-server protocol', 'app-server 协议'))
           .setDesc(bi('Off = fall back to legacy exec.', '关闭则用 legacy exec。'))
           .addToggle(tg => tg.setValue(ep.codexUseAppServer !== false).onChange(async v => {
@@ -869,7 +877,7 @@ export class GlossaSettingTab extends PluginSettingTab {
             this.display();
           }));
 
-        new Setting(card).setName(t('codex_sandbox'))
+        new Setting(advanced).setName(t('codex_sandbox'))
           .setDesc(t('codex_sandbox_desc'))
           .addDropdown(d => d.addOption('', '(Default)').addOption('read-only', 'Read-only').addOption('workspace-write', 'Workspace-write').addOption('danger-full-access', 'Danger-full-access ⚠')
             .setValue(ep.codexSandboxMode ?? '')
@@ -880,7 +888,7 @@ export class GlossaSettingTab extends PluginSettingTab {
               if (warn) new Notice(`Warning: ${warn}`, 10000);
               this.display();
             }));
-        new Setting(card).setName(t('codex_approval'))
+        new Setting(advanced).setName(t('codex_approval'))
           .setDesc(t('codex_approval_desc'))
           .addDropdown(d => d.addOption('', '(Default)').addOption('untrusted', 'Untrusted').addOption('on-failure', 'On-failure').addOption('on-request', 'On-request').addOption('never', 'Never ⚠')
             .setValue(ep.codexApprovalPolicy ?? '')
@@ -891,12 +899,12 @@ export class GlossaSettingTab extends PluginSettingTab {
               if (warn) new Notice(`Warning: ${warn}`, 10000);
               this.display();
             }));
-        new Setting(card).setName(t('codex_use_oss'))
+        new Setting(advanced).setName(t('codex_use_oss'))
           .addToggle(tg => tg.setValue(!!ep.codexUseOss).onChange(async v => { ep.codexUseOss = v; await this.plugin.saveSettings(); }));
-        new Setting(card).setName(t('codex_config_overrides'))
+        new Setting(advanced).setName(t('codex_config_overrides'))
           .setDesc(t('codex_config_overrides_desc'))
           .addTextArea(tx => { tx.inputEl.rows = 4; tx.setValue(ep.codexConfigOverrides ?? '').onChange(async v => { ep.codexConfigOverrides = v; await this.plugin.saveSettings(); }); });
-        new Setting(card).setName(bi('Diagnose', '诊断'))
+        new Setting(advanced).setName(bi('Diagnose', '诊断'))
           .setDesc(bi('"say pong" probe + event log.', '"say pong" 探测 + 事件日志。'))
           .addButton(b => b.setButtonText(bi('🔬 Run', '🔬 运行')).onClick(async () => {
             b.setButtonText('Running…').setDisabled(true);
@@ -927,45 +935,45 @@ export class GlossaSettingTab extends PluginSettingTab {
       }
 
       if (ep.kind === 'claude-code-cli') {
-        new Setting(card).setName(t('claude_bare'))
+        new Setting(advanced).setName(t('claude_bare'))
           .setDesc(t('claude_bare_desc'))
           .addToggle(tg => tg.setValue(ep.bareMode ?? !ep.cliFullAgent).onChange(async v => { ep.bareMode = v; await this.plugin.saveSettings(); }));
-        new Setting(card).setName(t('claude_max_turns'))
+        new Setting(advanced).setName(t('claude_max_turns'))
           .setDesc(t('claude_max_turns_desc'))
           .addText(tx => tx.setValue(String(ep.maxTurns ?? 1)).onChange(async v => { ep.maxTurns = parseInt(v) || 1; await this.plugin.saveSettings(); }));
-        new Setting(card).setName(bi('Allowed tools', '允许工具'))
+        new Setting(advanced).setName(bi('Allowed tools', '允许工具'))
           .setDesc(bi('--allowedTools, space-separated.', '--allowedTools，空格分隔。'))
           .addText(t => t.setValue(ep.claudeAllowedTools ?? '').onChange(async v => { ep.claudeAllowedTools = v; await this.plugin.saveSettings(); }));
-        new Setting(card).setName(bi('Disallowed tools', '禁用工具'))
+        new Setting(advanced).setName(bi('Disallowed tools', '禁用工具'))
           .setDesc('CLI flag for disallowed tools.')
           .addText(t => t.setValue(ep.claudeDisallowedTools ?? '').onChange(async v => { ep.claudeDisallowedTools = v; await this.plugin.saveSettings(); }));
-        new Setting(card).setName(bi('Extra dirs', '额外目录'))
+        new Setting(advanced).setName(bi('Extra dirs', '额外目录'))
           .setDesc(bi('--add-dir, one per line.', '--add-dir，一行一个。'))
           .addTextArea(t => { t.inputEl.rows = 3; t.setValue(ep.claudeAddDirs ?? '').onChange(async v => { ep.claudeAddDirs = v; await this.plugin.saveSettings(); }); });
-        new Setting(card).setName(bi('MCP config', 'MCP 配置'))
+        new Setting(advanced).setName(bi('MCP config', 'MCP 配置'))
           .setDesc('--mcp-config')
           .addText(t => t.setValue(ep.claudeMcpConfig ?? '').onChange(async v => { ep.claudeMcpConfig = v; await this.plugin.saveSettings(); }));
-        new Setting(card).setName(bi('Budget (USD)', '预算 (USD)'))
+        new Setting(advanced).setName(bi('Budget (USD)', '预算 (USD)'))
           .setDesc(bi('--max-budget-usd. 0 = no cap.', '--max-budget-usd。0 = 不限。'))
           .addText(t => t.setValue(String(ep.claudeMaxBudgetUSD ?? '')).onChange(async v => { ep.claudeMaxBudgetUSD = parseFloat(v) || 0; await this.plugin.saveSettings(); }));
-        new Setting(card).setName(bi('Fallback model', '备用模型'))
+        new Setting(advanced).setName(bi('Fallback model', '备用模型'))
           .setDesc('--fallback-model')
           .addText(t => t.setValue(ep.claudeFallbackModel ?? '').onChange(async v => { ep.claudeFallbackModel = v; await this.plugin.saveSettings(); }));
       }
 
-      new Setting(card).setName(bi('Extra args', '额外参数'))
+      new Setting(advanced).setName(bi('Extra args', '额外参数'))
         .setDesc(bi('One per line.', '一行一个。'))
         .addTextArea(t => t.setValue((ep.cliExtraArgs ?? []).join('\n'))
           .onChange(async v => { ep.cliExtraArgs = v.split('\n').map(s => s.trim()).filter(Boolean); await this.plugin.saveSettings(); }));
 
-      new Setting(card).setName(bi('Debug', '调试'))
+      new Setting(advanced).setName(bi('Debug', '调试'))
         .setDesc(bi('Log spawn + events to devtools.', '把 spawn + 事件打到 devtools。'))
         .addToggle(tg => tg.setValue(!!ep.cliDebug).onChange(async v => { ep.cliDebug = v; await this.plugin.saveSettings(); }));
     }
 
     // Custom API: offer requestUrl fallback for proxy support
     if (ep.kind === 'custom-api') {
-      new Setting(card).setName(bi('Obsidian requestUrl', 'Obsidian requestUrl'))
+      new Setting(advanced).setName(bi('Obsidian requestUrl', 'Obsidian requestUrl'))
         .setDesc(bi('Proxy-aware. No streaming.', '支持代理。不流式。'))
         .addToggle(tg => tg.setValue(!!ep.useObsidianFetch).onChange(async v => { ep.useObsidianFetch = v; await this.plugin.saveSettings(); this.display(); }));
     }
@@ -974,7 +982,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     // custom-api when requestUrl is used (system proxy follows). Hide otherwise.
     const proxyApplies = ep.kind === 'codex-cli' || ep.kind === 'claude-code-cli' || ep.useObsidianFetch;
     if (proxyApplies) {
-      new Setting(card).setName(bi('Proxy mode', '代理模式'))
+      new Setting(advanced).setName(bi('Proxy mode', '代理模式'))
         .setDesc(ep.kind === 'custom-api'
           ? bi('Follows system proxy.', '跟随系统代理。')
           : bi(`global = ${this.plugin.settings.globalProxy || 'unset'} · none · override`,
@@ -983,12 +991,8 @@ export class GlossaSettingTab extends PluginSettingTab {
           .setValue(ep.proxyMode ?? 'global')
           .onChange(async v => { ep.proxyMode = v as any; await this.plugin.saveSettings(); this.display(); }));
       if (ep.proxyMode === 'override') {
-        new Setting(card).setName(bi('Proxy URL', '代理 URL')).addText(t => t.setPlaceholder(HTTP_PROXY_PLACEHOLDER).setValue(ep.proxy ?? '').onChange(async v => { ep.proxy = v.trim(); await this.plugin.saveSettings(); }));
+        new Setting(advanced).setName(bi('Proxy URL', '代理 URL')).addText(t => t.setPlaceholder(HTTP_PROXY_PLACEHOLDER).setValue(ep.proxy ?? '').onChange(async v => { ep.proxy = v.trim(); await this.plugin.saveSettings(); }));
       }
-    } else if (ep.kind === 'custom-api') {
-      new Setting(card).setName(bi('Proxy', '代理'))
-        .setDesc(bi('Streaming follows system proxy.', '流式跟随系统代理。'))
-        .addButton(b => b.setDisabled(true).setButtonText(bi('system only', '仅系统代理')));
     }
   }
 
