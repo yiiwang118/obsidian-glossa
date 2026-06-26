@@ -281,7 +281,13 @@
 @media (prefers-reduced-motion: reduce) {
   .glossa-view *,
   .glossa-view *::before,
-  .glossa-view *::after {
+  .glossa-view *::after,
+  .nc-popup,
+  .nc-popup *,
+  .nc-history-popover,
+  .nc-history-popover *,
+  .modal.nc-add-modal,
+  .modal.nc-add-modal * {
     animation-duration: 1ms !important;
     transition-duration: 1ms !important;
   }
@@ -674,18 +680,13 @@
    model hasn't responded yet), show a subtle "Thinking…" pulse so the user
    knows something is happening. */
 .nc-msg.assistant.streaming > .nc-msg-body:empty {
-  display: block;
-  min-height: 14px;
+  display: none;
+  min-height: 0;
   padding: 0;
   margin: 0;
 }
 .nc-msg.assistant.streaming > .nc-msg-body:empty::before {
-  content: 'Thinking…';
-  display: block;
-  font-size: 11.5px;
-  color: var(--text-muted);
-  padding: 2px 0;
-  animation: nc-pulse 1.4s ease-in-out infinite;
+  content: none;
 }
 /* Hide the placeholder once anything else (reasoning card / tool card) is present */
 .nc-msg.assistant.streaming:has(.nc-tool-events-stack:not(:empty)) > .nc-msg-body:empty::before,
@@ -2452,11 +2453,16 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   font-variant-numeric: tabular-nums;
 }
 .nc-selection-preview-close {
+  appearance: none;
+  -webkit-appearance: none;
   cursor: pointer;
   opacity: 0.5;
   flex-shrink: 0;
   align-self: flex-start;
   width: 18px; height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%;
   color: var(--text-muted);
@@ -5338,6 +5344,42 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   font: inherit;
 }
 
+.nc-context-bar {
+  gap: 6px;
+  align-items: center;
+}
+
+.nc-pill {
+  min-height: 26px;
+  padding: 3px 8px 3px 7px;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1;
+  max-width: 230px;
+}
+
+.nc-pill .nc-pill-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.nc-pill .nc-pill-label {
+  max-width: 170px;
+  font-size: 12px;
+  line-height: 1.15;
+  font-weight: 560;
+}
+
+.nc-pill .nc-pill-meta {
+  font-size: 9px;
+  letter-spacing: 0.05em;
+}
+
+.nc-pill .nc-pill-close {
+  width: 13px;
+  height: 13px;
+}
+
 .nc-pill:hover,
 .nc-model-chip:hover,
 .nc-composer-pill:hover,
@@ -5611,27 +5653,27 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
    active state, and use lower-saturation Material semantic colors.
    ============================================================ */
 :root {
-  --glossa-accent: #1967d2;
-  --glossa-accent-2: #1a73e8;
-  --glossa-success: #188038;
-  --glossa-warn: #b06000;
-  --glossa-danger: #c5221f;
+  --glossa-accent: #3f63a8;
+  --glossa-accent-2: #2f7f7a;
+  --glossa-success: #2f7d52;
+  --glossa-warn: #9a6728;
+  --glossa-danger: #b84a4a;
   --glossa-icon: #5f6368;
   --glossa-icon-soft: #80868b;
-  --glossa-active-text: #185abc;
-  --glossa-active-bg: #e8f0fe;
-  --glossa-active-border: #d2e3fc;
+  --glossa-active-text: #365f9f;
+  --glossa-active-bg: #eef3fb;
+  --glossa-active-border: #d8e1f1;
 }
 
 .theme-dark {
-  --glossa-accent: #8ab4f8;
-  --glossa-accent-2: #aecbfa;
-  --glossa-success: #81c995;
-  --glossa-warn: #fdd663;
-  --glossa-danger: #f28b82;
+  --glossa-accent: #93b4e7;
+  --glossa-accent-2: #7bc7bd;
+  --glossa-success: #78b78f;
+  --glossa-warn: #e0b15a;
+  --glossa-danger: #e08c86;
   --glossa-icon: var(--text-muted);
   --glossa-icon-soft: var(--text-faint);
-  --glossa-active-text: #aecbfa;
+  --glossa-active-text: #b8cdf3;
   --glossa-active-bg: color-mix(in srgb, var(--glossa-accent) 14%, transparent);
   --glossa-active-border: color-mix(in srgb, var(--glossa-accent) 22%, transparent);
 }
@@ -5641,9 +5683,19 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   color: var(--glossa-active-text);
 }
 
+.nc-msg.assistant > .nc-msg-role .nc-role-name {
+  font-size: calc(var(--nc-base-font, 13px) - 1px);
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  text-transform: none;
+  color: color-mix(in srgb, var(--glossa-active-text) 86%, var(--glossa-ink));
+  background: none;
+  -webkit-text-fill-color: currentColor;
+}
+
 .nc-msg.assistant.streaming > .nc-msg-role .nc-role-name {
   background: none !important;
-  color: var(--glossa-active-text);
+  color: color-mix(in srgb, var(--glossa-active-text) 86%, var(--glossa-ink));
   -webkit-text-fill-color: currentColor;
   animation: none;
 }
@@ -5654,26 +5706,98 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 
 .nc-empty-title {
-  margin-bottom: 18px;
-  color: color-mix(in srgb, var(--glossa-ink) 88%, var(--glossa-active-text));
-  font-family: "New York", "Baskerville", "Iowan Old Style", Georgia, "Times New Roman", serif;
-  font-size: 34px;
-  font-style: italic;
-  font-weight: 520;
+  margin-top: 2px;
+  margin-bottom: 26px;
+  color: color-mix(in srgb, var(--glossa-ink) 92%, #243b5a);
+  font-family: "Edwardian Script ITC", "Snell Roundhand", "Apple Chancery", "Segoe Script", "Brush Script MT", cursive;
+  font-size: 52px;
+  font-style: normal;
+  font-weight: 400;
   letter-spacing: 0;
-  line-height: 1.05;
+  line-height: 0.88;
+  background:
+    linear-gradient(
+      108deg,
+      color-mix(in srgb, var(--glossa-ink) 96%, #18263a) 0%,
+      color-mix(in srgb, #1f3552 68%, var(--glossa-ink)) 48%,
+      color-mix(in srgb, #2b4f67 46%, var(--glossa-ink)) 100%
+    );
+  background-size: 118% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-variant-ligatures: contextual discretionary-ligatures;
+  font-synthesis: none;
   text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
+  animation: nc-empty-wordmark-drift 22s ease-in-out infinite alternate;
   text-shadow:
-    0 1px 0 color-mix(in srgb, var(--glossa-bg) 84%, transparent),
-    0 12px 34px color-mix(in srgb, var(--glossa-active-text) 10%, transparent);
+    0 1px 0 color-mix(in srgb, var(--glossa-bg) 86%, transparent),
+    0 12px 30px color-mix(in srgb, #243b5a 9%, transparent);
+}
+
+.nc-empty {
+  width: min(360px, calc(100% - 40px));
+  max-width: 360px;
+  align-items: center;
+}
+
+.nc-empty-icon {
+  margin-bottom: 18px;
+}
+
+.nc-empty-orb svg {
+  width: 92px;
+  height: 92px;
+}
+
+.nc-example-chips {
+  width: min(100%, 330px);
+  gap: 7px;
+  margin-top: 0;
+}
+
+.nc-example-chip {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 13px;
+  border-radius: 12px;
+  font-size: var(--nc-base-font, 13px);
+  gap: 10px;
+}
+
+.nc-example-chip-cmd {
+  min-width: 78px;
+  font-size: calc(var(--nc-base-font, 13px) - 2px);
+  font-weight: 600;
+}
+
+.nc-example-chip-text {
+  font-size: var(--nc-base-font, 13px);
+  color: var(--glossa-muted);
 }
 
 .theme-dark .nc-empty-title {
-  color: color-mix(in srgb, var(--glossa-ink) 92%, var(--glossa-active-text));
+  color: color-mix(in srgb, var(--glossa-ink) 88%, var(--glossa-active-text));
+  background:
+    linear-gradient(
+      108deg,
+      color-mix(in srgb, var(--glossa-ink) 92%, #d5e3ff) 0%,
+      color-mix(in srgb, var(--glossa-active-text) 50%, var(--glossa-ink)) 52%,
+      color-mix(in srgb, var(--glossa-accent-2) 28%, var(--glossa-ink)) 100%
+    );
+  background-size: 118% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
   text-shadow:
-    0 1px 0 color-mix(in srgb, #000 24%, transparent),
-    0 14px 34px color-mix(in srgb, var(--glossa-active-text) 13%, transparent);
+    0 1px 0 color-mix(in srgb, #000 30%, transparent),
+    0 14px 34px color-mix(in srgb, var(--glossa-active-text) 10%, transparent);
+}
+
+@keyframes nc-empty-wordmark-drift {
+  from { background-position: 0% 50%; }
+  to   { background-position: 100% 50%; }
 }
 
 .nc-example-chip-cmd,
@@ -5794,6 +5918,15 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   color: var(--glossa-icon-soft);
   border-color: var(--glossa-line-soft);
   opacity: 0.72;
+}
+
+.glossa-view button:disabled,
+.nc-popup button:disabled,
+.nc-history-popover button:disabled,
+.modal.nc-add-modal button:disabled,
+.nc-settings button:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.65);
 }
 
 .nc-submit-btn.stop {
@@ -6021,4 +6154,259 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-settings select,
 .nc-settings textarea {
   border-radius: 8px !important;
+}
+
+/* Obsidian ribbon should look native: monochrome, no blue active tint. */
+.workspace-ribbon .clickable-icon.glossa-ribbon-icon,
+.workspace-ribbon .clickable-icon.glossa-ribbon-icon:hover,
+.workspace-ribbon .clickable-icon.glossa-ribbon-icon.is-active,
+.workspace-ribbon .clickable-icon.glossa-ribbon-icon[aria-pressed="true"] {
+  color: color-mix(in srgb, var(--text-muted) 88%, var(--text-normal)) !important;
+}
+
+.theme-dark .workspace-ribbon .clickable-icon.glossa-ribbon-icon,
+.theme-dark .workspace-ribbon .clickable-icon.glossa-ribbon-icon:hover,
+.theme-dark .workspace-ribbon .clickable-icon.glossa-ribbon-icon.is-active,
+.theme-dark .workspace-ribbon .clickable-icon.glossa-ribbon-icon[aria-pressed="true"] {
+  color: color-mix(in srgb, var(--text-muted) 82%, var(--text-normal)) !important;
+}
+
+.workspace-ribbon .clickable-icon.glossa-ribbon-icon svg {
+  color: currentColor !important;
+  stroke: currentColor !important;
+}
+
+.workspace-tab-header[data-type="glossa-view"] .workspace-tab-header-inner-icon,
+.workspace-tab-header[aria-label*="Glossa"] .workspace-tab-header-inner-icon,
+.workspace-tab-header[title*="Glossa"] .workspace-tab-header-inner-icon,
+.workspace-tab-header .workspace-tab-header-inner-icon svg[class*="glossa"] {
+  color: color-mix(in srgb, var(--text-muted) 88%, var(--text-normal)) !important;
+}
+
+.workspace-tab-header[data-type="glossa-view"] .workspace-tab-header-inner-icon svg,
+.workspace-tab-header[aria-label*="Glossa"] .workspace-tab-header-inner-icon svg,
+.workspace-tab-header[title*="Glossa"] .workspace-tab-header-inner-icon svg,
+.workspace-tab-header .workspace-tab-header-inner-icon svg[class*="glossa"] {
+  stroke: currentColor !important;
+}
+
+.theme-dark .workspace-tab-header[data-type="glossa-view"] .workspace-tab-header-inner-icon,
+.theme-dark .workspace-tab-header[aria-label*="Glossa"] .workspace-tab-header-inner-icon,
+.theme-dark .workspace-tab-header[title*="Glossa"] .workspace-tab-header-inner-icon,
+.theme-dark .workspace-tab-header .workspace-tab-header-inner-icon svg[class*="glossa"] {
+  color: color-mix(in srgb, var(--text-muted) 82%, var(--text-normal)) !important;
+}
+
+.nc-empty-title {
+  color: color-mix(in srgb, var(--glossa-ink) 92%, #243b5a);
+  background:
+    linear-gradient(
+      112deg,
+      #18263a 0%,
+      #2f4f75 42%,
+      #3f63a8 68%,
+      #2f7f7a 100%
+    );
+  background-size: 128% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.theme-dark .nc-empty-title {
+  background:
+    linear-gradient(
+      112deg,
+      #d7e2f4 0%,
+      #aebfda 38%,
+      #93b4e7 68%,
+      #7bc7bd 100%
+    );
+  background-size: 128% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Reasoning is secondary metadata, not a full tool card. Keep the collapsed
+   state quiet and inline; only the expanded body gets a readable surface. */
+.nc-thinking-card {
+  align-self: flex-start;
+  max-width: 100%;
+  width: auto;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: visible;
+}
+
+.nc-thinking-summary {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 1px 0;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  color: color-mix(in srgb, var(--glossa-muted) 88%, var(--glossa-ink));
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.nc-thinking-summary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nc-thinking-summary::before {
+  margin-top: 1px;
+  opacity: 0.42;
+}
+
+.nc-thinking-card:hover .nc-thinking-summary {
+  color: var(--glossa-ink);
+}
+
+.nc-thinking-card[open] {
+  align-self: stretch;
+  background: transparent !important;
+  border: 0 !important;
+}
+
+.nc-thinking-card[open] .nc-thinking-body {
+  margin: 4px 0 2px 5px;
+  padding: 8px 10px 8px 12px;
+  border-top: 0;
+  border-left: 2px solid color-mix(in srgb, var(--glossa-active-text) 48%, var(--glossa-line));
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--glossa-surface-2) 72%, transparent);
+}
+
+/* Live agent status polish: keep one activity pill, keep the assistant identity
+   at the top of the turn, and make tool rows read as lightweight status strips. */
+.nc-msg.assistant.preamble:not(.nc-asst-continuation) {
+  margin-top: 0;
+}
+
+.nc-msg.assistant.preamble:not(.nc-asst-continuation) > .nc-msg-role,
+.nc-msg.assistant.preamble.streaming:not(.nc-asst-continuation) > .nc-msg-role {
+  display: flex;
+}
+
+.nc-msg.assistant.nc-asst-continuation > .nc-msg-role,
+.nc-msg.assistant.nc-asst-continuation.streaming > .nc-msg-role {
+  display: none !important;
+}
+
+.nc-msg.assistant.streaming > .nc-turn-activity {
+  margin-top: 7px;
+  margin-bottom: 0;
+  order: 50;
+}
+
+.nc-msg.assistant.streaming > .nc-msg-body:empty {
+  display: none !important;
+}
+
+.nc-msg.assistant.streaming > .nc-msg-body:empty::before {
+  content: none !important;
+}
+
+.nc-tool-events-stack {
+  gap: 6px;
+  margin-top: 8px;
+  max-width: 100%;
+}
+
+.nc-tool-events-stack:empty {
+  display: none;
+  margin-top: 0;
+}
+
+.nc-tool-events-stack > [data-tool-id]:has(.nc-tool-event-status.running) {
+  opacity: 1;
+  visibility: visible;
+  animation: none;
+}
+
+.nc-tool-event {
+  background: color-mix(in srgb, var(--glossa-surface-1, var(--background-primary)) 92%, var(--glossa-active-bg));
+  border: 1px solid var(--glossa-line-soft, var(--background-modifier-border));
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+.nc-tool-event:hover {
+  background: color-mix(in srgb, var(--glossa-surface-2, var(--background-secondary)) 90%, var(--glossa-active-bg));
+  border-color: var(--glossa-line, var(--background-modifier-border-hover));
+  box-shadow: none;
+}
+
+.nc-tool-event-header {
+  min-height: 30px;
+  padding: 5px 9px 5px 10px;
+  gap: 8px;
+  align-items: center;
+}
+
+.nc-tool-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--glossa-icon-soft) !important;
+  opacity: 0.9;
+}
+
+.nc-tool-icon svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.9;
+}
+
+.nc-tool-event-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  line-height: 1.25;
+  color: var(--glossa-ink);
+}
+
+.nc-tool-event-args {
+  flex: 1 1 42%;
+  max-width: 42%;
+  min-width: 0;
+  color: var(--glossa-muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.nc-tool-event-elapsed {
+  min-width: 42px;
+  margin-left: auto;
+  text-align: right;
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.nc-tool-event-status {
+  width: 17px;
+  height: 17px;
+  border: 1px solid transparent;
+  line-height: 1;
+}
+
+.nc-tool-event-chev {
+  width: 15px;
+  height: 15px;
+  color: var(--glossa-icon-soft);
+  opacity: 0.55;
+}
+
+.nc-tool-event.collapsed .nc-tool-event-header {
+  border-bottom: 0;
 }

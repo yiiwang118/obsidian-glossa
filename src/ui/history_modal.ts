@@ -174,6 +174,7 @@ class HistoryPopover {
     row.setAttribute('role', 'option');
     row.setAttribute('aria-selected', 'false');
     row.setAttribute('tabindex', '-1');
+    row.setAttribute('aria-label', `${s.title || bi('(untitled)', '（无标题）')} · ${this.relativeTime(s.updatedAt)}`);
     if (s.id === this.renamingId) { this.renderRenameInline(row, s); return null; }
 
     const title = row.createEl('span', { cls: 'nc-history-pop-row-title', text: s.title || bi('(untitled)', '（无标题）') });

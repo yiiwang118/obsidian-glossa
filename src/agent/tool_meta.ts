@@ -129,16 +129,16 @@ export const TOOL_META: Record<string, ToolMeta> = {
     summarize: a => `${(a.items ?? []).length} step${(a.items ?? []).length === 1 ? '' : 's'}`,
   },
   discover_skills: {
-    icon: ICON.brain, label: 'List skills', verb: 'Listing skills',
+    icon: ICON.sparkles, label: 'Skills', verb: 'Finding skills',
     color: '#b66cf0', category: 'meta',
   },
   run_skill: {
-    icon: ICON.brain, label: 'Run skill', verb: 'Loading skill',
+    icon: ICON.sparkles, label: 'Skill', verb: 'Using skill',
     color: '#b66cf0', category: 'meta',
     summarize: a => a.name,
   },
   skill: {
-    icon: ICON.brain, label: 'Skill', verb: 'Running skill',
+    icon: ICON.sparkles, label: 'Skill', verb: 'Using skill',
     color: '#b66cf0', category: 'meta',
     summarize: a => `${a.skill}${a.args ? ` (${String(a.args).slice(0, 24)})` : ''}`,
   },

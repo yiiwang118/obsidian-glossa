@@ -139,6 +139,8 @@ export const TOOLS: Record<string, ToolImpl> = {
   bases_query: basesQuery,
 };
 
+const MODEL_HIDDEN_TOOL_NAMES = new Set(['attempt_completion']);
+
 /**
  * Build the model-facing tool spec list.
  *
@@ -158,6 +160,7 @@ export function listToolSpecs(opts: { includeDeferred?: boolean } = {}): ToolSpe
   const { allBridgeToolNames, isBridgeActive } = require('./plugin_bridges') as typeof import('./plugin_bridges');
   const bridgeNames = new Set(allBridgeToolNames());
   return Object.values(TOOLS)
+    .filter(t => !MODEL_HIDDEN_TOOL_NAMES.has(t.spec.name))
     .filter(t => !bridgeNames.has(t.spec.name) || isBridgeActive(t.spec.name))
     .filter(t => opts.includeDeferred || !t.shouldDefer)
     .map(t => t.spec);

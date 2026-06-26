@@ -39,6 +39,28 @@ import { loadProjectContext } from '../context/project_context';
 
 export const VIEW_TYPE_GLOSSA = 'glossa-view';
 
+function makeButtonLike(el: HTMLElement, label?: string) {
+  el.setAttribute('role', 'button');
+  el.tabIndex = 0;
+  if (label) el.setAttribute('aria-label', label);
+  el.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    el.click();
+  });
+}
+
+function normalizeModelList(models: string[]): string[] {
+  return [...new Set(models.map(m => String(m).trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+}
+
+const HIDDEN_TOOL_EVENTS = new Set(['attempt_completion']);
+
+function shouldRenderToolEvent(ev: ToolEvent): boolean {
+  return !HIDDEN_TOOL_EVENTS.has(ev.name);
+}
+
 interface MsgUI {
   msg: ChatMessage;
   wrap: HTMLElement;
@@ -235,10 +257,14 @@ export class GlossaView extends ItemView {
     // resolves the target mode from the segment that was hit so clicking
     // the already-active side is a no-op rather than a flip.
     this.modeToggle = el('div', { className: 'nc-mode-seg', parent: header });
-    const planSeg = el('button', { className: 'nc-mode-seg-opt', parent: this.modeToggle, text: 'Plan' });
+    this.modeToggle.setAttribute('role', 'group');
+    this.modeToggle.setAttribute('aria-label', 'Run mode');
+    const planSeg = el('button', { className: 'nc-mode-seg-opt', parent: this.modeToggle, text: 'Plan', type: 'button' });
     planSeg.setAttribute('data-opt', 'plan');
-    const actSeg = el('button', { className: 'nc-mode-seg-opt', parent: this.modeToggle, text: 'Act' });
+    planSeg.setAttribute('aria-label', 'Plan mode');
+    const actSeg = el('button', { className: 'nc-mode-seg-opt', parent: this.modeToggle, text: 'Act', type: 'button' });
     actSeg.setAttribute('data-opt', 'act');
+    actSeg.setAttribute('aria-label', 'Act mode');
     this.updateModeToggle();
     const pickMode = async (target: 'plan' | 'act') => {
       if (this.plugin.settings.runMode === target) return;
@@ -254,7 +280,7 @@ export class GlossaView extends ItemView {
 
     el('span', { className: 'nc-header-spacer', parent: header });
 
-    const newBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('new_chat') });
+    const newBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('new_chat'), type: 'button', attrs: { 'aria-label': t('new_chat') } });
     setTrustedSvg(newBtn, ICON.plus);
     newBtn.onclick = () => this.startNewSession();
 
@@ -262,11 +288,11 @@ export class GlossaView extends ItemView {
     // it's a high-frequency action (chat-list lookups happen many times per
     // session). Settings is the low-frequency action — collapsed into ⋯.
     // This keeps the header at 3 right-side icons instead of 4.
-    const histBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('chat_history') });
+    const histBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('chat_history'), type: 'button', attrs: { 'aria-label': t('chat_history') } });
     setTrustedSvg(histBtn, ICON.history);
     histBtn.onclick = () => this.toggleHistoryPopover(histBtn);
 
-    const moreBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('more') });
+    const moreBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('more'), type: 'button', attrs: { 'aria-label': t('more') } });
     setTrustedSvg(moreBtn, ICON.more);
     moreBtn.onclick = (e) => this.openMoreMenu(e);
   }
@@ -289,6 +315,9 @@ export class GlossaView extends ItemView {
     this.modeToggle.classList.toggle('plan', mode === 'plan');
     this.modeToggle.classList.toggle('act', mode === 'act');
     this.modeToggle.title = mode === 'plan' ? t('plan_tooltip') : t('act_tooltip');
+    for (const btn of Array.from(this.modeToggle.querySelectorAll<HTMLButtonElement>('.nc-mode-seg-opt'))) {
+      btn.setAttribute('aria-pressed', String(btn.dataset.opt === mode));
+    }
   }
   /** History popover anchored to the history icon. Click toggles, Esc / outside
    *  click closes. Self-contained floating layer — does NOT mutate the layout
@@ -489,7 +518,11 @@ export class GlossaView extends ItemView {
     }
     const sel = getCurrentSelection(this.app);
     if (sel && sel.text.trim().length >= 2) {
-      if (!this.currentSelection || this.currentSelection.text !== sel.text) {
+      const sameSelection = this.currentSelection
+        && this.currentSelection.text === sel.text
+        && this.currentSelection.source === sel.source
+        && this.currentSelection.file?.path === sel.file?.path;
+      if (!sameSelection) {
         this.currentSelection = sel;
         this.renderSelectionPreview();
         this.updateTokenBadge();
@@ -534,7 +567,7 @@ export class GlossaView extends ItemView {
     }
     el('span', { className: 'nc-selection-preview-chars', text: `${text.length.toLocaleString()} chars${lineCount > 1 ? ` · ${lineCount.toLocaleString()} lines` : ''}`, parent: meta });
     el('div', { className: 'nc-selection-preview-text', text: preview, title: text.length > preview.length ? text.slice(0, 1200) : undefined, parent: body });
-    const close = el('span', { className: 'nc-selection-preview-close', parent: this.selectionPreviewEl, title: 'Detach selection' });
+    const close = el('button', { className: 'nc-selection-preview-close', parent: this.selectionPreviewEl, title: 'Detach selection', type: 'button', attrs: { 'aria-label': 'Detach selection' } });
     setTrustedSvg(close, ICON.x);
     close.onclick = () => { this.currentSelection = null; this.renderSelectionPreview(); };
   }
@@ -633,6 +666,7 @@ export class GlossaView extends ItemView {
         removeThis();
       };
       pill.onclick = () => this.openContextItem(it);
+      makeButtonLike(pill, it.detail ? `Open ${it.detail}` : `Open ${it.label}`);
       pill.oncontextmenu = (e) => {
         e.preventDefault();
         const m = new Menu();
@@ -738,7 +772,13 @@ export class GlossaView extends ItemView {
       const toggleBtn = el('button', { className: 'nc-compact-toggle', parent: acts });
       setTrustedSvg(toggleBtn, ICON.chevronDown);
       toggleBtn.title = 'Toggle summary';
-      toggleBtn.onclick = (e) => { e.stopPropagation(); wrap.classList.toggle('collapsed'); };
+      toggleBtn.setAttribute('aria-label', 'Toggle compact summary');
+      toggleBtn.setAttribute('aria-expanded', String(!wrap.classList.contains('collapsed')));
+      toggleBtn.onclick = (e) => {
+        e.stopPropagation();
+        wrap.classList.toggle('collapsed');
+        toggleBtn.setAttribute('aria-expanded', String(!wrap.classList.contains('collapsed')));
+      };
       // Undo button — only present if a snapshot exists for this summary
       const hasSnapshot = (this.session.compactHistory ?? []).some(s => s.summaryId === m.id);
       if (hasSnapshot) {
@@ -752,6 +792,7 @@ export class GlossaView extends ItemView {
         if ((e.target as HTMLElement).closest('.nc-compact-actions')) return;
         wrap.classList.toggle('collapsed');
       };
+      makeButtonLike(role, 'Toggle compact summary');
     } else if (m.role === 'user') {
       // No role row for user — the darker bubble bg is the visual marker.
       role.classList.add('hidden-role');
@@ -768,12 +809,6 @@ export class GlossaView extends ItemView {
     // then prose, then tool actions. Read top-to-bottom = chronologically correct.
 
     let activityEl: HTMLElement | undefined;
-    if (m.role === 'assistant') {
-      activityEl = el('div', { className: 'nc-turn-activity', parent: wrap });
-      el('span', { className: 'nc-turn-activity-dot', parent: activityEl });
-      el('span', { className: 'nc-turn-activity-text', text: 'Thinking...', parent: activityEl });
-      el('span', { className: 'nc-turn-activity-time', parent: activityEl });
-    }
 
     // Persistent reasoning card (separate from inline <thinking> blocks). Goes ABOVE
     // the body so reasoning visually precedes the prose it produced.
@@ -858,10 +893,21 @@ export class GlossaView extends ItemView {
     let toolStack: HTMLElement | undefined;
     if (m.role === 'assistant') {
       toolStack = el('div', { className: 'nc-tool-events-stack', parent: wrap });
-      if (m.toolEvents && m.toolEvents.length) {
-        for (const ev of m.toolEvents) this.appendToolCard(toolStack, ev);
+      const visibleToolEvents = (m.toolEvents ?? []).filter(shouldRenderToolEvent);
+      if (visibleToolEvents.length) {
+        for (const ev of visibleToolEvents) this.appendToolCard(toolStack, ev);
         this.updateToolStackCollapse(toolStack);
       }
+    }
+
+    // Live activity belongs at the bottom of the current assistant segment.
+    // It is the one persistent "still working" signal while text/reasoning/tools
+    // are inserted above it.
+    if (m.role === 'assistant') {
+      activityEl = el('div', { className: 'nc-turn-activity', parent: wrap });
+      el('span', { className: 'nc-turn-activity-dot', parent: activityEl });
+      el('span', { className: 'nc-turn-activity-text', text: 'Thinking...', parent: activityEl });
+      el('span', { className: 'nc-turn-activity-time', parent: activityEl });
     }
 
     const ui: MsgUI = { msg: m, wrap, body, activityEl, toolStack, reasoningCard, reasoningBody };
@@ -945,6 +991,7 @@ export class GlossaView extends ItemView {
     this.planBoardEl.classList.remove('collapsed');
 
     const header = el('div', { className: 'nc-plan-header', parent: this.planBoardEl });
+    header.setAttribute('aria-expanded', 'true');
     const titleWrap = el('div', { className: 'nc-plan-title-wrap', parent: header });
     const titleIcon = el('span', { className: 'nc-plan-title-icon', parent: titleWrap });
     setTrustedSvg(titleIcon, ICON.check);
@@ -969,7 +1016,9 @@ export class GlossaView extends ItemView {
       const open = !this.planBoardEl.classList.contains('collapsed');
       this.planBoardEl.classList.toggle('collapsed', open);
       toggle.textContent = open ? '▸' : '▾';
+      header.setAttribute('aria-expanded', String(!open));
     };
+    makeButtonLike(header, 'Toggle plan');
   }
 
   /** When loading a session from history, recover the latest plan from messages.
@@ -1014,6 +1063,7 @@ export class GlossaView extends ItemView {
     setVars(box, { ['--tool-color']: meta.color });
 
     const hdr = el('div', { className: 'nc-tool-event-header', parent: box });
+    hdr.setAttribute('aria-expanded', String(!box.classList.contains('collapsed')));
 
     // Icon
     const icon = el('span', { className: 'nc-tool-icon', parent: hdr });
@@ -1024,27 +1074,18 @@ export class GlossaView extends ItemView {
     // Falls back to the default verb+summary split layout when the tool
     // didn't register a renderer.
     const isRunning = ev.status === 'running' || ev.status === 'pending';
-    const custom = toolUseMessage(ev.name, ev.args);
+    const custom = isRunning ? null : toolUseMessage(ev.name, ev.args);
+    const summary = meta.summarize ? meta.summarize(ev.args) : '';
     if (custom instanceof HTMLElement) {
       // Tool returned a DOM node — attach as a single header chunk.
       custom.classList.add('nc-tool-event-name');
       hdr.appendChild(custom);
-    } else if (typeof custom === 'string' && custom.length > 0 && !isRunning) {
-      // Tool returned plain text — render it as the verb/label span.
-      // (For the running state we still want the activity description, which
-      // returns "<verb> <summary>" — used below to keep spinner text consistent.)
-      el('span', { className: 'nc-tool-event-name', text: custom, parent: hdr });
     } else {
-      // Default 2-span layout: verb/label + summary, with activityDescription
-      // applied while running so the user sees e.g. "Reading Foo.md" not "Read note Foo.md".
-      const verbOrLabel = isRunning ? activityDescriptionFor(ev.name, ev.args) : meta.label;
+      // Default 2-span layout: short action name + target summary. Long paths
+      // stay in the secondary span so status rows keep a stable rhythm.
+      const verbOrLabel = isRunning ? meta.verb : meta.label;
       el('span', { className: 'nc-tool-event-name', text: verbOrLabel, parent: hdr });
-      // When NOT running, also show the summary as a separate span so the
-      // user can still see the file path next to the tool label.
-      if (!isRunning) {
-        const summary = meta.summarize ? meta.summarize(ev.args) : '';
-        if (summary) el('span', { className: 'nc-tool-event-args', text: summary, title: summary, parent: hdr });
-      }
+      if (summary) el('span', { className: 'nc-tool-event-args', text: summary, title: summary, parent: hdr });
     }
 
     // Elapsed time
@@ -1104,10 +1145,18 @@ export class GlossaView extends ItemView {
       const t = e.target as HTMLElement;
       if (t.tagName === 'PRE' || t.tagName === 'SUMMARY' || t.tagName === 'DETAILS') return;
       box.classList.toggle('collapsed');
+      hdr.setAttribute('aria-expanded', String(!box.classList.contains('collapsed')));
     };
+    makeButtonLike(hdr, `Toggle ${meta.label} details`);
   }
 
   private upsertToolEvent(ui: MsgUI, ev: ToolEvent) {
+    if (!shouldRenderToolEvent(ev)) {
+      ui.toolStack?.querySelector(`[data-tool-id="${ev.id}"]`)?.remove();
+      if (ui.toolStack) this.updateToolStackCollapse(ui.toolStack);
+      this.scrollToBottom();
+      return;
+    }
     if (!ui.toolStack) ui.toolStack = el('div', { className: 'nc-tool-events-stack', parent: ui.wrap });
     let card = ui.toolStack.querySelector(`[data-tool-id="${ev.id}"]`) as HTMLElement | null;
     if (!card) {
@@ -1149,6 +1198,7 @@ export class GlossaView extends ItemView {
       if (cards.length >= AUTO_COLLAPSE && allDone) {
         // Currently expanded — offer a collapse pill back to the summary.
         const collapse = el('button', { className: 'nc-tool-stack-more nc-tool-stack-collapse', parent: stack });
+        collapse.type = 'button';
         el('span', { className: 'nc-tool-stack-more-label', text: `Collapse · ${cards.length} tools`, parent: collapse });
         collapse.onclick = () => { stack.classList.remove('expanded'); this.updateToolStackCollapse(stack); };
       }
@@ -1166,12 +1216,14 @@ export class GlossaView extends ItemView {
     }
     const dur = totalMs < 1000 ? `${totalMs}ms` : `${(totalMs / 1000).toFixed(1)}s`;
     const summary = el('button', { className: 'nc-tool-stack-summary', parent: stack });
+    summary.type = 'button';
+    summary.setAttribute('aria-expanded', 'false');
     el('span', { className: 'nc-tool-stack-summary-icon', text: '⚙', parent: summary });
     summary.appendText(` Ran ${cards.length} tools · ${dur} · `);
     el('span', { className: 'nc-tool-stack-summary-ok', text: 'all ✓', parent: summary });
     summary.appendText(' ');
     el('span', { className: 'nc-tool-stack-summary-chev', text: '▸', parent: summary });
-    summary.onclick = () => { stack.classList.add('expanded'); this.updateToolStackCollapse(stack); };
+    summary.onclick = () => { summary.setAttribute('aria-expanded', 'true'); stack.classList.add('expanded'); this.updateToolStackCollapse(stack); };
     if (hasFailure) (summary.querySelector('.nc-tool-stack-summary-ok') as HTMLElement).textContent = 'Some failed';
   }
 
@@ -1182,7 +1234,7 @@ export class GlossaView extends ItemView {
       .map(m => this.msgUIs.get(m.id))
       .filter((ui): ui is MsgUI => !!ui);
     const processUis = uis.filter(ui => {
-      const hasProcessTools = (ui.msg.toolEvents ?? []).some(ev => ev.name !== 'attempt_completion');
+      const hasProcessTools = (ui.msg.toolEvents ?? []).some(shouldRenderToolEvent);
       const hasReasoning = !!ui.msg.reasoningContent?.trim();
       const hasBodyText = !!ui.msg.content?.trim();
       return hasProcessTools || (hasReasoning && !hasBodyText);
@@ -1200,17 +1252,19 @@ export class GlossaView extends ItemView {
     }
 
     const reasoningCount = processUis.filter(ui => ui.msg.reasoningContent?.trim()).length;
-    const toolCount = processUis.reduce((n, ui) => n + (ui.msg.toolEvents?.length ?? 0), 0);
+    const toolCount = processUis.reduce((n, ui) => n + (ui.msg.toolEvents ?? []).filter(shouldRenderToolEvent).length, 0);
     const summary = el('button', { className: 'nc-process-summary' });
+    summary.type = 'button';
     const roleRow = first.wrap.querySelector(':scope > .nc-msg-role');
     first.wrap.insertBefore(summary, roleRow?.nextSibling ?? first.wrap.firstChild);
-    const label = `Process · ${reasoningCount} reasoning · ${toolCount} tools`;
+    const label = `Run · ${reasoningCount} reasoning · ${toolCount} action${toolCount === 1 ? '' : 's'}`;
     el('span', { className: 'nc-process-dot', parent: summary });
     el('span', { text: label, parent: summary });
     el('span', { className: 'nc-process-chev', text: '▸', parent: summary });
 
     const setExpanded = (expanded: boolean) => {
       summary.classList.toggle('expanded', expanded);
+      summary.setAttribute('aria-expanded', String(expanded));
       const chev = summary.querySelector('.nc-process-chev') as HTMLElement | null;
       if (chev) chev.textContent = expanded ? '▾' : '▸';
       for (let i = 0; i < processUis.length; i++) {
@@ -1754,19 +1808,19 @@ export class GlossaView extends ItemView {
       if (fileInput.files) for (const f of Array.from(fileInput.files)) this.ctx.add(await resolveDroppedFile(f));
       fileInput.value = '';
     };
-    const attachBtn = el('button', { className: 'nc-composer-icon-btn', parent: footer, title: t('attach_file') });
+    const attachBtn = el('button', { className: 'nc-composer-icon-btn', parent: footer, title: t('attach_file'), type: 'button', attrs: { 'aria-label': t('attach_file') } });
     setTrustedSvg(attachBtn, ICON.plusThin);
     attachBtn.onclick = () => fileInput.click();
 
     // (2) Permission pill — quick toggle of read-only / workspace-write / full
-    this.permPillEl = el('button', { className: 'nc-composer-pill nc-perm-pill', parent: footer });
+    this.permPillEl = el('button', { className: 'nc-composer-pill nc-perm-pill', parent: footer, type: 'button' });
     this.updatePermPill();
     this.permPillEl.onclick = (e) => this.openPermissionMenu(e);
 
     // (3) Model chip — moved below the textarea per user feedback. Sits right
     //     after the permission pill so the "current behaviour" cluster
     //     (permissions + model) reads as a single group on the left.
-    this.modelBtn = el('button', { className: 'nc-model-chip', parent: footer, title: 'Pick endpoint / model' });
+    this.modelBtn = el('button', { className: 'nc-model-chip', parent: footer, title: 'Pick endpoint / model', type: 'button' });
     this.updateModelBtn();
     this.modelBtn.onclick = (e) => this.openEndpointMenu(e);
 
@@ -1774,12 +1828,12 @@ export class GlossaView extends ItemView {
     el('span', { className: 'nc-input-footer-spacer', parent: footer });
 
     // (3) Reasoning effort pill — brain + level
-    this.reasoningPillEl = el('button', { className: 'nc-composer-pill nc-reasoning-pill', parent: footer });
+    this.reasoningPillEl = el('button', { className: 'nc-composer-pill nc-reasoning-pill', parent: footer, type: 'button', attrs: { 'aria-label': 'Reasoning effort' } });
     this.updateReasoningPill();
     this.reasoningPillEl.onclick = (e) => this.openReasoningMenu(e);
 
     // (4) Send / stop
-    this.submitBtn = el('button', { className: 'nc-submit-btn nc-submit-icon-only', parent: footer }) as HTMLButtonElement;
+    this.submitBtn = el('button', { className: 'nc-submit-btn nc-submit-icon-only', parent: footer, type: 'button' }) as HTMLButtonElement;
     this.updateSubmitBtn();
     this.submitBtn.onclick = () => this.streaming ? this.cancelStream() : this.submit();
 
@@ -1829,6 +1883,7 @@ export class GlossaView extends ItemView {
     el('span', { className: 'nc-pill-text', text: this.permLabel(), parent: this.permPillEl });
     el('span', { className: 'nc-pill-caret', text: '▾', parent: this.permPillEl });
     this.permPillEl.title = bi('Click to switch permission level', '点击切换权限级别');
+    this.permPillEl.setAttribute('aria-label', this.permPillEl.title + `: ${this.permLabel()}`);
     this.permPillEl.classList.toggle('perm-read',  lvl === 'read-only');
     this.permPillEl.classList.toggle('perm-write', lvl === 'workspace-write');
     this.permPillEl.classList.toggle('perm-full',  lvl === 'full');
@@ -1884,6 +1939,8 @@ export class GlossaView extends ItemView {
     el('span', { className: 'nc-pill-sub', text: map[effort] ?? 'M', parent: this.reasoningPillEl });
     el('span', { className: 'nc-pill-caret', text: '▾', parent: this.reasoningPillEl });
     this.reasoningPillEl.title = bi(`Reasoning effort: ${effort}`, `思考强度：${effort}`);
+    this.reasoningPillEl.setAttribute('aria-label', this.reasoningPillEl.title);
+    this.reasoningPillEl.setAttribute('aria-disabled', String(!ep));
     this.reasoningPillEl.classList.toggle('disabled', !ep);
   }
   private async openReasoningMenu(_e: MouseEvent) {
@@ -2051,14 +2108,23 @@ export class GlossaView extends ItemView {
           label: bi('↻ Detect models', '↻ 检测可用模型'),
           section: active.label,
           onSelect: async () => {
-            quickNotice(bi('Detecting models…', '检测中…'));
-            const list = await new CustomApiProvider(active).listModels();
-            if (list.length) {
-              active.availableModels = list;
-              await this.plugin.saveSettings();
-              quickNotice(bi(`Found ${list.length} models.`, `共发现 ${list.length} 个模型。`));
-            } else {
-              quickNotice(bi('No models returned by this endpoint.', '该 endpoint 未返回模型列表。'));
+            try {
+              quickNotice(bi('Detecting models…', '检测中…'));
+              const epDec = await this.plugin.getDecryptedEndpoint(active);
+              if (!epDec) {
+                quickNotice(bi('Unlock or re-enter this endpoint API key first.', '请先解锁或重新输入该 endpoint 的 API key。'));
+                return;
+              }
+              const list = normalizeModelList(await new CustomApiProvider(epDec).listModels());
+              if (list.length) {
+                active.availableModels = list;
+                await this.plugin.saveSettings();
+                quickNotice(bi(`Found ${list.length} models.`, `共发现 ${list.length} 个模型。`));
+              } else {
+                quickNotice(bi('No models returned by this endpoint.', '该 endpoint 未返回模型列表。'));
+              }
+            } catch (err: any) {
+              quickNotice(bi(`Detect failed: ${err?.message ?? err}`, `检测失败：${err?.message ?? err}`), 6000);
             }
           },
         });
@@ -2084,7 +2150,7 @@ export class GlossaView extends ItemView {
       section: bi('More', '更多'),
       onSelect: () => {
         (this.app as any).setting.open();
-        (this.app as any).setting.openTabById('glossa');
+        (this.app as any).setting.openTabById(this.plugin.manifest.id);
       },
     });
 
@@ -2978,12 +3044,7 @@ export class GlossaView extends ItemView {
     const hardCap = Math.floor(maxCtx * 0.92);
 
     // Session/history contribution
-    let sessionCtxTokens = 0;
-    try {
-      // lightweight estimate of in-session messages
-      const { estimateSessionTokens } = require('../agent/compact');
-      sessionCtxTokens = estimateSessionTokens(this.session);
-    } catch { sessionCtxTokens = 0; }
+    const sessionCtxTokens = estimateSessionTokens(this.session);
     const totalPromptTokens = ctxTokens + sessionCtxTokens;
     const showBudget = totalPromptTokens > 0 && maxCtx > 0;
 
@@ -3102,7 +3163,16 @@ export class GlossaView extends ItemView {
    *  thrashes SSDs and makes iCloud/Dropbox loud. flushPersistNow() forces an
    *  immediate write at terminal points (stream end, view close, snapshot). */
   private _persistTimer: any = null;
+  private sessionHasMeaningfulContent(session: ChatSession): boolean {
+    return (session.messages ?? []).some(m =>
+      (m.content ?? '').trim().length > 0 ||
+      (m.displayContent ?? '').trim().length > 0 ||
+      (m.reasoningContent ?? '').trim().length > 0 ||
+      ((m.toolEvents ?? []).length > 0));
+  }
+
   private persistSession() {
+    if (!this.sessionHasMeaningfulContent(this.session)) return;
     if (this._persistTimer) return;
     const session = this.session;
     this._persistTimer = window.setTimeout(() => {
@@ -3114,6 +3184,7 @@ export class GlossaView extends ItemView {
    *  end, before navigation, or before destructive operations like compact. */
   private async flushPersistNow() {
     if (this._persistTimer) { window.clearTimeout(this._persistTimer); this._persistTimer = null; }
+    if (!this.sessionHasMeaningfulContent(this.session)) return;
     await this.plugin.store.saveSession(this.session);
   }
 

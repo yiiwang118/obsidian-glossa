@@ -125,9 +125,8 @@ If the user's request can be answered DIRECTLY from the attached context (the <c
 
 - After 1–3 reads or searches, ACT. Do not keep exploring once you've found the target.
 - Never repeat the same search with slight variations — that's wasted budget.
-- The MOMENT all required edits are applied, call \`attempt_completion(result)\` with a 1-sentence summary. Do NOT wait for "perfect".
-- For fast-path tasks (see above) do NOT call \`attempt_completion\` — just answer directly. \`attempt_completion\` is for tool-running turns only.
-- NEVER batch \`attempt_completion\` with a write tool — call it alone in its turn.
+- The MOMENT all required edits are applied, stop calling tools and answer the user directly with the outcome.
+- Do not announce that you are ending, wrapping up, or completing the task. Just give the useful final result/path/status.
 - Same tool with identical args 3× → STOP and tell the user you're blocked.
 
 # Plan tool
@@ -253,13 +252,14 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     if (step > 0 && !skipNextBoundary) await opts.onStepBoundary();
     skipNextBoundary = false;
 
-    // Convergence nudge — inject a system-reminder once we cross step 8 without
-    // attempt_completion. Mirrors upstream Claude Code's mid-turn nudges.
+    // Convergence nudge — inject once when the model is meandering. We do not
+    // expose a completion tool; the natural stop condition is a final answer
+    // with no further tool calls.
     if (step === 8 && !nudgeInjected) {
       nudgeInjected = true;
       messages.push({
         role: 'user',
-        content: '<system-reminder>You have made 8 tool calls in this turn without calling attempt_completion. STOP exploring. Decide: either call attempt_completion now with what you have, OR commit to one concrete edit on the next turn. No more searches.</system-reminder>',
+        content: '<system-reminder>You have spent 8 assistant turns on this request. STOP exploring. If the task is complete or sufficient, provide the final answer now. Otherwise commit to one concrete next action. No more broad searches.</system-reminder>',
       });
     }
 
@@ -460,7 +460,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         prepared.push({ call, ev, tool, mcpEntry, effectiveArgs: call.args, rewriteToWriteNote: false,
           resolved: { status: 'error', result:
             `Refused: this exact ${call.name} call has been issued ${prevCount + 1} times already in this turn. ` +
-            `You are looping. Either call a DIFFERENT tool or call attempt_completion with whatever you have so far.` } });
+            `You are looping. Either call a DIFFERENT tool or provide the final answer with what you have so far.` } });
         continue;
       }
       // Batching guard — 3+ file_edit calls to the SAME file in one turn

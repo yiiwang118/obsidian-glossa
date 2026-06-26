@@ -27,6 +27,8 @@ export class Popup {
   constructor() {
     Popup.instances.add(this);
     this.el = el('div', { className: 'nc-popup' });
+    this.el.setAttribute('role', 'listbox');
+    this.el.setAttribute('aria-label', 'Glossa menu');
     setStyle(this.el, { display: 'none' });
     activeDocument.body.appendChild(this.el);
     this.el.addEventListener('mousedown', (e) => e.stopPropagation());
@@ -53,6 +55,7 @@ export class Popup {
     this.hidePeers();
     this.items = items;
     this.anchor = anchor;
+    this.anchor.setAttribute('aria-expanded', 'true');
     this.selectedIdx = -1;
     this.render();
     this.open = true;
@@ -88,6 +91,7 @@ export class Popup {
 
   hide() {
     this.open = false;
+    this.anchor?.setAttribute('aria-expanded', 'false');
     setStyle(this.el, { display: 'none' });
     this.items = [];
     this.itemEls = [];
@@ -125,7 +129,11 @@ export class Popup {
     }
     if (e.key === 'Enter' || e.key === 'Tab') {
       const it = this.items[this.selectedIdx >= 0 ? this.selectedIdx : 0];
-      if (it) { it.onSelect(); this.hide(); }
+      if (it) {
+        const res = it.onSelect();
+        this.hide();
+        if (res && typeof (res as any).then === 'function') (res as any).catch(() => {});
+      }
       return true;
     }
     if (e.key === 'Escape') { this.hide(); return true; }
@@ -185,7 +193,7 @@ export class Popup {
     let lastSection: string | undefined;
     this.items.forEach((it, i) => {
       if (it.section && it.section !== lastSection) {
-        el('div', { className: 'nc-popup-section', text: it.section, parent: this.el });
+        el('div', { className: 'nc-popup-section', text: it.section, parent: this.el, attrs: { role: 'presentation' } });
         lastSection = it.section;
       }
       const row = el('div', {
@@ -195,6 +203,10 @@ export class Popup {
           + (it.danger ? ' danger' : ''),
         parent: this.el,
       });
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', String(i === this.selectedIdx));
+      row.setAttribute('aria-label', it.hint ? `${it.label}, ${it.hint}` : it.label);
+      row.tabIndex = -1;
       row.addEventListener('mousemove', () => {
         if (this.selectedIdx === i) return;
         if (this.selectedIdx >= 0) this.itemEls[this.selectedIdx]?.classList.remove('selected');

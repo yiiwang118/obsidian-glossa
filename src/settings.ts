@@ -35,6 +35,18 @@ function makeKeyboardClickable(el: HTMLElement, label?: string) {
   });
 }
 
+function parseClampedInt(value: string, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function parseNonNegativeFloat(value: string, fallback = 0): number {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, parsed);
+}
+
 /* ============================================================
    Provider presets
    ============================================================ */
@@ -328,7 +340,10 @@ export class GlossaSettingTab extends PluginSettingTab {
         .onChange(async v => { this.plugin.settings.autoAttachSelection = v; await this.plugin.saveSettings(); }));
     new Setting(containerEl).setName(bi('Warn token threshold', 'Token 警告阈值'))
       .addText(t => t.setValue(String(this.plugin.settings.warnTokenThreshold))
-        .onChange(async v => { this.plugin.settings.warnTokenThreshold = parseInt(v) || 50000; await this.plugin.saveSettings(); }));
+        .onChange(async v => {
+          this.plugin.settings.warnTokenThreshold = parseClampedInt(v, 500_000, 10_000, 5_000_000);
+          await this.plugin.saveSettings();
+        }));
     new Setting(containerEl).setName(bi('Cost bar', '费用条')).addToggle(t => t
       .setValue(this.plugin.settings.showCostBar)
       .onChange(async v => { this.plugin.settings.showCostBar = v; await this.plugin.saveSettings(); }));
@@ -348,7 +363,10 @@ export class GlossaSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName(bi('Max steps', '最大步数'))
       .setDesc('')
       .addText(t => t.setValue(String(this.plugin.settings.agentMaxSteps))
-        .onChange(async v => { this.plugin.settings.agentMaxSteps = parseInt(v) || 20; await this.plugin.saveSettings(); }));
+        .onChange(async v => {
+          this.plugin.settings.agentMaxSteps = parseClampedInt(v, 20, 1, 100);
+          await this.plugin.saveSettings();
+        }));
     new Setting(containerEl).setName(bi('Project context', '项目上下文'))
       .setDesc(bi('Auto-load AGENTS.md / CLAUDE.md / .codex.md.', '自动加载 AGENTS.md / CLAUDE.md / .codex.md。'))
       .addToggle(t => t.setValue(this.plugin.settings.loadProjectContext)
@@ -490,17 +508,22 @@ export class GlossaSettingTab extends PluginSettingTab {
       new Setting(containerEl).setName(bi('Encrypt plaintext keys', '加密明文密钥'))
         .setDesc(bi('Wrap any remaining plaintext API keys.', '加密剩余明文 API key。'))
         .addButton(b => b.setButtonText(bi('Run', '运行')).setCta().onClick(async () => {
-          if (!await this.plugin.requireUnlock()) return;
-          let wrapped = 0;
-          for (const ep of this.plugin.settings.endpoints) {
-            if (ep.apiKey && !ep.apiKey.startsWith('NCENC1:')) {
-              const ok = await this.plugin.storeApiKey(ep, ep.apiKey);
-              if (ok) wrapped++;
+          b.setDisabled(true).setButtonText(bi('Running…', '运行中…'));
+          try {
+            if (!await this.plugin.requireUnlock()) return;
+            let wrapped = 0;
+            for (const ep of this.plugin.settings.endpoints) {
+              if (ep.apiKey && !ep.apiKey.startsWith('NCENC1:')) {
+                const ok = await this.plugin.storeApiKey(ep, ep.apiKey);
+                if (ok) wrapped++;
+              }
             }
+            await this.plugin.saveSettings();
+            new Notice(bi(`Encrypted ${wrapped} key(s).`, `已加密 ${wrapped} 个密钥。`));
+            this.display();
+          } finally {
+            b.setDisabled(false).setButtonText(bi('Run', '运行'));
           }
-          await this.plugin.saveSettings();
-          new Notice(bi(`Encrypted ${wrapped} key(s).`, `已加密 ${wrapped} 个密钥。`));
-          this.display();
         }));
     }
     const maintenance = this.createSettingsGroup(
@@ -511,6 +534,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     new Setting(maintenance).setName(bi('Purge checkpoints', '清空检查点'))
       .setDesc('')
       .addButton(b => b.setButtonText(bi('Purge', '清空')).setWarning().onClick(async () => {
+        b.setDisabled(true);
         const { confirmModal } = await import('./ui/confirm_modal');
         const ok = await confirmModal(this.app, {
           title: bi('Purge checkpoints', '清空检查点'),
@@ -518,13 +542,18 @@ export class GlossaSettingTab extends PluginSettingTab {
           confirmText: bi('Delete', '删除'),
           danger: true,
         });
-        if (!ok) return;
-        await this.plugin.checkpoint.purgeAll();
-        new Notice(bi('Checkpoints purged.', '已清空检查点。'));
+        try {
+          if (!ok) return;
+          await this.plugin.checkpoint.purgeAll();
+          new Notice(bi('Checkpoints purged.', '已清空检查点。'));
+        } finally {
+          b.setDisabled(false);
+        }
       }));
     new Setting(maintenance).setName(bi('Purge embedding index', '清空嵌入索引'))
       .setDesc('')
       .addButton(b => b.setButtonText(bi('Purge', '清空')).setWarning().onClick(async () => {
+        b.setDisabled(true);
         const { confirmModal } = await import('./ui/confirm_modal');
         const ok = await confirmModal(this.app, {
           title: bi('Purge embedding index', '清空嵌入索引'),
@@ -532,15 +561,24 @@ export class GlossaSettingTab extends PluginSettingTab {
           confirmText: bi('Delete', '删除'),
           danger: true,
         });
-        if (!ok) return;
-        try { await this.plugin.app.vault.adapter.remove(`${this.plugin.manifest.dir}/embeddings.json`); } catch { /* ignore */ }
-        new Notice(bi('Embedding index removed.', '已删除嵌入索引。'));
+        try {
+          if (!ok) return;
+          try { await this.plugin.app.vault.adapter.remove(`${this.plugin.manifest.dir}/embeddings.json`); } catch { /* ignore */ }
+          new Notice(bi('Embedding index removed.', '已删除嵌入索引。'));
+        } finally {
+          b.setDisabled(false);
+        }
       }));
     new Setting(maintenance).setName(bi('Purge legacy chat content', '清理旧对话内容'))
       .setDesc('')
       .addButton(b => b.setButtonText(bi('Run', '运行')).onClick(async () => {
-        const n = await this.plugin.store.purgeLegacyContext();
-        new Notice(bi(`Stripped ${n} legacy fields.`, `已清理 ${n} 个旧字段。`));
+        b.setDisabled(true).setButtonText(bi('Running…', '运行中…'));
+        try {
+          const n = await this.plugin.store.purgeLegacyContext();
+          new Notice(bi(`Stripped ${n} legacy fields.`, `已清理 ${n} 个旧字段。`));
+        } finally {
+          b.setDisabled(false).setButtonText(bi('Run', '运行'));
+        }
       }));
 
     /* ----- Embedding RAG ----- */
@@ -562,11 +600,28 @@ export class GlossaSettingTab extends PluginSettingTab {
       .addText(t => t.setValue(this.plugin.settings.embeddingModel).onChange(async v => { this.plugin.settings.embeddingModel = v; await this.plugin.saveSettings(); }));
     new Setting(containerEl).setName(bi('Chunk size / overlap', '分块大小 / 重叠'))
       .setDesc('')
-      .addText(t => t.setValue(String(this.plugin.settings.embeddingChunkSize)).onChange(async v => { this.plugin.settings.embeddingChunkSize = parseInt(v) || 1500; await this.plugin.saveSettings(); }))
-      .addText(t => t.setValue(String(this.plugin.settings.embeddingChunkOverlap)).onChange(async v => { this.plugin.settings.embeddingChunkOverlap = parseInt(v) || 200; await this.plugin.saveSettings(); }));
+      .addText(t => t.setValue(String(this.plugin.settings.embeddingChunkSize)).onChange(async v => {
+        const size = parseClampedInt(v, 1500, 300, 12_000);
+        this.plugin.settings.embeddingChunkSize = size;
+        this.plugin.settings.embeddingChunkOverlap = Math.min(this.plugin.settings.embeddingChunkOverlap, Math.max(0, size - 1));
+        await this.plugin.saveSettings();
+      }))
+      .addText(t => t.setValue(String(this.plugin.settings.embeddingChunkOverlap)).onChange(async v => {
+        const maxOverlap = Math.max(0, this.plugin.settings.embeddingChunkSize - 1);
+        this.plugin.settings.embeddingChunkOverlap = parseClampedInt(v, 200, 0, maxOverlap);
+        await this.plugin.saveSettings();
+      }));
     new Setting(containerEl).setName(bi('Rebuild index', '重建索引'))
       .setDesc(`${this.plugin.embeddingIndex.size()} chunks · ${this.plugin.embeddingIndex.modelInfo().model || '(none)'}`)
-      .addButton(b => b.setButtonText(bi('Build', '构建')).setCta().onClick(async () => { await this.plugin.rebuildEmbeddings(); this.display(); }));
+      .addButton(b => b.setButtonText(bi('Build', '构建')).setCta().onClick(async () => {
+        b.setDisabled(true).setButtonText(bi('Building…', '构建中…'));
+        try {
+          await this.plugin.rebuildEmbeddings();
+          this.display();
+        } finally {
+          b.setDisabled(false).setButtonText(bi('Build', '构建'));
+        }
+      }));
 
     /* ----- Checkpoint ----- */
     this.renderHeading(containerEl, bi('Checkpoints', '检查点'), 'security');
@@ -594,9 +649,14 @@ export class GlossaSettingTab extends PluginSettingTab {
       new McpMarketplaceModal(this.plugin, () => this.display()).open();
     }))
     .addButton(b => b.setButtonText(bi('Reconnect all', '全部重连')).onClick(async () => {
-      await this.plugin.mcp.start(this.plugin.settings.mcpServers);
-      new Notice(bi(`${this.plugin.mcp.clients.length} server(s), ${this.plugin.mcp.allTools().length} tools.`,
-                    `${this.plugin.mcp.clients.length} 个服务，${this.plugin.mcp.allTools().length} 个工具。`));
+      b.setDisabled(true).setButtonText(bi('Reconnecting…', '重连中…'));
+      try {
+        await this.plugin.mcp.start(this.plugin.settings.mcpServers);
+        new Notice(bi(`${this.plugin.mcp.clients.length} server(s), ${this.plugin.mcp.allTools().length} tools.`,
+                      `${this.plugin.mcp.clients.length} 个服务，${this.plugin.mcp.allTools().length} 个工具。`));
+      } finally {
+        b.setDisabled(false).setButtonText(bi('Reconnect all', '全部重连'));
+      }
     }));
     for (const s of this.plugin.settings.mcpServers) {
       const client = this.plugin.mcp.clients.find(c => c.cfg.id === s.id);
@@ -634,9 +694,14 @@ export class GlossaSettingTab extends PluginSettingTab {
         new Setting(card).setName(bi('Restart', '重启'))
           .setDesc(client.status === 'failed' && client.lastError ? `Error: ${client.lastError.slice(0, 100)}` : '')
           .addButton(b => b.setButtonText(bi('↻ Restart', '↻ 重启')).onClick(async () => {
-            await this.plugin.mcp.restart(s.id);
-            new Notice(bi(`Restarted ${s.name}: ${client.status}`, `已重启 ${s.name}：${client.status}`));
-            this.display();
+            b.setDisabled(true).setButtonText(bi('Restarting…', '重启中…'));
+            try {
+              await this.plugin.mcp.restart(s.id);
+              new Notice(bi(`Restarted ${s.name}: ${client.status}`, `已重启 ${s.name}：${client.status}`));
+              this.display();
+            } finally {
+              b.setDisabled(false).setButtonText(bi('↻ Restart', '↻ 重启'));
+            }
           }));
         if (client.recentStderr()) {
           const pre = card.createEl('details');
@@ -999,7 +1064,10 @@ export class GlossaSettingTab extends PluginSettingTab {
           .addToggle(tg => tg.setValue(ep.bareMode ?? !ep.cliFullAgent).onChange(async v => { ep.bareMode = v; await this.plugin.saveSettings(); }));
         new Setting(advanced).setName(t('claude_max_turns'))
           .setDesc(t('claude_max_turns_desc'))
-          .addText(tx => tx.setValue(String(ep.maxTurns ?? 1)).onChange(async v => { ep.maxTurns = parseInt(v) || 1; await this.plugin.saveSettings(); }));
+          .addText(tx => tx.setValue(String(ep.maxTurns ?? 1)).onChange(async v => {
+            ep.maxTurns = parseClampedInt(v, 1, 1, 25);
+            await this.plugin.saveSettings();
+          }));
         new Setting(advanced).setName(bi('Allowed tools', '允许工具'))
           .setDesc(bi('--allowedTools, space-separated.', '--allowedTools，空格分隔。'))
           .addText(t => t.setValue(ep.claudeAllowedTools ?? '').onChange(async v => { ep.claudeAllowedTools = v; await this.plugin.saveSettings(); }));
@@ -1014,7 +1082,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           .addText(t => t.setValue(ep.claudeMcpConfig ?? '').onChange(async v => { ep.claudeMcpConfig = v; await this.plugin.saveSettings(); }));
         new Setting(advanced).setName(bi('Budget (USD)', '预算 (USD)'))
           .setDesc(bi('--max-budget-usd. 0 = no cap.', '--max-budget-usd。0 = 不限。'))
-          .addText(t => t.setValue(String(ep.claudeMaxBudgetUSD ?? '')).onChange(async v => { ep.claudeMaxBudgetUSD = parseFloat(v) || 0; await this.plugin.saveSettings(); }));
+          .addText(t => t.setValue(String(ep.claudeMaxBudgetUSD ?? '')).onChange(async v => { ep.claudeMaxBudgetUSD = parseNonNegativeFloat(v); await this.plugin.saveSettings(); }));
         new Setting(advanced).setName(bi('Fallback model', '备用模型'))
           .setDesc('--fallback-model')
           .addText(t => t.setValue(ep.claudeFallbackModel ?? '').onChange(async v => { ep.claudeFallbackModel = v; await this.plugin.saveSettings(); }));
@@ -1171,6 +1239,8 @@ class AddEndpointModal extends Modal {
 
     /* Kind tabs */
     const kinds = contentEl.createEl('div', { cls: 'nc-kind-tabs' });
+    kinds.setAttribute('role', 'tablist');
+    kinds.setAttribute('aria-label', 'Endpoint type');
     const kindCards: HTMLElement[] = [];
     for (const kc of KIND_CARDS) {
       const card = kinds.createEl('div', { cls: 'nc-kind-card' });
@@ -1182,12 +1252,16 @@ class AddEndpointModal extends Modal {
         this.selectedKind = kc.kind;
         kindCards.forEach(c => c.removeClass('selected'));
         card.addClass('selected');
+        kindCards.forEach(c => c.setAttribute('aria-selected', String(c === card)));
         this.renderForm();
       };
       makeKeyboardClickable(card, kc.title);
+      card.setAttribute('role', 'tab');
+      card.setAttribute('aria-selected', 'false');
       kindCards.push(card);
     }
     kindCards[0].addClass('selected');
+    kindCards[0].setAttribute('aria-selected', 'true');
 
     /* Presets (visible for custom-api) */
     const presetsSec = contentEl.createEl('div', { cls: 'nc-presets-section' });
@@ -1206,6 +1280,7 @@ class AddEndpointModal extends Modal {
         this.draft.apiStyle = p.apiStyle;
         this.selectedKind = 'custom-api';
         kindCards.forEach((c, i) => c.toggleClass('selected', KIND_CARDS[i].kind === 'custom-api'));
+        kindCards.forEach((c, i) => c.setAttribute('aria-selected', String(KIND_CARDS[i].kind === 'custom-api')));
         this.renderForm();
       };
       makeKeyboardClickable(chip, p.name);
@@ -1230,6 +1305,7 @@ class AddEndpointModal extends Modal {
 
     row('Label', (p) => {
       const inp = p.createEl('input', { type: 'text', value: this.draft.label ?? '' });
+      inp.autocomplete = 'off';
       inp.oninput = () => { this.draft.label = inp.value; };
     });
 
@@ -1244,19 +1320,27 @@ class AddEndpointModal extends Modal {
       row('Base URL', (p) => {
         const inp = p.createEl('input', { type: 'text', value: this.draft.baseUrl ?? '' });
         inp.placeholder = HTTPS_API_PLACEHOLDER;
+        inp.autocomplete = 'off';
+        inp.spellcheck = false;
         inp.oninput = () => { this.draft.baseUrl = inp.value; };
       });
       row('API Key', (p) => {
         const inp = p.createEl('input', { type: 'password', value: this.plainKey });
         inp.placeholder = API_KEY_PLACEHOLDER;
+        inp.autocomplete = 'off';
+        inp.spellcheck = false;
         inp.oninput = () => { this.plainKey = inp.value; };
       });
       row('Model', (p) => {
         const wrap = p.createEl('div', { cls: 'nc-row-with-btn' });
         this.modelInput = wrap.createEl('input', { type: 'text', value: this.draft.model ?? '' });
         this.modelInput.placeholder = ['e.g. ', 'deepseek-chat'].join('');
+        this.modelInput.autocomplete = 'off';
+        this.modelInput.spellcheck = false;
         this.modelInput.oninput = () => { this.draft.model = this.modelInput.value; };
         const btn = wrap.createEl('button', { text: DETECT_BUTTON_LABEL });
+        btn.type = 'button';
+        btn.setAttribute('aria-label', 'Detect models');
         btn.onclick = () => this.detectModels(btn);
       });
       this.detectStatusEl = formEl.createEl('div', { cls: 'nc-detect-status' });
@@ -1270,8 +1354,11 @@ class AddEndpointModal extends Modal {
         const wrap = p.createEl('div', { cls: 'nc-row-with-btn' });
         const inp = wrap.createEl('input', { type: 'text', value: (this.draft as any).binaryPath ?? '' });
         inp.placeholder = `/path/to/${binName}`;
+        inp.autocomplete = 'off';
+        inp.spellcheck = false;
         inp.oninput = () => { (this.draft as any).binaryPath = inp.value; };
         const btn = wrap.createEl('button', { text: 'Auto' });
+        btn.type = 'button';
         btn.onclick = () => {
           const r = resolveBinary(binName);
           if (r) { inp.value = r; (this.draft as any).binaryPath = r; new Notice(`Found ${r}`); }
@@ -1283,14 +1370,18 @@ class AddEndpointModal extends Modal {
         inp.placeholder = this.selectedKind === 'codex-cli'
           ? 'leave empty → uses ~/.codex/config.toml'
           : 'leave empty → uses claude default (sonnet)';
+        inp.autocomplete = 'off';
+        inp.spellcheck = false;
         inp.oninput = () => { this.draft.model = inp.value; };
       });
     }
 
     const actions = formEl.createEl('div', { cls: 'nc-add-form-actions' });
     const cancel = actions.createEl('button', { text: 'Cancel' });
+    cancel.type = 'button';
     cancel.onclick = () => this.close();
     const save = actions.createEl('button', { text: 'Save', cls: 'mod-cta' });
+    save.type = 'button';
     save.onclick = () => this.save();
   }
 
@@ -1307,6 +1398,7 @@ class AddEndpointModal extends Modal {
     }
     this.detectStatusEl.setText('Detecting…');
     btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
     btn.textContent = 'Detecting…';
     // Use plaintext key directly for detection — never persisted from this temp ep.
     const ep: Endpoint = {
@@ -1337,6 +1429,7 @@ class AddEndpointModal extends Modal {
       this.detectStatusEl.setText(`Failed: ${e.message}`);
     } finally {
       btn.disabled = false;
+      btn.removeAttribute('aria-busy');
     }
   }
 

@@ -11,7 +11,7 @@ import { CheckpointManager } from './agent/checkpoint';
 import { McpHub } from './agent/mcp';
 import { setLanguage, bi } from './utils/i18n';
 import { loadShellEnv } from './utils/env';
-import { GLOSSA_MARK_SVG, GLOSSA_RIBBON_SVG } from './ui/icons';
+import { GLOSSA_RIBBON_SVG } from './ui/icons';
 
 export default class GlossaPlugin extends Plugin {
   settings: GlossaSettings;
@@ -105,13 +105,14 @@ export default class GlossaPlugin extends Plugin {
       // Defer unlock prompt; user can trigger by clicking the ribbon or opening sidebar.
     }
 
-    // Glossa mark — keep the brand gradient for in-panel surfaces, but use a
-    // currentColor variant in Obsidian's ribbon so it matches host app icons.
-    addIcon('glossa', GLOSSA_MARK_SVG);
+    // Obsidian chrome (ribbon + tab headers) should inherit the host app's
+    // monochrome icon color. In-panel brand surfaces use inline gradient SVGs.
+    addIcon('glossa', GLOSSA_RIBBON_SVG);
     addIcon('glossa-ribbon', GLOSSA_RIBBON_SVG);
 
     this.registerView(VIEW_TYPE_GLOSSA, (leaf) => new GlossaView(leaf, this));
-    this.addRibbonIcon('glossa-ribbon', 'Open ' + 'Glossa', () => this.activateView());
+    const ribbonIconEl = this.addRibbonIcon('glossa-ribbon', 'Open ' + 'Glossa', () => this.activateView());
+    ribbonIconEl.addClass('glossa-ribbon-icon');
 
     this.addCommand({ id: 'open-sidebar', name: 'Open sidebar', callback: () => this.activateView() });
     this.addCommand({ id: 'new-chat', name: 'New chat',
@@ -477,6 +478,18 @@ class ChatStore {
   private path: string;
   constructor(private plugin: GlossaPlugin) { this.path = `${plugin.manifest.dir}/chats.json`; }
 
+  private sortAndCap() {
+    this.sessions = this.sessions.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100);
+  }
+
+  private cloneMessages(messages: ChatSession['messages']): ChatSession['messages'] {
+    try {
+      return JSON.parse(JSON.stringify(messages)) as ChatSession['messages'];
+    } catch {
+      return messages.map(m => ({ ...m }));
+    }
+  }
+
   async load(legacy?: ChatSession[]) {
     try {
       if (await this.plugin.app.vault.adapter.exists(this.path)) {
@@ -541,7 +554,7 @@ class ChatStore {
       return;
     }
     if (idx >= 0) this.sessions[idx] = s; else this.sessions.push(s);
-    this.sessions = this.sessions.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100);
+    this.sortAndCap();
     await this.persist();
   }
   async persist() {
@@ -561,7 +574,7 @@ class ChatStore {
   async renameSession(id: string, title: string) {
     const s = this.sessions.find(x => x.id === id);
     if (!s) return;
-    s.title = title.slice(0, 100);
+    s.title = title.trim().slice(0, 100);
     s.updatedAt = Date.now();
     await this.persist();
   }
@@ -575,9 +588,10 @@ class ChatStore {
       title: `${src.title} (copy)`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      messages: src.messages.map(m => ({ ...m })),
+      messages: this.cloneMessages(src.messages),
     };
     this.sessions.push(copy);
+    this.sortAndCap();
     await this.persist();
     return copy;
   }

@@ -53,7 +53,7 @@ export const getBacklinks: ToolImpl = buildTool({
         const card = activeDocument.createElement('div');
         setStyle(card, { padding: '4px 0' });
         setStyle(card, { marginBottom: '6px' });
-        setStyle(card, { borderLeft: '2px solid var(--glossa-active-text, #185abc)' });
+        setStyle(card, { borderLeft: '2px solid var(--glossa-active-text, #365f9f)' });
         setStyle(card, { paddingLeft: '8px' });
         const srcEl = activeDocument.createElement('div');
         setStyle(srcEl, { fontFamily: 'var(--font-monospace, monospace)' });
@@ -93,8 +93,8 @@ export const getBacklinks: ToolImpl = buildTool({
         setStyle(badge, { fontSize: '10px' });
         setStyle(badge, { padding: '1px 6px' });
         setStyle(badge, { borderRadius: '8px' });
-        setStyle(badge, { background: 'var(--glossa-active-bg, #e8f0fe)' });
-        setStyle(badge, { color: 'var(--glossa-active-text, #185abc)' });
+        setStyle(badge, { background: 'var(--glossa-active-bg, #eef3fb)' });
+        setStyle(badge, { color: 'var(--glossa-active-text, #365f9f)' });
         row.appendChild(src);
         row.appendChild(badge);
         wrap.appendChild(row);

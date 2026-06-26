@@ -252,15 +252,29 @@ export class CustomApiProvider implements LLMProvider {
       : { 'Authorization': `Bearer ${this.ep.apiKey}`, ...(this.ep.headers ?? {}) };
     try {
       const r = await requestUrl({ url, method: 'GET', headers, throw: false });
-      if (r.status >= 400) return style === 'anthropic' ? ANTHROPIC_KNOWN_MODELS : [];
-      const j: any = r.json;
+      const body = (r.text ?? '').trim();
+      const looksHtml = /^<!doctype html/i.test(body) || /^<html[\s>]/i.test(body);
+      if (r.status >= 400) {
+        if (style === 'anthropic') return ANTHROPIC_KNOWN_MODELS;
+        throw new Error(`GET /models returned HTTP ${r.status}${body ? `: ${body.slice(0, 160)}` : ''}`);
+      }
+      if (looksHtml) {
+        throw new Error('GET /models returned HTML, not JSON. Check that Base URL points to the API root, e.g. https://host/v1.');
+      }
+      let j: any;
+      try {
+        j = r.json;
+      } catch {
+        throw new Error(`GET /models returned non-JSON${body ? `: ${body.slice(0, 160)}` : '.'}`);
+      }
       const ids = (j.data ?? []).map((m: any) => m.id ?? m.name).filter(Boolean);
       const sorted = [...new Set<string>(ids)].sort();
       if (sorted.length) return sorted;
       return style === 'anthropic' ? ANTHROPIC_KNOWN_MODELS : [];
     } catch (e) {
       console.warn('[plugin] listModels failed', e);
-      return style === 'anthropic' ? ANTHROPIC_KNOWN_MODELS : [];
+      if (style === 'anthropic') return ANTHROPIC_KNOWN_MODELS;
+      throw e instanceof Error ? e : new Error(String(e));
     }
   }
 

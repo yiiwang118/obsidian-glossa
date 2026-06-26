@@ -61,12 +61,12 @@ export const manageTags: ToolImpl = buildTool({
     setStyle(chipRow, { flexWrap: 'wrap' });
     setStyle(chipRow, { gap: '4px' });
     const op = args?.op;
-    const chipColor = op === 'add' ? 'var(--glossa-success, #188038)'
-                    : op === 'remove' ? 'var(--glossa-danger, #c5221f)'
-                    : 'var(--glossa-active-text, #185abc)';
-    const chipBg = op === 'add' ? 'color-mix(in srgb, var(--glossa-success, #188038) 10%, transparent)'
-                 : op === 'remove' ? 'color-mix(in srgb, var(--glossa-danger, #c5221f) 10%, transparent)'
-                 : 'var(--glossa-active-bg, #e8f0fe)';
+    const chipColor = op === 'add' ? 'var(--glossa-success, #2f7d52)'
+                    : op === 'remove' ? 'var(--glossa-danger, #b84a4a)'
+                    : 'var(--glossa-active-text, #365f9f)';
+    const chipBg = op === 'add' ? 'color-mix(in srgb, var(--glossa-success, #2f7d52) 10%, transparent)'
+                 : op === 'remove' ? 'color-mix(in srgb, var(--glossa-danger, #b84a4a) 10%, transparent)'
+                 : 'var(--glossa-active-bg, #eef3fb)';
     for (const t of tags) {
       const chip = activeDocument.createElement('span');
       chip.textContent = `#${t}`;
