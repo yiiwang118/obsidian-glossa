@@ -5327,11 +5327,15 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-pill,
 .nc-model-chip,
 .nc-composer-pill {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 30px;
   background: var(--glossa-surface-2) !important;
   border: 1px solid transparent !important;
   border-radius: 999px;
   color: var(--glossa-muted);
   box-shadow: none !important;
+  font: inherit;
 }
 
 .nc-pill:hover,
@@ -5650,8 +5654,26 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 
 .nc-empty-title {
-  color: var(--glossa-ink);
-  font-weight: 500;
+  margin-bottom: 18px;
+  color: color-mix(in srgb, var(--glossa-ink) 88%, var(--glossa-active-text));
+  font-family: "New York", "Baskerville", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  font-size: 34px;
+  font-style: italic;
+  font-weight: 520;
+  letter-spacing: 0;
+  line-height: 1.05;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  text-shadow:
+    0 1px 0 color-mix(in srgb, var(--glossa-bg) 84%, transparent),
+    0 12px 34px color-mix(in srgb, var(--glossa-active-text) 10%, transparent);
+}
+
+.theme-dark .nc-empty-title {
+  color: color-mix(in srgb, var(--glossa-ink) 92%, var(--glossa-active-text));
+  text-shadow:
+    0 1px 0 color-mix(in srgb, #000 24%, transparent),
+    0 14px 34px color-mix(in srgb, var(--glossa-active-text) 13%, transparent);
 }
 
 .nc-example-chip-cmd,
@@ -5977,6 +5999,21 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 
 .nc-settings .nc-endpoint-card > .nc-settings-group .nc-settings-group-body {
   background: var(--glossa-surface-1);
+}
+
+.nc-security-banner.is-locked {
+  border-color: var(--glossa-active-border);
+  background: var(--glossa-active-bg);
+}
+
+.nc-security-banner.is-mixed {
+  border-color: color-mix(in srgb, var(--glossa-warn) 24%, var(--glossa-line));
+  background: color-mix(in srgb, var(--glossa-warn) 10%, var(--glossa-surface-1));
+}
+
+.nc-security-banner.is-unlocked {
+  border-color: color-mix(in srgb, var(--glossa-success) 22%, var(--glossa-line));
+  background: color-mix(in srgb, var(--glossa-success) 8%, var(--glossa-surface-1));
 }
 
 .nc-settings input[type="text"],

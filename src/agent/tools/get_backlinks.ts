@@ -53,7 +53,7 @@ export const getBacklinks: ToolImpl = buildTool({
         const card = activeDocument.createElement('div');
         setStyle(card, { padding: '4px 0' });
         setStyle(card, { marginBottom: '6px' });
-        setStyle(card, { borderLeft: '2px solid #5b9bff' });
+        setStyle(card, { borderLeft: '2px solid var(--glossa-active-text, #185abc)' });
         setStyle(card, { paddingLeft: '8px' });
         const srcEl = activeDocument.createElement('div');
         setStyle(srcEl, { fontFamily: 'var(--font-monospace, monospace)' });
@@ -67,7 +67,7 @@ export const getBacklinks: ToolImpl = buildTool({
           setStyle(row, { opacity: '0.7' });
           setStyle(row, { marginTop: '2px' });
           const lineNo = activeDocument.createElement('span');
-          setStyle(lineNo, { color: '#888' });
+          setStyle(lineNo, { color: 'var(--glossa-faint, #80868b)' });
           lineNo.textContent = `L${r.line}`;
           row.appendChild(lineNo);
           row.appendChild(activeDocument.createTextNode(`  ${r.text.slice(0, 200)}`));
@@ -93,8 +93,8 @@ export const getBacklinks: ToolImpl = buildTool({
         setStyle(badge, { fontSize: '10px' });
         setStyle(badge, { padding: '1px 6px' });
         setStyle(badge, { borderRadius: '8px' });
-        setStyle(badge, { background: 'rgba(91, 155, 255, 0.15)' });
-        setStyle(badge, { color: '#5b9bff' });
+        setStyle(badge, { background: 'var(--glossa-active-bg, #e8f0fe)' });
+        setStyle(badge, { color: 'var(--glossa-active-text, #185abc)' });
         row.appendChild(src);
         row.appendChild(badge);
         wrap.appendChild(row);

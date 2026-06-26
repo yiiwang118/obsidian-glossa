@@ -152,8 +152,8 @@ export const patchNote: ToolImpl = buildTool({
     const wrap = activeDocument.createElement('div');
     setStyle(wrap, { padding: '6px 10px' });
     setStyle(wrap, { fontSize: '12px' });
-    setStyle(wrap, { background: 'rgba(63, 185, 80, 0.08)' });
-    setStyle(wrap, { borderLeft: '3px solid #3fb950' });
+    setStyle(wrap, { background: 'color-mix(in srgb, var(--glossa-success, #188038) 8%, transparent)' });
+    setStyle(wrap, { borderLeft: '3px solid var(--glossa-success, #188038)' });
     setStyle(wrap, { borderRadius: '4px' });
     setStyle(wrap, { lineHeight: '1.5' });
     const head = activeDocument.createElement('div');

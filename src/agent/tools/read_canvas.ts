@@ -67,7 +67,7 @@ export const readCanvas: ToolImpl = buildTool({
       setStyle(el, { padding: '6px 10px' });
       setStyle(el, { fontSize: '12px' });
       setStyle(el, { lineHeight: '1.5' });
-      setStyle(el, { background: 'rgba(255,255,255,0.03)' });
+      setStyle(el, { background: 'var(--glossa-surface-2, rgba(255,255,255,0.03))' });
       setStyle(el, { borderRadius: '4px' });
       el.textContent = firstLine;
       // Append a "show full" details below.

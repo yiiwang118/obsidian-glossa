@@ -664,7 +664,7 @@ export class GlossaView extends ItemView {
     // so this method stays pure DOM.
     const orb = el('div', { className: 'nc-empty-icon nc-empty-orb', parent: this.emptyEl });
     setTrustedSvg(orb, AURORA_ORB_SVG);
-    // Title — keeps the existing aurora-flow gradient via .nc-empty-title CSS.
+    // Title wordmark styling lives in CSS so theme refinements stay centralized.
     el('div', { className: 'nc-empty-title', text: t('empty_title'), parent: this.emptyEl });
 
     // Chips live in a group container with a list role so screen readers
@@ -1766,7 +1766,7 @@ export class GlossaView extends ItemView {
     // (3) Model chip — moved below the textarea per user feedback. Sits right
     //     after the permission pill so the "current behaviour" cluster
     //     (permissions + model) reads as a single group on the left.
-    this.modelBtn = el('span', { className: 'nc-model-chip', parent: footer, title: 'Pick endpoint / model' });
+    this.modelBtn = el('button', { className: 'nc-model-chip', parent: footer, title: 'Pick endpoint / model' });
     this.updateModelBtn();
     this.modelBtn.onclick = (e) => this.openEndpointMenu(e);
 
@@ -2003,6 +2003,7 @@ export class GlossaView extends ItemView {
       const a = el('span', { className: 'nc-arrow', parent: this.modelBtn });
       setTrustedSvg(a, ICON.arrowDown);
       this.modelBtn.title = bi('No endpoint — open settings', '未配置 endpoint — 打开设置');
+      this.modelBtn.setAttribute('aria-label', this.modelBtn.title);
       return;
     }
     // Show ONLY the user-defined label. The underlying model id moves into
@@ -2012,6 +2013,7 @@ export class GlossaView extends ItemView {
     setTrustedSvg(a, ICON.arrowDown);
     const model = active.model ?? bi('(default)', '（默认）');
     this.modelBtn.title = `${active.label}\nmodel: ${model}\n${bi('click to switch', '点击切换')}`;
+    this.modelBtn.setAttribute('aria-label', `${active.label}, ${model}`);
   }
 
   private openEndpointMenu(_e: MouseEvent) {

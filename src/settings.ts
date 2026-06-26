@@ -19,6 +19,22 @@ const MCP_LABEL = 'M' + 'CP';
 const DETECT_BUTTON_LABEL = '↻ ' + 'Detect';
 const IMPORT_URL_BUTTON_LABEL = '+ ' + 'Import URL';
 
+function normalizeModelList(models: string[]): string[] {
+  return [...new Set(models.map(m => String(m).trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+}
+
+function makeKeyboardClickable(el: HTMLElement, label?: string) {
+  el.setAttribute('role', 'button');
+  el.tabIndex = 0;
+  if (label) el.setAttribute('aria-label', label);
+  el.addEventListener('keydown', (evt: KeyboardEvent) => {
+    if (evt.key !== 'Enter' && evt.key !== ' ') return;
+    evt.preventDefault();
+    el.click();
+  });
+}
+
 /* ============================================================
    Provider presets
    ============================================================ */
@@ -142,9 +158,18 @@ export class GlossaSettingTab extends PluginSettingTab {
       { id: 'advanced',  label: 'Advanced' },
     ];
     const bar = containerEl.createEl('div', { cls: 'nc-settings-tabs' });
+    bar.setAttribute('role', 'tablist');
     for (const t of tabs) {
       const tabEl = bar.createEl('div', { cls: 'nc-settings-tab' + (this.activeTab === t.id ? ' active' : ''), text: t.label });
+      tabEl.setAttribute('role', 'tab');
+      tabEl.setAttribute('aria-selected', String(this.activeTab === t.id));
+      tabEl.tabIndex = this.activeTab === t.id ? 0 : -1;
       tabEl.onclick = () => { this.activeTab = t.id; this.display(); };
+      tabEl.onkeydown = (evt) => {
+        if (evt.key !== 'Enter' && evt.key !== ' ') return;
+        evt.preventDefault();
+        tabEl.click();
+      };
     }
 
     // Render all the sections into a single document, then hide everything not matching activeTab.
@@ -209,15 +234,15 @@ export class GlossaSettingTab extends PluginSettingTab {
       if (!this.plugin.isUnlocked()) {
         title = '🔒 Encrypted — locked';
         body = `Keys are AES-GCM encrypted at rest. Run "Unlock encrypted keys" from the command palette to use them.`;
-        setStyle(sec, { borderColor: '#5b9bff' }); setStyle(sec, { background: 'rgba(91,155,255,0.10)' });
+        sec.addClass('is-locked');
       } else if (hasAnyPlainKey && hasAnyEncKey) {
         title = '⚠ Mixed';
         body = `Some endpoints have plaintext keys despite encryption being on. Re-enter their API keys to encrypt them.`;
-        setStyle(sec, { borderColor: '#d4a72c' }); setStyle(sec, { background: 'rgba(212,167,44,0.10)' });
+        sec.addClass('is-mixed');
       } else {
         title = '🔓 Encrypted — unlocked';
         body = `API keys decrypt in memory only. Restart Obsidian → lock again. Passphrase is never stored.`;
-        setStyle(sec, { borderColor: '#3fb950' }); setStyle(sec, { background: 'rgba(63,185,80,0.08)' });
+        sec.addClass('is-unlocked');
       }
       sec.createEl('div', { cls: 'nc-security-title', text: title });
       sec.createEl('div', { cls: 'nc-security-body', text: body });
@@ -414,8 +439,8 @@ export class GlossaSettingTab extends PluginSettingTab {
         const dateEl = row.createEl('span', { text: date.toLocaleTimeString() });
         setStyle(dateEl, { color: 'var(--text-faint)', minWidth: '80px' });
         const colors: Record<string, string> = {
-          'allow': '#3fb950', 'auto-allow': '#3fb950', 'allowed-by-rule': '#5b9bff',
-          'deny': '#f85149', 'auto-deny': '#f85149', 'denied-by-rule': '#f85149',
+          'allow': 'var(--glossa-success)', 'auto-allow': 'var(--glossa-success)', 'allowed-by-rule': 'var(--glossa-active-text)',
+          'deny': 'var(--glossa-danger)', 'auto-deny': 'var(--glossa-danger)', 'denied-by-rule': 'var(--glossa-danger)',
         };
         const decisionEl = row.createEl('span', { text: e.decision });
         setStyle(decisionEl, { color: colors[e.decision] ?? 'var(--text-muted)', minWidth: '110px', fontWeight: '600' });
@@ -696,12 +721,19 @@ export class GlossaSettingTab extends PluginSettingTab {
     left.createEl('span', { text: ep.kind, cls: 'nc-endpoint-kind-badge' });
     // Right side of header: Test connectivity + Delete
     const testBtn = hdr.createEl('button', { text: 'Test', cls: 'nc-endpoint-test-btn' });
+    testBtn.setAttribute('aria-label', `Test ${ep.label}`);
     const testStatus = hdr.createEl('span', { cls: 'nc-endpoint-test-status' });
     testBtn.onclick = async () => {
+      testBtn.setAttribute('disabled', 'true');
       testStatus.removeClass('ok'); testStatus.removeClass('fail');
       testStatus.setText('…');
       const epDec = await this.plugin.getDecryptedEndpoint(ep);
-      if (!epDec) { testStatus.setText('Locked'); testStatus.addClass('fail'); return; }
+      if (!epDec) {
+        testStatus.setText('Locked');
+        testStatus.addClass('fail');
+        testBtn.removeAttribute('disabled');
+        return;
+      }
       try {
         const provider: any = await this.buildProviderFor(epDec);
         if (!provider?.testConnect) { testStatus.setText('Unsupported'); return; }
@@ -713,9 +745,12 @@ export class GlossaSettingTab extends PluginSettingTab {
       } catch (e: any) {
         testStatus.setText(e.message ?? String(e));
         testStatus.addClass('fail');
+      } finally {
+        testBtn.removeAttribute('disabled');
       }
     };
     const delBtn = hdr.createEl('button', { text: 'Delete', cls: 'mod-warning' });
+    delBtn.setAttribute('aria-label', `Delete ${ep.label}`);
     delBtn.onclick = async () => {
       // Find every place this endpoint id is referenced so the deletion
       // doesn't leave dangling pointers (which caused 404s on embedding
@@ -806,15 +841,39 @@ export class GlossaSettingTab extends PluginSettingTab {
         ep.baseUrl = trimmed;
         await this.plugin.saveSettings();
       }));
-      new Setting(basic).setName(bi('API Key', 'API Key'))
+      const apiKeySetting = new Setting(basic).setName(bi('API Key', 'API Key'))
         .setDesc(ep.apiKey?.startsWith('NCENC1:') ? bi('✓ encrypted', '✓ 已加密') : (this.plugin.settings.encryptionEnabled ? bi('will encrypt on save', '保存时加密') : bi('plaintext', '明文')))
         .addText(t => {
           t.inputEl.type = 'password';
           const enc = ep.apiKey?.startsWith('NCENC1:');
           t.setPlaceholder(enc ? bi('(encrypted)', '（已加密）') : 'sk-…')
            .setValue(enc ? '' : (ep.apiKey ?? ''))
-           .onChange(async v => { if (v) { await this.plugin.storeApiKey(ep, v); await this.plugin.saveSettings(); } });
+           .onChange(async v => {
+             if (v) {
+               await this.plugin.storeApiKey(ep, v);
+             } else if (!enc) {
+               ep.apiKey = '';
+             }
+             await this.plugin.saveSettings();
+           });
         });
+      apiKeySetting.addButton(b => b
+        .setButtonText(bi('Clear', '清除'))
+        .setWarning()
+        .setDisabled(!ep.apiKey)
+        .onClick(async () => {
+          const { confirmModal } = await import('./ui/confirm_modal');
+          const ok = await confirmModal(this.app, {
+            title: bi('Clear API key?', '清除 API key？'),
+            body: bi(`Remove the stored API key for ${ep.label}?`, `移除 ${ep.label} 保存的 API key？`),
+            confirmText: bi('Clear', '清除'),
+            danger: true,
+          });
+          if (!ok) return;
+          ep.apiKey = '';
+          await this.plugin.saveSettings();
+          this.display();
+        }));
 
       // Model with detect button + dropdown of detected
       this.renderModelRow(basic, ep);
@@ -1003,15 +1062,15 @@ export class GlossaSettingTab extends PluginSettingTab {
     setting.addText(t => { inputComp = t; t.setValue(ep.model ?? '').onChange(async v => { ep.model = v; await this.plugin.saveSettings(); }); });
     setting.addButton(b => b.setButtonText(bi('↻ Detect', '↻ 探测')).onClick(async () => {
       if (!ep.baseUrl || !ep.apiKey) { new Notice(bi('Fill Base URL + API Key first.', '请先填写 Base URL + API Key。')); return; }
-      b.setButtonText(bi('detecting…', '探测中…'));
+      b.setButtonText(bi('detecting…', '探测中…')).setDisabled(true);
       try {
         const epDec = await this.plugin.getDecryptedEndpoint(ep);
-        if (!epDec) { b.setButtonText(bi('↻ Detect', '↻ 探测')); return; }
-        const list = await new CustomApiProvider(epDec).listModels();
+        if (!epDec) return;
+        const list = normalizeModelList(await new CustomApiProvider(epDec).listModels());
         if (list.length === 0) { new Notice(bi('No models returned.', '未返回模型列表。')); }
         else { ep.availableModels = list; await this.plugin.saveSettings(); new Notice(bi(`Found ${list.length} models.`, `找到 ${list.length} 个模型。`)); this.display(); }
       } catch (e: any) { new Notice(bi(`Failed: ${e.message}`, `失败：${e.message}`)); }
-      finally { b.setButtonText(bi('↻ Detect', '↻ 探测')); }
+      finally { b.setButtonText(bi('↻ Detect', '↻ 探测')).setDisabled(false); }
     }));
 
     if (ep.availableModels && ep.availableModels.length > 0) {
@@ -1125,6 +1184,7 @@ class AddEndpointModal extends Modal {
         card.addClass('selected');
         this.renderForm();
       };
+      makeKeyboardClickable(card, kc.title);
       kindCards.push(card);
     }
     kindCards[0].addClass('selected');
@@ -1148,6 +1208,7 @@ class AddEndpointModal extends Modal {
         kindCards.forEach((c, i) => c.toggleClass('selected', KIND_CARDS[i].kind === 'custom-api'));
         this.renderForm();
       };
+      makeKeyboardClickable(chip, p.name);
     }
 
     /* Form */
@@ -1234,6 +1295,7 @@ class AddEndpointModal extends Modal {
   }
 
   private async detectModels(btn: HTMLButtonElement) {
+    if (btn.disabled) return;
     if (!this.draft.baseUrl || !this.plainKey) {
       this.detectStatusEl.setText('Need base URL + API key first.');
       return;
@@ -1244,6 +1306,7 @@ class AddEndpointModal extends Modal {
       return;
     }
     this.detectStatusEl.setText('Detecting…');
+    btn.disabled = true;
     btn.textContent = 'Detecting…';
     // Use plaintext key directly for detection — never persisted from this temp ep.
     const ep: Endpoint = {
@@ -1252,7 +1315,7 @@ class AddEndpointModal extends Modal {
       apiStyle: this.draft.apiStyle ?? 'openai',
     };
     try {
-      const list = await new CustomApiProvider(ep).listModels();
+      const list = normalizeModelList(await new CustomApiProvider(ep).listModels());
       btn.textContent = DETECT_BUTTON_LABEL;
       if (list.length === 0) { this.detectStatusEl.setText('No models returned (endpoint /models 404 or empty).'); return; }
       this.detectStatusEl.setText(`Found ${list.length} models. Pick one:`);
@@ -1272,6 +1335,8 @@ class AddEndpointModal extends Modal {
     } catch (e: any) {
       btn.textContent = DETECT_BUTTON_LABEL;
       this.detectStatusEl.setText(`Failed: ${e.message}`);
+    } finally {
+      btn.disabled = false;
     }
   }
 
