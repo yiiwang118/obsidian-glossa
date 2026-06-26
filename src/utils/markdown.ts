@@ -19,15 +19,57 @@ export async function renderInto(
   component: Component,
   sourcePath = ''
 ) {
+  const raw = src || '';
   target.empty();
-  await MarkdownRenderer.render(app, src || '', target, sourcePath, component);
-  // Force MathJax to typeset any math expressions we just inserted.
-  // Obsidian normally does this on its own preview, but custom views sometimes
-  // miss the trigger. Belt-and-suspenders.
+  await MarkdownRenderer.render(app, raw, target, sourcePath, component);
+  // Only touch MathJax when the source actually contains math. For ordinary
+  // prose/tool output this avoids waking Obsidian's MathJax font loader, which
+  // can produce noisy "slow network / fallback font" intervention warnings.
+  if (!hasMarkdownMath(raw)) return;
   try {
-    const mj = (window as any).MathJax;
+    const ownerWindow = target.ownerDocument.defaultView ?? window;
+    const mj = (ownerWindow as any).MathJax ?? (window as any).MathJax;
     if (mj?.typesetPromise) await mj.typesetPromise([target]);
   } catch { /* ignore */ }
+}
+
+function hasMarkdownMath(src: string): boolean {
+  if (!src) return false;
+  let inFenced = false;
+  let inInline = false;
+  let pendingDollar = -1;
+
+  for (let i = 0; i < src.length; i++) {
+    if (!inInline && src.startsWith('```', i)) {
+      inFenced = !inFenced;
+      i += 2;
+      continue;
+    }
+    if (inFenced) continue;
+
+    const ch = src[i];
+    if (ch === '`') {
+      inInline = !inInline;
+      continue;
+    }
+    if (inInline) continue;
+
+    if (ch === '\\' && (src[i + 1] === '(' || src[i + 1] === '[')) return true;
+    if (ch === '$') {
+      if (src[i - 1] === '\\') continue;
+      if (src[i + 1] === '$') return true;
+      const prev = src[i - 1] ?? '';
+      const next = src[i + 1] ?? '';
+      if (!next || /\s/.test(next) || /[\d,.;:!?)]/.test(next)) continue;
+      if (pendingDollar >= 0) {
+        const before = src[i - 1] ?? '';
+        if (before && !/\s/.test(before)) return true;
+      } else if (!prev || !/[A-Za-z0-9]/.test(prev)) {
+        pendingDollar = i;
+      }
+    }
+  }
+  return false;
 }
 
 /** During streaming, trim trailing incomplete math so we don't keep flickering

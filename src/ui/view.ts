@@ -611,6 +611,22 @@ export class GlossaView extends ItemView {
     return text.slice(0, limit).trimEnd() + `\n...[truncated ${text.length.toLocaleString()} chars]`;
   }
 
+  private contextPriorityHint(items: ContextItemRef[], hasExplicitAttachments: boolean) {
+    if (!hasExplicitAttachments) return '';
+    const attached = items.filter(it => !it.isCurrent).map(it => it.detail || it.label).filter(Boolean);
+    const current = items.filter(it => it.isCurrent).map(it => it.detail || it.label).filter(Boolean);
+    return [
+      '<context-priority>',
+      'User-attached files/items are the primary target for phrases like "this file", "this PDF", "uploaded file", or "this image".',
+      current.length
+        ? 'Current/open file context is ambient background only. Do not treat it as the target unless the user explicitly says current/open file.'
+        : '',
+      attached.length ? `Primary attached item(s): ${attached.join('; ')}` : '',
+      current.length ? `Ambient current item(s): ${current.join('; ')}` : '',
+      '</context-priority>',
+    ].filter(Boolean).join('\n');
+  }
+
   private contextBarSig = '';
   private renderContextBar() {
     if (!this.contextBarEl) return;
@@ -619,10 +635,20 @@ export class GlossaView extends ItemView {
     if (sig === this.contextBarSig) return;
     this.contextBarSig = sig;
     clear(this.contextBarEl);
-    for (const it of this.ctx.list()) {
+    const items = this.ctx.list();
+    const explicit = items.filter(it => !it.isCurrent);
+    const current = items.filter(it => it.isCurrent);
+    const groups: Array<[string, ContextItem[]]> = [];
+    if (explicit.length) groups.push([bi('Attached', '附件'), explicit]);
+    if (current.length) groups.push([bi('Current', '当前'), current]);
+    for (const [label, groupItems] of groups) {
+      const group = el('div', { className: 'nc-context-group' + (groupItems.some(it => it.isCurrent) ? ' current' : ' attached'), parent: this.contextBarEl });
+      el('span', { className: 'nc-context-group-label', text: label, parent: group });
+      const row = el('div', { className: 'nc-context-group-items', parent: group });
+    for (const it of groupItems) {
       const pill = el('span', {
         className: 'nc-pill' + (it.pinned ? ' pinned' : '') + (it.isCurrent ? ' current' : '') + (it.kind === 'image' ? ' image' : ''),
-        parent: this.contextBarEl,
+        parent: row,
       });
       if (it.kind === 'image' && it.content.startsWith('data:image/')) {
         const thumb = el('img', { className: 'nc-pill-thumb', parent: pill });
@@ -633,7 +659,8 @@ export class GlossaView extends ItemView {
       }
       el('span', { className: 'nc-pill-label', text: it.label, title: it.detail || it.label, parent: pill });
       if (it.isCurrent) {
-        el('span', { className: 'nc-pill-meta', text: 'Current', parent: pill });
+        // The group label already says Current; repeating it inside the chip
+        // makes the composer read as "CURRENT ... CURRENT".
       } else if (it.kind === 'image') {
         el('span', { className: 'nc-pill-meta', text: 'IMG', parent: pill });
       } else {
@@ -677,6 +704,7 @@ export class GlossaView extends ItemView {
         m.addItem(i => i.setTitle('Remove').onClick(removeThis));
         m.showAtMouseEvent(e);
       };
+    }
     }
   }
 
@@ -868,6 +896,8 @@ export class GlossaView extends ItemView {
       })
       .catch(() => {});
 
+    if (m.role === 'user') this.renderContextSnapshot(wrap, m);
+
     // Selection echo (user-side): show the quoted snippet that went into the prompt.
     if (m.role === 'user' && m.selectionEcho) {
       const echo = el('details', { className: 'nc-selection-echo', parent: wrap });
@@ -921,6 +951,19 @@ export class GlossaView extends ItemView {
 
     if (!this.messagesEl.classList.contains('no-anim')) this.scrollToBottom();
     return ui;
+  }
+
+  private renderContextSnapshot(parent: HTMLElement, m: ChatMessage) {
+    const items = (m.contextSnapshot ?? []).filter(it => !it.isCurrent);
+    if (items.length === 0) return;
+    const box = el('div', { className: 'nc-message-attachments', parent });
+    for (const it of items) {
+      const chip = el('span', { className: `nc-message-attachment ${it.kind}`, title: it.detail || it.label, parent: box });
+      const icon = el('span', { className: 'nc-message-attachment-icon', parent: chip });
+      setTrustedSvg(icon, pillIcon({ kind: it.kind } as ContextItem));
+      el('span', { className: 'nc-message-attachment-label', text: it.label, parent: chip });
+      el('span', { className: 'nc-message-attachment-meta', text: it.kind === 'image' ? 'IMG' : formatTokenCount(it.tokens), parent: chip });
+    }
   }
 
   private setTurnActivity(ui: MsgUI | null, label: string, status: 'thinking' | 'tool' | 'idle' = 'thinking') {
@@ -2585,9 +2628,12 @@ export class GlossaView extends ItemView {
       ? `### Selection (from ${this.currentSelection.source}${this.currentSelection.file ? `, ${this.currentSelection.file.path}` : ''}):\n\n${this.currentSelection.text}`
       : '';
 
+    const turnContextItems = this.ctx.list();
+    const hasExplicitAttachments = turnContextItems.some(it => !it.isCurrent);
+
     // Save only lightweight metadata refs — never the resolved file/image contents.
-    const ctxSnap: ContextItemRef[] = this.ctx.list().map(it => ({
-      kind: it.kind, label: it.label, detail: it.detail, tokens: it.tokens, pinned: it.pinned,
+    const ctxSnap: ContextItemRef[] = turnContextItems.map(it => ({
+      kind: it.kind, label: it.label, detail: it.detail, tokens: it.tokens, pinned: it.pinned, isCurrent: it.isCurrent,
     }));
     // If the user typed a slash trigger and we expanded it (text !== raw),
     // remember the raw form for display. The bubble shows "/summarize" while
@@ -2604,6 +2650,7 @@ export class GlossaView extends ItemView {
     };
     this.session.messages.push(userMsg);
     this.renderMessage(userMsg);
+    this.ctx.resetUnpinned();
 
     // Input + history cursor were already cleared at the top of submit() so the
     // box feels instant. We just reset the selection echo here.
@@ -2646,7 +2693,7 @@ export class GlossaView extends ItemView {
     const responseReserve = Math.min(16_000, Math.max(4_000, Math.floor(effectiveWindow.maxCtx * 0.06)));
     const softCap = Math.max(1, Math.floor(effectiveWindow.maxCtx * 0.92) - historyBudgetTokens - responseReserve);
     const hardCap = Math.max(1, Math.floor(effectiveWindow.maxCtx * 0.98) - historyBudgetTokens - responseReserve);
-    const { text: ctxBlock, dropped, forcedDrops } = this.ctx.asPromptBlock(softCap, hardCap);
+    const { text: ctxBlock, dropped, forcedDrops } = this.ctx.asPromptBlock(softCap, hardCap, { suppressAutoCurrent: hasExplicitAttachments, items: turnContextItems });
     if (dropped.length > 0) {
       quickNotice(`Context budget: dropped ${dropped.length} unpinned item(s) (${dropped.map(d => d.label).join(', ').slice(0, 80)}) to fit ${formatTokenCount(softCap)} tokens. Pin to keep.`);
     }
@@ -2665,7 +2712,7 @@ export class GlossaView extends ItemView {
     // skip the auto-attached context — the template is canonical.
     const finalUserContent = wasExpanded
       ? text
-      : [ctxBlock, selectionContextBlock, text].filter(Boolean).join('\n\n');
+      : [this.contextPriorityHint(ctxSnap, hasExplicitAttachments), ctxBlock, selectionContextBlock, text].filter(Boolean).join('\n\n');
 
     // Build a FULL model-facing history that PRESERVES tool calls + tool results from
     // prior turns. Without this, the model loses everything it ever read/wrote and can
@@ -2732,7 +2779,7 @@ export class GlossaView extends ItemView {
       },
       model: ep.model,
       signal: this.abortCtl.signal,
-      attachedImages: this.ctx.imagesForAPI(),
+      attachedImages: this.ctx.imagesForAPI({ suppressAutoCurrent: hasExplicitAttachments, items: turnContextItems }),
       checkpoint: this.plugin.checkpoint,
       sessionId: this.session.id,
       turnId: this.currentAsstMsg?.id,

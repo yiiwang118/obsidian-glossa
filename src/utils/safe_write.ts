@@ -60,7 +60,7 @@ export async function safeWrite(
   data: string,
   opts: SafeWriteOptions = {},
 ): Promise<void> {
-  const tmpPath = `${path}.tmp`;
+  const tmpPath = `${path}.${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.tmp`;
   const bakPath = `${path}.bak`;
   // Stage.
   await adapter.write(tmpPath, data);

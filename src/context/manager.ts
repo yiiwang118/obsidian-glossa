@@ -48,8 +48,9 @@ export class ContextManager {
    *
    *  Without `hardCap`, behaviour is identical to the previous version.
    */
-  asPromptBlock(maxTokens?: number, hardCap?: number): { text: string; dropped: ContextItem[]; forcedDrops: ContextItem[]; remaining: number } {
-    const textOnly = this.items.filter(x => x.kind !== 'image');
+  asPromptBlock(maxTokens?: number, hardCap?: number, opts: { suppressAutoCurrent?: boolean; items?: ContextItem[] } = {}): { text: string; dropped: ContextItem[]; forcedDrops: ContextItem[]; remaining: number } {
+    const sourceItems = opts.items ?? this.items;
+    const textOnly = sourceItems.filter(x => x.kind !== 'image' && !(opts.suppressAutoCurrent && x.isCurrent && !x.pinned));
     let kept = [...textOnly];
     const dropped: ContextItem[] = [];
     const forcedDrops: ContextItem[] = [];
@@ -90,9 +91,10 @@ export class ContextManager {
   }
 
   /** Return images attached as context (for multimodal providers). */
-  imagesForAPI(): { dataUri: string; name?: string }[] {
-    return this.items
-      .filter(x => x.kind === 'image' && x.content.startsWith('data:'))
+  imagesForAPI(opts: { suppressAutoCurrent?: boolean; items?: ContextItem[] } = {}): { dataUri: string; name?: string }[] {
+    const sourceItems = opts.items ?? this.items;
+    return sourceItems
+      .filter(x => x.kind === 'image' && x.content.startsWith('data:') && !(opts.suppressAutoCurrent && x.isCurrent && !x.pinned))
       .map(x => ({ dataUri: x.content, name: x.label }));
   }
 

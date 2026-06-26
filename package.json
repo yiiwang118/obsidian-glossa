@@ -1,6 +1,6 @@
 {
   "name": "glossa",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "AI sidebar for Obsidian — multi-provider, agent mode, context-aware editing.",
   "main": "main.js",
   "scripts": {

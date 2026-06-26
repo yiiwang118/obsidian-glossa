@@ -2283,9 +2283,33 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 
 /* Context pills (Notion / Linear flavour: a tag chip, not a bordered button) */
 .nc-context-bar {
-  display: flex; flex-wrap: wrap; gap: 4px;
+  display: flex; flex-direction: column; gap: 6px;
 }
 .nc-context-bar:empty { display: none; }
+.nc-context-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.nc-context-group.current {
+  opacity: 0.74;
+}
+.nc-context-group-label {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.nc-context-group-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
 .nc-pill {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 2px 6px 2px 4px;
@@ -2332,6 +2356,59 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 .nc-pill .nc-pill-close:hover { opacity: 1; background: var(--nc-bg-soft-hover); }
 .nc-pill .nc-pill-close svg { width: 8px; height: 8px; }
+
+.nc-message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.nc-message-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(360px, 100%);
+  padding: 4px 8px 4px 7px;
+  border: 1px solid var(--nc-border);
+  border-radius: var(--nc-radius-pill);
+  background: rgba(255, 255, 255, 0.52);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+.theme-dark .nc-message-attachment {
+  background: rgba(255, 255, 255, 0.055);
+}
+.nc-message-attachment-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--nc-accent);
+}
+.nc-message-attachment-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.nc-message-attachment-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  color: var(--text-normal);
+  font-weight: 600;
+}
+.nc-message-attachment-meta {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
 /* Aurora-tinted context pill states. Pinned items get a deeper wash +
    aurora-coloured icon so the user can scan the bar and find pinned
    docs at a glance. The current-file pill gets a lighter wash so it
@@ -6409,4 +6486,41 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 
 .nc-tool-event.collapsed .nc-tool-event-header {
   border-bottom: 0;
+}
+
+/* Final context priority layout: user-attached files and ambient current file
+   are intentionally separated so "this file" maps to Attached, not Current. */
+.glossa-view .nc-context-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.glossa-view .nc-context-bar:empty {
+  display: none;
+}
+.glossa-view .nc-context-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.glossa-view .nc-context-group.current {
+  opacity: 0.72;
+}
+.glossa-view .nc-context-group-label {
+  flex: 0 0 auto;
+  min-width: 52px;
+  color: var(--glossa-faint, var(--text-faint));
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.glossa-view .nc-context-group-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
 }

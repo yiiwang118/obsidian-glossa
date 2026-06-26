@@ -32,6 +32,7 @@ export interface ContextItemRef {
   detail?: string;
   tokens: number;
   pinned: boolean;
+  isCurrent?: boolean;
 }
 
 export interface ChatMessage {

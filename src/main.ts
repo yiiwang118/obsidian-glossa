@@ -476,10 +476,19 @@ export default class GlossaPlugin extends Plugin {
 class ChatStore {
   private sessions: ChatSession[] = [];
   private path: string;
-  constructor(private plugin: GlossaPlugin) { this.path = `${plugin.manifest.dir}/chats.json`; }
+  private deletedPath: string;
+  private deletedSessionIds = new Map<string, number>();
+  private persistQueue: Promise<void> = Promise.resolve();
+
+  constructor(private plugin: GlossaPlugin) {
+    this.path = `${plugin.manifest.dir}/chats.json`;
+    this.deletedPath = `${plugin.manifest.dir}/chats.deleted.json`;
+  }
 
   private sortAndCap() {
-    this.sessions = this.sessions.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100);
+    const sorted = this.sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+    for (const s of sorted.slice(100)) this.markDeleted(s.id);
+    this.sessions = sorted.slice(0, 100);
   }
 
   private cloneMessages(messages: ChatSession['messages']): ChatSession['messages'] {
@@ -490,21 +499,146 @@ class ChatStore {
     }
   }
 
+  private parseStore(raw: string): { sessions: ChatSession[]; deletedSessionIds: Record<string, number> } {
+    const parsed = JSON.parse(raw) as { sessions?: ChatSession[]; deletedSessionIds?: Record<string, number> } | ChatSession[];
+    if (Array.isArray(parsed)) return { sessions: parsed, deletedSessionIds: {} };
+    return {
+      sessions: Array.isArray(parsed?.sessions) ? parsed.sessions : [],
+      deletedSessionIds: parsed?.deletedSessionIds && typeof parsed.deletedSessionIds === 'object'
+        ? parsed.deletedSessionIds
+        : {},
+    };
+  }
+
+  private isMeaningfulSession(s: ChatSession): boolean {
+    return (s.messages ?? []).some(m =>
+      (m.content ?? '').trim().length > 0 ||
+      (m.displayContent ?? '').trim().length > 0 ||
+      (m.reasoningContent ?? '').trim().length > 0 ||
+      ((m.toolEvents ?? []).length > 0));
+  }
+
+  private markDeleted(id?: string) {
+    if (!id) return;
+    this.deletedSessionIds.set(id, Math.max(this.deletedSessionIds.get(id) ?? 0, Date.now()));
+  }
+
+  private applyDeletedSessionIds(deleted: Record<string, number>) {
+    for (const [id, at] of Object.entries(deleted)) {
+      if (!id) continue;
+      const prev = this.deletedSessionIds.get(id) ?? 0;
+      this.deletedSessionIds.set(id, Math.max(prev, Number(at) || Date.now()));
+    }
+  }
+
+  private deletedRecord(): Record<string, number> {
+    const entries = [...this.deletedSessionIds.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2000);
+    this.deletedSessionIds = new Map(entries);
+    return Object.fromEntries(entries);
+  }
+
+  private normalizeSessions(sessions: ChatSession[]): ChatSession[] {
+    return sessions.filter(s => this.isMeaningfulSession(s) && !this.deletedSessionIds.has(s.id));
+  }
+
+  private async loadDeletedJournal() {
+    try {
+      if (!(await this.plugin.app.vault.adapter.exists(this.deletedPath))) return;
+      const raw = await this.plugin.app.vault.adapter.read(this.deletedPath);
+      const parsed = JSON.parse(raw) as { deletedSessionIds?: Record<string, number> };
+      if (parsed?.deletedSessionIds) this.applyDeletedSessionIds(parsed.deletedSessionIds);
+    } catch (e) {
+      console.warn('[Glossa] deleted chat journal load failed', e);
+    }
+  }
+
+  private async persistDeletedJournal() {
+    try {
+      const { safeWriteJson } = await import('./utils/safe_write');
+      await safeWriteJson(
+        this.plugin.app.vault.adapter,
+        this.deletedPath,
+        { deletedSessionIds: this.deletedRecord(), updatedAt: Date.now() },
+        { pretty: true },
+      );
+    } catch (e) {
+      console.warn('[Glossa] deleted chat journal save failed', e);
+    }
+  }
+
+  private async readStoreFile(path: string): Promise<{ sessions: ChatSession[]; deletedSessionIds: Record<string, number> } | null> {
+    try {
+      if (!(await this.plugin.app.vault.adapter.exists(path))) return null;
+      const raw = await this.plugin.app.vault.adapter.read(path);
+      return this.parseStore(raw);
+    } catch (e) {
+      console.warn(`[Glossa] chat recovery skipped unreadable file ${path}`, e);
+      return null;
+    }
+  }
+
+  private async recoveryCandidates(): Promise<string[]> {
+    const adapter = this.plugin.app.vault.adapter;
+    const candidates: string[] = [];
+    if (await adapter.exists(`${this.path}.bak`)) candidates.push(`${this.path}.bak`);
+    try {
+      const listed = await adapter.list(this.plugin.manifest.dir);
+      const conflictFiles = (listed.files ?? [])
+        .filter(file => /^chats\.json(?: \d+)?\.json$/.test(file.split('/').pop() ?? file))
+        .sort((a, b) => {
+          const aNum = Number((a.match(/chats\.json (\d+)\.json$/) ?? [])[1] ?? 0);
+          const bNum = Number((b.match(/chats\.json (\d+)\.json$/) ?? [])[1] ?? 0);
+          return bNum - aNum;
+        });
+      candidates.push(...conflictFiles);
+    } catch (e) {
+      console.warn('[Glossa] chat recovery could not list plugin directory', e);
+    }
+    return [...new Set(candidates)];
+  }
+
+  private async recoverSessionsFromBackups(): Promise<ChatSession[] | null> {
+    for (const candidate of await this.recoveryCandidates()) {
+      const store = await this.readStoreFile(candidate);
+      if (!store || store.sessions.length === 0) continue;
+      this.applyDeletedSessionIds(store.deletedSessionIds);
+      this.sessions = this.normalizeSessions(store.sessions);
+      this.sortAndCap();
+      await this.persist();
+      new Notice(bi(
+        `Glossa restored ${this.sessions.length} chat sessions from ${candidate.split('/').pop()}.`,
+        `Glossa 已从 ${candidate.split('/').pop()} 恢复 ${this.sessions.length} 个历史会话。`,
+      ), 8000);
+      return this.sessions;
+    }
+    return null;
+  }
+
   async load(legacy?: ChatSession[]) {
     try {
+      await this.loadDeletedJournal();
       if (await this.plugin.app.vault.adapter.exists(this.path)) {
-        const raw = await this.plugin.app.vault.adapter.read(this.path);
-        const parsed = JSON.parse(raw);
-        this.sessions = Array.isArray(parsed?.sessions) ? parsed.sessions : [];
+        const store = await this.readStoreFile(this.path);
+        if (store) {
+          this.applyDeletedSessionIds(store.deletedSessionIds);
+          this.sessions = store.sessions;
+        } else {
+          const recovered = await this.recoverSessionsFromBackups();
+          if (recovered) this.sessions = recovered;
+        }
       } else if (legacy?.length) {
         this.sessions = legacy;
+      } else {
+        const recovered = await this.recoverSessionsFromBackups();
+        if (recovered) this.sessions = recovered;
       }
     } catch (e) { console.warn('[Glossa] chat load failed', e); }
-    // One-time migration: strip any `content` from contextSnapshot[] entries (older
-    // chats stored full file content there; new schema keeps metadata only).
+
     let migrated = false;
     const beforeFilter = this.sessions.length;
-    this.sessions = this.sessions.filter(s => this.isMeaningfulSession(s));
+    this.sessions = this.normalizeSessions(this.sessions);
     if (this.sessions.length !== beforeFilter) migrated = true;
     for (const s of this.sessions) {
       for (const m of s.messages ?? []) {
@@ -517,9 +651,8 @@ class ChatStore {
         }
       }
     }
-    if (migrated) {
-      await this.persist();
-    }
+    if (migrated) await this.persist();
+    else if (this.deletedSessionIds.size > 0) await this.persistDeletedJournal();
   }
 
   /** Force re-strip all contextSnapshot.content even if previously missed. */
@@ -537,14 +670,8 @@ class ChatStore {
   }
 
   all(): ChatSession[] { return this.sessions; }
-  private isMeaningfulSession(s: ChatSession): boolean {
-    return (s.messages ?? []).some(m =>
-      (m.content ?? '').trim().length > 0 ||
-      (m.displayContent ?? '').trim().length > 0 ||
-      (m.reasoningContent ?? '').trim().length > 0 ||
-      ((m.toolEvents ?? []).length > 0));
-  }
   async saveSession(s: ChatSession) {
+    if (this.deletedSessionIds.has(s.id)) return;
     const idx = this.sessions.findIndex(x => x.id === s.id);
     if (!this.isMeaningfulSession(s)) {
       if (idx >= 0) {
@@ -558,20 +685,33 @@ class ChatStore {
     await this.persist();
   }
   async persist() {
-    try {
-      // Atomic write via tmp+rename so a crash mid-write doesn't truncate
-      // the file to zero and silently wipe every saved conversation.
+    const write = async () => {
       const { safeWriteJson } = await import('./utils/safe_write');
-      await safeWriteJson(this.plugin.app.vault.adapter, this.path, { sessions: this.sessions }, { pretty: true });
-    } catch (e) { console.warn('[Glossa] chat save failed', e); }
+      const deletedSessionIds = this.deletedRecord();
+      await safeWriteJson(this.plugin.app.vault.adapter, this.path, {
+        version: 2,
+        updatedAt: Date.now(),
+        sessions: this.sessions,
+        deletedSessionIds,
+      }, { pretty: true });
+      await this.persistDeletedJournal();
+    };
+    this.persistQueue = this.persistQueue.then(write, write);
+    try {
+      await this.persistQueue;
+    } catch (e) {
+      console.warn('[Glossa] chat save failed', e);
+    }
   }
-  getSession(id: string): ChatSession | undefined { return this.sessions.find(x => x.id === id); }
-  listSessions(): ChatSession[] { return [...this.sessions].sort((a, b) => b.updatedAt - a.updatedAt); }
+  getSession(id: string): ChatSession | undefined { return this.deletedSessionIds.has(id) ? undefined : this.sessions.find(x => x.id === id); }
+  listSessions(): ChatSession[] { return this.normalizeSessions(this.sessions).sort((a, b) => b.updatedAt - a.updatedAt); }
   async deleteSession(id: string) {
+    this.markDeleted(id);
     this.sessions = this.sessions.filter(s => s.id !== id);
     await this.persist();
   }
   async renameSession(id: string, title: string) {
+    if (this.deletedSessionIds.has(id)) return;
     const s = this.sessions.find(x => x.id === id);
     if (!s) return;
     s.title = title.trim().slice(0, 100);
@@ -579,7 +719,7 @@ class ChatStore {
     await this.persist();
   }
   async duplicateSession(id: string): Promise<ChatSession | null> {
-    const src = this.sessions.find(x => x.id === id);
+    const src = this.getSession(id);
     if (!src) return null;
     const newId = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
     const copy: ChatSession = {
@@ -596,6 +736,7 @@ class ChatStore {
     return copy;
   }
   async clearAll() {
+    for (const s of this.sessions) this.markDeleted(s.id);
     this.sessions = [];
     await this.persist();
   }

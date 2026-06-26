@@ -72,6 +72,7 @@ export const readPdf: ToolImpl = buildTool({
     name: 'read_pdf',
     description: [
       'Browse a PDF file in the vault using a task-aware pipeline. Use this for PDF attachments, papers, reports, and books.',
+      'If the user explicitly uploaded/attached a PDF, prefer the attached PDF content already present in context. Do not read the current/open PDF instead unless the user explicitly asks for the current/open file.',
       'Pipeline: first classify the PDF text layer (text/scanned/mixed/complex), keep page numbers, then extract only the minimum useful pages for the task.',
       'Modes: inspect/rename reads the first page and title candidates; summarize reads front matter plus ending pages; search locates query hit pages and returns snippets; pages/full return page-grouped text.',
       'For scanned/image-only PDFs or complex visual layouts, this tool reports that rendering/OCR or visual inspection is needed instead of pretending the text layer is complete.',
