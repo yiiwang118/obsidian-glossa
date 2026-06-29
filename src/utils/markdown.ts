@@ -19,9 +19,10 @@ export async function renderInto(
   component: Component,
   sourcePath = ''
 ) {
-  const raw = src || '';
+  const raw = sanitizeMarkdownResourceUrls(src || '');
   target.empty();
   await MarkdownRenderer.render(app, raw, target, sourcePath, component);
+  scrubRenderedResourceUrls(target);
   // Only touch MathJax when the source actually contains math. For ordinary
   // prose/tool output this avoids waking Obsidian's MathJax font loader, which
   // can produce noisy "slow network / fallback font" intervention warnings.
@@ -31,6 +32,52 @@ export async function renderInto(
     const mj = (ownerWindow as any).MathJax ?? (window as any).MathJax;
     if (mj?.typesetPromise) await mj.typesetPromise([target]);
   } catch { /* ignore */ }
+}
+
+const BLOCKED_IMAGE_SCHEMES = /^(?:upload):\/\//i;
+
+/**
+ * Some imported/web content contains editor-private image URLs such as
+ * `upload://...`. Chromium cannot resolve those inside Obsidian and logs
+ * ERR_UNKNOWN_URL_SCHEME for every rendered image. Replace them before the
+ * Markdown renderer creates <img> elements; keep a small textual marker so the
+ * user can still tell an omitted image existed.
+ */
+export function sanitizeMarkdownResourceUrls(src: string): string {
+  if (!src || !/\b(?:upload):\/\//i.test(src)) return src;
+  let out = src.replace(/!\[([^\]]*)\]\(\s*(upload:\/\/[^)\s]+)(?:\s+["'][^"']*["'])?\s*\)/gi, (_m, alt, url) => {
+    return omittedImageText(alt || basenameFromUrl(url));
+  });
+  out = out.replace(/<img\b[^>]*\bsrc\s*=\s*(["'])(upload:\/\/[^"']+)\1[^>]*>/gi, (_m, _q, url) => {
+    return omittedImageText(basenameFromUrl(url));
+  });
+  out = out.replace(/<img\b[^>]*\bsrc\s*=\s*(upload:\/\/[^\s>]+)[^>]*>/gi, (_m, url) => {
+    return omittedImageText(basenameFromUrl(url));
+  });
+  return out;
+}
+
+function scrubRenderedResourceUrls(target: HTMLElement) {
+  const imgs = target.querySelectorAll('img');
+  for (const img of Array.from(imgs)) {
+    const src = img.getAttribute('src') || '';
+    if (!BLOCKED_IMAGE_SCHEMES.test(src)) continue;
+    const replacement = target.ownerDocument.createElement('span');
+    replacement.className = 'nc-omitted-image';
+    replacement.textContent = omittedImageText(img.getAttribute('alt') || basenameFromUrl(src));
+    img.replaceWith(replacement);
+  }
+}
+
+function omittedImageText(label: string): string {
+  const clean = (label || 'image').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return `[image omitted: ${clean || 'unsupported source'}]`;
+}
+
+function basenameFromUrl(url: string): string {
+  const clean = (url || '').split(/[?#]/)[0] || '';
+  const last = clean.split('/').pop() || clean;
+  return last || 'unsupported source';
 }
 
 function hasMarkdownMath(src: string): boolean {

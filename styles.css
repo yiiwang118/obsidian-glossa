@@ -493,6 +493,191 @@
   padding: 10px 14px 6px;
   display: flex; flex-direction: column; gap: 6px;
 }
+
+/* Conversation minimap: a compact jump rail for long sessions. It is
+   positioned outside the text column so it never changes message width. */
+.nc-thread-rail {
+  position: absolute;
+  left: 0;
+  top: 102px;
+  bottom: 122px;
+  width: 15px;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out-quart);
+}
+.nc-thread-rail.dense { gap: 2px; }
+.nc-thread-rail.very-dense { gap: 1px; }
+.glossa-view:has(.nc-msg) .nc-thread-rail {
+  opacity: 1;
+}
+.nc-thread-rail-marker {
+  position: relative;
+  width: 15px;
+  height: 6px;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  pointer-events: auto;
+  cursor: pointer;
+  opacity: 0.55;
+  transition:
+    opacity var(--dur-fast) var(--ease-out-quart),
+    transform var(--dur-fast) var(--ease-out-quart);
+}
+.nc-thread-rail.dense .nc-thread-rail-marker { height: 5px; }
+.nc-thread-rail.very-dense .nc-thread-rail-marker { height: 4px; }
+.nc-thread-rail.dense .nc-thread-rail-marker::before,
+.nc-thread-rail.very-dense .nc-thread-rail-marker::before {
+  top: 1px;
+}
+.nc-thread-rail-marker::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 8px;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 52%, transparent);
+  transition:
+    width var(--dur-fast) var(--ease-out-quart),
+    height var(--dur-fast) var(--ease-out-quart),
+    left var(--dur-fast) var(--ease-out-quart),
+    top var(--dur-fast) var(--ease-out-quart),
+    background var(--dur-fast) var(--ease-out-quart);
+}
+.nc-thread-rail-marker.user::before {
+  left: 0;
+  width: 8px;
+  height: 2px;
+  background: color-mix(in srgb, var(--text-muted) 58%, transparent);
+}
+.nc-thread-rail-marker.tool::before,
+.nc-thread-rail-marker.summary::before {
+  background: color-mix(in srgb, var(--text-muted) 54%, transparent);
+}
+.nc-thread-rail-marker.error::before {
+  left: 0;
+  width: 8px;
+  height: 2px;
+  background: color-mix(in srgb, var(--text-error, #ef4444) 58%, transparent);
+}
+.nc-thread-rail-marker:hover,
+.nc-thread-rail-marker:focus-visible {
+  opacity: 1;
+  transform: none;
+}
+.nc-thread-rail-marker:hover::before,
+.nc-thread-rail-marker:focus-visible::before,
+.nc-thread-rail-marker.hover-focus::before {
+  left: 0;
+  top: 1px;
+  width: 18px;
+  height: 3px;
+  background: var(--text-normal);
+}
+.nc-thread-rail-marker.active {
+  opacity: 0.95;
+}
+.nc-thread-rail-marker.active::before {
+  background: color-mix(in srgb, var(--text-normal) 86%, transparent);
+}
+.nc-thread-rail-marker.near-1 { opacity: 0.9; }
+.nc-thread-rail-marker.near-1::before {
+  width: 16px;
+  background: color-mix(in srgb, var(--text-normal) 78%, transparent);
+}
+.nc-thread-rail-marker.near-2 { opacity: 0.78; }
+.nc-thread-rail-marker.near-2::before {
+  width: 14px;
+  background: color-mix(in srgb, var(--text-normal) 62%, transparent);
+}
+.nc-thread-rail-marker.near-3 { opacity: 0.66; }
+.nc-thread-rail-marker.near-3::before {
+  width: 12px;
+  background: color-mix(in srgb, var(--text-normal) 48%, transparent);
+}
+.nc-thread-rail-marker.near-4 { opacity: 0.58; }
+.nc-thread-rail-marker.near-4::before {
+  width: 10px;
+  background: color-mix(in srgb, var(--text-normal) 38%, transparent);
+}
+.nc-thread-rail-marker.near-5 { opacity: 0.52; }
+.nc-thread-rail-marker.near-5::before {
+  width: 9px;
+  background: color-mix(in srgb, var(--text-normal) 30%, transparent);
+}
+.nc-thread-preview {
+  position: absolute;
+  left: 22px;
+  width: min(360px, calc(100% - 54px));
+  max-height: 164px;
+  overflow: hidden;
+  z-index: 30;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+  background: color-mix(in srgb, var(--background-primary) 94%, transparent);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+.theme-dark .nc-thread-preview {
+  background: color-mix(in srgb, var(--background-primary) 90%, #0f172a 10%);
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.34);
+}
+.nc-thread-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 6px;
+}
+.nc-thread-preview-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+  color: var(--text-normal);
+  font-size: calc(var(--nc-base-font, 13px) - 1px);
+}
+.nc-thread-preview-time {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: var(--nc-font-xs, 10px);
+  color: var(--text-faint);
+}
+.nc-thread-preview-body {
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text-muted);
+  line-height: 1.45;
+  font-size: calc(var(--nc-base-font, 13px) - 1px);
+}
+.nc-thread-preview.user {
+  border-color: color-mix(in srgb, var(--text-normal) 18%, var(--background-modifier-border));
+}
+.nc-thread-preview.error {
+  border-color: color-mix(in srgb, var(--text-error, #ef4444) 26%, var(--background-modifier-border));
+}
+@media (max-width: 520px) {
+  .nc-thread-rail { display: none; }
+}
+
 .nc-msg {
   display: flex; flex-direction: column;
   gap: 2px;

@@ -2,6 +2,61 @@
 
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] — 2026-06-29
+
+Long-chat navigation and render-noise cleanup.
+
+### Added
+- Added a compact left-side conversation rail for long sessions. It records user prompts only, highlights the current prompt while scrolling, and lets users jump back to an earlier question without cluttering the transcript.
+- Added hover previews for rail markers with the original user prompt and relative time.
+- Added regression coverage for unsupported Markdown image sources.
+
+### Fixed
+- Replaced unsupported `upload://...` image URLs before Markdown rendering, preventing Chromium `ERR_UNKNOWN_URL_SCHEME` console noise from imported or copied web content.
+- Added a post-render scrub for any unsupported image URL that survives Markdown parsing.
+- Reset the conversation rail whenever a session is compacted, regenerated, switched, or cleared so stale markers cannot point at old DOM nodes.
+
+### Changed
+- Kept the rail visually close to Codex-style navigation: dense edge markers, active-state darkening, and magnetic expansion only while hovering.
+- Avoided extra MathJax work for ordinary prose by keeping Markdown rendering on the lighter path unless math is actually present.
+
+## [0.5.1] — 2026-06-26
+
+Polish release after the 0.5 UI and context updates.
+
+### Added
+- Added visible attachment chips to user messages so uploaded files remain traceable after sending.
+- Added a clearer current-file context model in the composer, separating the active note from uploaded files.
+- Added README and Chinese README refreshes with concise install instructions, screenshots guidance, and community acknowledgement.
+
+### Fixed
+- Fixed uploaded attachments remaining in the composer after send.
+- Fixed several context-display edge cases where the active file and uploaded file were visually ambiguous.
+- Fixed Markdown rendering paths that could wake MathJax unnecessarily for non-math content.
+
+### Changed
+- Refined the empty-state branding, command suggestions, tool rows, reasoning rows, and action summaries for a cleaner AI Studio-inspired UI.
+- Improved settings modal spacing and endpoint form layout across light and dark themes.
+
+## [0.5.0] — 2026-06-26
+
+Major UI and agent-experience refresh.
+
+### Added
+- Added an AI Studio-inspired visual refresh for the sidebar, input composer, action rows, and status pills.
+- Added richer PDF browsing behavior and clearer PDF context handling in the agent pipeline.
+- Added support for displaying uploaded file context in the active conversation flow.
+
+### Fixed
+- Fixed multiple sidebar icon color mismatches and toolbar contrast problems.
+- Fixed duplicate or stale Thinking indicators during long-running agent turns.
+- Fixed several history/session naming and empty-chat persistence edge cases.
+
+### Changed
+- Reworked agent activity presentation from verbose tool logs into compact process/action summaries.
+- Improved provider and endpoint settings layout, warnings, and reasoning-effort handling.
+- Temporarily disabled unstable reference-hover preview triggers while keeping the code path available for later refinement.
+
 ## [0.4.3] — 2026-06-25
 
 Follow-up release after the initial community listing.
@@ -96,6 +151,9 @@ First open-source release. Focuses on hardening: 6 high/medium-severity findings
 
 Last pre-open-source version. Internal-only. Not published.
 
+[0.5.2]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.5.2
+[0.5.1]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.5.1
+[0.5.0]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.5.0
 [0.4.3]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.4.3
 [0.4.2]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.4.2
 [0.4.1]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.4.1

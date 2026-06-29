@@ -72,6 +72,17 @@ interface MsgUI {
   reasoningBody?: HTMLElement;
 }
 
+interface ThreadRailItem {
+  id: string;
+  role: ChatMessage['role'];
+  kind: 'user' | 'assistant' | 'tool' | 'error' | 'summary';
+  title: string;
+  snippet: string;
+  time: number;
+  messageEl: HTMLElement;
+  markerEl: HTMLElement;
+}
+
 export class GlossaView extends ItemView {
   plugin: GlossaPlugin;
   ctx: ContextManager;
@@ -85,6 +96,12 @@ export class GlossaView extends ItemView {
   private planBoardEl: HTMLElement;
   private get currentPlan(): PlanItem[] { return this.session.plan ?? []; }
   private messagesEl: HTMLElement;
+  private threadRailEl: HTMLElement;
+  private railPreviewEl: HTMLElement | null = null;
+  private railItems: ThreadRailItem[] = [];
+  private activeRailId: string | null = null;
+  private hoverRailId: string | null = null;
+  private railScrollRaf = 0;
   private emptyEl: HTMLElement | null = null;
   inputEl: HTMLTextAreaElement;     // public so /commands can populate it
   private inputWrap: HTMLElement;   // composer card — Aurora ring lives on it
@@ -168,7 +185,13 @@ export class GlossaView extends ItemView {
     this.buildHeader();
     this.planBoardEl = el('div', { className: 'nc-plan-board', parent: this.rootEl });
     setStyle(this.planBoardEl, { display: 'none' });
+    this.threadRailEl = el('div', {
+      className: 'nc-thread-rail',
+      parent: this.rootEl,
+      attrs: { 'aria-label': 'Conversation timeline' },
+    });
     this.messagesEl = el('div', { className: 'nc-messages', parent: this.rootEl });
+    this.messagesEl.addEventListener('scroll', this.onMessagesScroll, { passive: true });
     this.renderEmpty();
     this.buildInput();
     this.costBar = el('div', { className: 'nc-cost-bar', parent: this.rootEl });
@@ -218,6 +241,14 @@ export class GlossaView extends ItemView {
   }
 
   onDomSelectionChange = debounce(() => this.refreshSelection(), 120);
+
+  private onMessagesScroll = () => {
+    if (this.railScrollRaf) return;
+    this.railScrollRaf = window.requestAnimationFrame(() => {
+      this.railScrollRaf = 0;
+      this.updateActiveRailItem();
+    });
+  };
 
   /** Apply user-tunable CSS variables to the view root. The single Font size
    *  slider in Settings drives both the base prose font (`--nc-base-font`) and
@@ -720,6 +751,7 @@ export class GlossaView extends ItemView {
      ============================================================ */
   private renderEmpty() {
     clear(this.messagesEl);
+    this.resetThreadRail();
     this.emptyEl = el('div', { className: 'nc-empty', parent: this.messagesEl });
     // Aurora orb — replaces the prior bot glyph as the hero artwork.
     // Breathing scale animation lives entirely in CSS (.g-orb-halo, .g-orb-core)
@@ -782,6 +814,7 @@ export class GlossaView extends ItemView {
     }
     const continuationCls = isContinuation ? ' nc-asst-continuation' : '';
     const wrap = el('div', { className: `nc-msg ${m.role}${m.compactSummary ? ' compact-summary collapsed' : ''}${continuationCls}`, parent: this.messagesEl });
+    wrap.setAttribute('data-message-id', m.id);
     if (m.role === 'assistant' && m.turnId) wrap.setAttribute('data-turn-id', m.turnId);
 
     const role = el('div', { className: 'nc-msg-role', parent: wrap });
@@ -942,6 +975,7 @@ export class GlossaView extends ItemView {
 
     const ui: MsgUI = { msg: m, wrap, body, activityEl, toolStack, reasoningCard, reasoningBody };
     this.msgUIs.set(m.id, ui);
+    this.registerThreadRailItem(m, ui);
 
     this.renderMessageActions(wrap, m);
     ui.actionsEl = wrap.querySelector('.nc-msg-actions') as HTMLElement;
@@ -951,6 +985,189 @@ export class GlossaView extends ItemView {
 
     if (!this.messagesEl.classList.contains('no-anim')) this.scrollToBottom();
     return ui;
+  }
+
+  private resetThreadRail() {
+    this.railItems = [];
+    this.activeRailId = null;
+    this.threadRailEl?.empty();
+    this.hideThreadRailPreview();
+  }
+
+  private registerThreadRailItem(m: ChatMessage, ui: MsgUI) {
+    if (!this.threadRailEl) return;
+    // The rail is a question navigator, not a full transcript minimap. Keeping
+    // only user turns mirrors Codex's "jump back to my prompt" workflow and
+    // avoids duplicate/stacked previews from assistant/tool segments.
+    if (m.role !== 'user') return;
+    const visibleTools = (m.toolEvents ?? []).filter(shouldRenderToolEvent);
+    const hasError = visibleTools.some(ev => ev.status === 'error' || ev.status === 'denied');
+    const kind: ThreadRailItem['kind'] = m.compactSummary
+      ? 'summary'
+      : m.role === 'user'
+        ? 'user'
+        : hasError
+          ? 'error'
+          : visibleTools.length
+            ? 'tool'
+            : 'assistant';
+    const title = this.threadRailTitle(m, visibleTools);
+    const snippet = this.threadRailSnippet(m, visibleTools);
+    const marker = el('button', {
+      className: `nc-thread-rail-marker ${kind}`,
+      parent: this.threadRailEl,
+      attrs: {
+        type: 'button',
+        'aria-label': title,
+      },
+    }) as HTMLButtonElement;
+    setVars(marker, { ['--rail-i']: String(this.railItems.length) });
+    marker.onclick = () => {
+      this.hideThreadRailPreview();
+      ui.wrap.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      this.setActiveRailItem(m.id);
+    };
+    marker.onmouseenter = () => this.showThreadRailPreview(m.id);
+    marker.onmouseleave = () => this.scheduleHideThreadRailPreview();
+    marker.onfocus = () => this.showThreadRailPreview(m.id);
+    marker.onblur = () => this.scheduleHideThreadRailPreview();
+    this.railItems.push({
+      id: m.id,
+      role: m.role,
+      kind,
+      title,
+      snippet,
+      time: m.timestamp,
+      messageEl: ui.wrap,
+      markerEl: marker,
+    });
+    this.threadRailEl.classList.toggle('dense', this.railItems.length > 28);
+    this.threadRailEl.classList.toggle('very-dense', this.railItems.length > 56);
+    window.requestAnimationFrame(() => this.updateActiveRailItem());
+  }
+
+  private threadRailTitle(m: ChatMessage, tools: ToolEvent[]): string {
+    if (m.compactSummary) return 'Compacted summary';
+    if (m.role === 'user') return this.oneLine(m.displayContent || m.content || bi('User message', '用户消息'), 64);
+    if (tools.length) {
+      const first = tools[0];
+      const more = tools.length > 1 ? ` + ${tools.length - 1}` : '';
+      return `${metaFor(first.name).label}${more}`;
+    }
+    return this.oneLine(m.content || m.reasoningContent || 'Glossa reply', 64);
+  }
+
+  private threadRailSnippet(m: ChatMessage, tools: ToolEvent[]): string {
+    const context = (m.contextSnapshot ?? []).filter(it => !it.isCurrent).map(it => it.label).slice(0, 3);
+    const contextLine = context.length ? `${bi('Attachments', '附件')}: ${context.join(', ')}` : '';
+    if (tools.length) {
+      const toolLine = tools.slice(0, 3).map(ev => `${metaFor(ev.name).label}${ev.status === 'error' ? ' failed' : ''}`).join(' · ');
+      const prose = this.oneLine(stripMarkdown(m.content || ''), 140);
+      return [toolLine, prose, contextLine].filter(Boolean).join('\n');
+    }
+    const body = this.oneLine(stripMarkdown(m.displayContent || m.content || m.reasoningContent || ''), 220);
+    return [body, contextLine].filter(Boolean).join('\n') || this.formatMessageTime(m.timestamp);
+  }
+
+  private oneLine(text: string, max: number): string {
+    const s = String(text || '').replace(/\s+/g, ' ').trim();
+    return s.length > max ? `${s.slice(0, Math.max(0, max - 1)).trim()}…` : s;
+  }
+
+  private updateActiveRailItem() {
+    if (!this.messagesEl || this.railItems.length === 0) return;
+    const top = this.messagesEl.getBoundingClientRect().top;
+    let best: ThreadRailItem | null = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (const item of this.railItems) {
+      if (!item.messageEl.isConnected) continue;
+      const rect = item.messageEl.getBoundingClientRect();
+      const dist = Math.abs(rect.top - top - 36);
+      if (rect.bottom < top + 8) {
+        if (!best) best = item;
+        continue;
+      }
+      if (dist < bestDist) {
+        best = item;
+        bestDist = dist;
+      }
+      if (rect.top > top + this.messagesEl.clientHeight) break;
+    }
+    if (best) this.setActiveRailItem(best.id);
+  }
+
+  private setActiveRailItem(id: string) {
+    if (this.activeRailId === id) return;
+    this.activeRailId = id;
+    this.updateRailFocus();
+  }
+
+  private railPreviewHideTimer = 0;
+  private showThreadRailPreview(id: string) {
+    const item = this.railItems.find(x => x.id === id);
+    if (!item || !this.rootEl) return;
+    if (this.railPreviewHideTimer) {
+      window.clearTimeout(this.railPreviewHideTimer);
+      this.railPreviewHideTimer = 0;
+    }
+    this.hideThreadRailPreview();
+    this.hoverRailId = id;
+    this.updateRailFocus();
+    const preview = el('div', { className: `nc-thread-preview ${item.kind}`, parent: this.rootEl });
+    preview.onmouseenter = () => {
+      if (this.railPreviewHideTimer) window.clearTimeout(this.railPreviewHideTimer);
+      this.railPreviewHideTimer = 0;
+    };
+    preview.onmouseleave = () => this.scheduleHideThreadRailPreview();
+    const header = el('div', { className: 'nc-thread-preview-head', parent: preview });
+    el('span', { className: 'nc-thread-preview-title', text: item.title, parent: header });
+    el('span', { className: 'nc-thread-preview-time', text: this.relativePreviewTime(item.time), parent: header });
+    const body = el('div', { className: 'nc-thread-preview-body', parent: preview });
+    body.textContent = item.snippet || item.title;
+    const railRect = item.markerEl.getBoundingClientRect();
+    const rootRect = this.rootEl.getBoundingClientRect();
+    const top = Math.max(8, Math.min(rootRect.height - 116, railRect.top - rootRect.top - 28));
+    setStyle(preview, { top: `${top}px` });
+    this.railPreviewEl = preview;
+  }
+
+  private scheduleHideThreadRailPreview() {
+    if (this.railPreviewHideTimer) window.clearTimeout(this.railPreviewHideTimer);
+    this.railPreviewHideTimer = window.setTimeout(() => this.hideThreadRailPreview(), 120);
+  }
+
+  private hideThreadRailPreview() {
+    if (this.railPreviewHideTimer) {
+      window.clearTimeout(this.railPreviewHideTimer);
+      this.railPreviewHideTimer = 0;
+    }
+    this.railPreviewEl?.remove();
+    this.railPreviewEl = null;
+    this.hoverRailId = null;
+    this.updateRailFocus();
+  }
+
+  private updateRailFocus() {
+    const hoverIndex = this.hoverRailId ? this.railItems.findIndex(x => x.id === this.hoverRailId) : -1;
+    for (let i = 0; i < this.railItems.length; i++) {
+      const marker = this.railItems[i].markerEl;
+      const distance = hoverIndex >= 0 ? Math.abs(i - hoverIndex) : 99;
+      marker.classList.toggle('active', this.activeRailId === this.railItems[i].id);
+      marker.classList.toggle('hover-focus', this.hoverRailId === this.railItems[i].id);
+      marker.classList.toggle('near-1', distance === 1);
+      marker.classList.toggle('near-2', distance === 2);
+      marker.classList.toggle('near-3', distance === 3);
+      marker.classList.toggle('near-4', distance === 4);
+      marker.classList.toggle('near-5', distance === 5);
+    }
+  }
+
+  private relativePreviewTime(ts: number): string {
+    const diff = Date.now() - ts;
+    if (diff < 60_000) return bi('now', '刚刚');
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
+    return `${Math.floor(diff / 86_400_000)}d`;
   }
 
   private renderContextSnapshot(parent: HTMLElement, m: ChatMessage) {
@@ -2522,6 +2739,7 @@ export class GlossaView extends ItemView {
       applyCompact(this.session, result, keepRecent);
       this.msgUIs.clear();
       clear(this.messagesEl);
+      this.resetThreadRail();
       this.messagesEl.classList.add('no-anim');
       for (const m of this.session.messages) this.renderMessage(m);
       this.compactAllProcessGroups();
@@ -2541,6 +2759,7 @@ export class GlossaView extends ItemView {
     if (!ok) { quickNotice('No snapshot for this summary.'); return; }
     this.msgUIs.clear();
     clear(this.messagesEl);
+    this.resetThreadRail();
     this.messagesEl.classList.add('no-anim');
     for (const m of this.session.messages) this.renderMessage(m);
     this.compactAllProcessGroups();
@@ -3170,6 +3389,7 @@ export class GlossaView extends ItemView {
     this.sessionCostUSD = 0; this.sessionInputTokens = 0; this.sessionOutputTokens = 0;
     this.msgUIs.clear();
     clear(this.messagesEl);
+    this.resetThreadRail();
     this.renderPlanBoard();   // empty since session.plan is undefined
     this.renderEmpty();
     this.renderCostBar();
@@ -3189,6 +3409,7 @@ export class GlossaView extends ItemView {
     this.session = s;
     this.msgUIs.clear();
     clear(this.messagesEl);
+    this.resetThreadRail();
     if (this.session.messages.length === 0) {
       this.renderEmpty();
     } else {
@@ -3336,6 +3557,7 @@ export class GlossaView extends ItemView {
     if (!lastUser) return;
     this.msgUIs.clear();
     clear(this.messagesEl);
+    this.resetThreadRail();
     if (this.session.messages.length === 0) this.renderEmpty();
     else {
       this.messagesEl.classList.add('no-anim');
@@ -3367,6 +3589,20 @@ function formatElapsed(ms: number): string {
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   const m = Math.floor(ms / 60_000); const s = Math.floor((ms % 60_000) / 1000);
   return `${m}m${s}s`;
+}
+
+function stripMarkdown(src: string): string {
+  return String(src || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, path, alias) => alias || path)
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^>\s?/gm, '')
+    .replace(/[*_~>#-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function pillIcon(it: ContextItem): string {
