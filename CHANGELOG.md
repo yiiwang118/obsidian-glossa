@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-06-30
+
+Web research, safer downloads, and source provenance.
+
+### Added
+- Added `web_search` with provider routing for DuckDuckGo, Brave, Tavily, Exa, and SerpAPI, including domain filters, deduplication, and simple trust/asset ranking.
+- Added `web_research`, a bounded search + fetch + extract pipeline for current information and download discovery.
+- Added `download_file` for saving public HTTP(S) assets into the vault with redirect safety, size caps, overwrite controls, SHA-256 hashes, and optional `.source.json` provenance.
+- Added optional post-download PDF inspection so downloaded papers can be quickly classified before deeper `read_pdf` extraction.
+- Added Advanced settings for web search provider/API key, default download folder, size caps, auto-download permission, and provenance records.
+
+### Changed
+- Reworked `web_fetch` around capped byte reads, cleaner HTML-to-Markdown extraction, metadata output, link extraction, and prompt-guided source excerpts.
+- Updated agent workflow guidance so unknown URLs use `web_research`, known URLs use `web_fetch`, and explicit saves use `download_file`.
+- Consolidated shared web-tool helpers for provider normalization, permission handling, domain normalization, and numeric caps.
+
+### Tests
+- Added web content extraction tests, web tool registration/ranking tests, and large-page performance coverage for extraction and prompt-guided summarization.
+
 ## [0.5.3] — 2026-06-30
 
 Update awareness and long-session polish.

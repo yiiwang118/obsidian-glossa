@@ -351,6 +351,86 @@ export class GlossaSettingTab extends PluginSettingTab {
     // — labels are translated and frequently renamed.
     proxySetting.settingEl.dataset.glossaId = 'global-proxy';
 
+    /* ----- Web research ----- */
+    this.renderHeading(containerEl, bi('Web research', '网页搜索'), 'advanced');
+    new Setting(containerEl)
+      .setName(bi('Search provider', '搜索 provider'))
+      .setDesc(bi('Auto uses free vertical sources first, then fallback search. For Claude/Codex-like quality, configure Brave, Tavily, Exa, or SerpAPI.', 'Auto 会先用免费垂直源，再 fallback 搜索。想接近 Claude/Codex 的搜索质量，建议配置 Brave、Tavily、Exa 或 SerpAPI。'))
+      .addDropdown(d => d
+        .addOption('auto', 'Auto (recommended)')
+        .addOption('duckduckgo', 'DuckDuckGo (fallback)')
+        .addOption('brave', 'Brave Search')
+        .addOption('tavily', 'Tavily')
+        .addOption('exa', 'Exa')
+        .addOption('serpapi', 'SerpAPI')
+        .setValue(this.plugin.settings.webSearchProvider)
+        .onChange(async v => {
+          this.plugin.settings.webSearchProvider = v as any;
+          await this.plugin.saveSettings();
+          this.display();
+        }));
+    if (this.plugin.settings.webSearchProvider !== 'duckduckgo' && this.plugin.settings.webSearchProvider !== 'auto') {
+      new Setting(containerEl)
+        .setName(bi('Search API key', '搜索 API key'))
+        .setDesc(bi('Stored in plugin settings. Use a provider-specific key.', '保存在插件设置中。填写对应 provider 的 key。'))
+        .addText(t => {
+          t.inputEl.type = 'password';
+          t.setPlaceholder(API_KEY_PLACEHOLDER)
+            .setValue(this.plugin.settings.webSearchApiKey ?? '')
+            .onChange(async v => {
+              this.plugin.settings.webSearchApiKey = v.trim();
+              await this.plugin.saveSettings();
+            });
+        });
+    }
+    new Setting(containerEl)
+      .setName(bi('Auto-approve web reads', '自动批准网页读取'))
+      .setDesc(bi('Skip approval for web_search, web_research, and web_fetch. Downloads still need their own setting/approval.', '跳过 web_search、web_research、web_fetch 的审批。下载仍然单独受下载设置/审批控制。'))
+      .addToggle(t => t
+        .setValue(!!this.plugin.settings.webAutoApproveNetworkReads)
+        .onChange(async v => {
+          this.plugin.settings.webAutoApproveNetworkReads = v;
+          await this.plugin.saveSettings();
+        }));
+    new Setting(containerEl)
+      .setName(bi('Download folder', '下载目录'))
+      .setDesc(bi('Default vault folder for download_file when no path is given.', 'download_file 没指定路径时的默认 vault 目录。'))
+      .addText(t => t
+        .setPlaceholder('Downloads/Glossa')
+        .setValue(this.plugin.settings.webDefaultDownloadFolder)
+        .onChange(async v => {
+          this.plugin.settings.webDefaultDownloadFolder = v.trim() || 'Downloads/Glossa';
+          await this.plugin.saveSettings();
+        }));
+    new Setting(containerEl)
+      .setName(bi('Max download MB', '最大下载 MB'))
+      .setDesc(bi('Safety cap for download_file. Tool args can only lower or raise within the hard cap.', 'download_file 的安全上限。工具参数仍受硬上限限制。'))
+      .addText(t => t
+        .setValue(String(Math.round((this.plugin.settings.webMaxDownloadBytes ?? 80 * 1024 * 1024) / (1024 * 1024))))
+        .onChange(async v => {
+          const mb = parseClampedInt(v, 80, 1, 250);
+          this.plugin.settings.webMaxDownloadBytes = mb * 1024 * 1024;
+          await this.plugin.saveSettings();
+        }));
+    new Setting(containerEl)
+      .setName(bi('Allow auto download', '允许自动下载'))
+      .setDesc(bi('Off = model should ask before downloads even in Act mode. Recommended off.', '关闭 = 即使 Act 模式也应先确认再下载。推荐关闭。'))
+      .addToggle(t => t
+        .setValue(!!this.plugin.settings.webAllowAutoDownload)
+        .onChange(async v => {
+          this.plugin.settings.webAllowAutoDownload = v;
+          await this.plugin.saveSettings();
+        }));
+    new Setting(containerEl)
+      .setName(bi('Save provenance', '保存来源记录'))
+      .setDesc(bi('Write a .source.json file next to downloaded files.', '在下载文件旁边写入 .source.json 来源记录。'))
+      .addToggle(t => t
+        .setValue(this.plugin.settings.webSaveProvenance !== false)
+        .onChange(async v => {
+          this.plugin.settings.webSaveProvenance = v;
+          await this.plugin.saveSettings();
+        }));
+
     /* ----- Context ----- */
     this.renderHeading(containerEl, bi('Context', '上下文'), 'advanced');
     new Setting(containerEl).setName(bi('Auto-attach current file', '自动附加当前文件')).addToggle(t => t

@@ -154,6 +154,16 @@ this — plan the edit as a single envelope from the start.
 
 Reads (auto-approved): \`read_note\`, \`grep_vault\`, \`search_vault\`, \`list_files\`, \`semantic_search\`, \`get_active_file\`, \`query_metadata\`.
 
+# Web workflow
+
+- If the user gives a concrete URL and asks what it says, use \`web_fetch({url, prompt, mode})\`.
+- If the URL is unknown or the user asks to find current/public information, prefer \`web_research\` so search, source fetching, and extraction happen in one bounded pipeline.
+- Use \`web_search\` directly only when you need a raw list of candidate sources.
+- If the user asks to save, download, inspect, or archive a web asset, use \`download_file\` after finding the direct asset URL. Then inspect the saved vault file with \`read_pdf\`, \`view_image\`, or \`read_note\` as appropriate.
+- For papers, GitHub repositories/releases, and official documentation, use \`web_research\` first; its auto provider can query specialized sources before generic web search.
+- Do not invent download links. Preserve source URLs and mention saved vault paths.
+- Avoid broad repeated searches. One good query, optional domain filter, then act.
+
 # Image workflow
 
 - For image questions, call \`view_image\` when the image is a vault file and you need visual evidence.

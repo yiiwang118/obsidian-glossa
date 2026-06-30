@@ -21,13 +21,23 @@ Most AI note tools are either too small to be useful or too closed to trust. Glo
 
 Glossa is not a cloud service. It runs as a local Obsidian desktop plugin. Your data goes only to the model providers, embedding endpoints, websites, MCP servers, or local CLI tools you explicitly configure or approve.
 
-## New in 0.5.3
+## What's New
 
-| | |
-|---|---|
-| ✨ **Update notice** | Glossa can now tell you when a newer GitHub release is available, with a small dismissible sidebar pill and a manual check command. |
-| 🧭 **Cleaner long chats** | The left conversation rail is quieter, faster, and focused on user prompts only, so long sessions are easier to revisit. |
-| ⚙️ **Smoother runtime** | Streaming turns cache more UI state, avoid redundant Markdown scans, and behave better in narrow sidebars. |
+- **2026-06-30 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 🌐 Web research pipeline.** Glossa can now search through the free auto provider or Brave, Tavily, Exa, and SerpAPI, then fetch bounded source notes instead of dumping raw pages.
+- **2026-06-30 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 📥 Safer downloads.** Public PDFs, images, release assets, datasets, and other files can be saved into the vault with size caps, private-network redirect blocking, SHA-256 hashes, and optional `.source.json` provenance.
+- **2026-06-30 — ✨ Update awareness.** A small sidebar notice can tell you when a newer GitHub release is available, with a manual check command and a dismiss option.
+- **2026-06-29 — 🧭 Long-chat navigation.** A compact conversation rail records user prompts only, highlights the current prompt, and lets you jump back without cluttering the transcript.
+- **2026-06-26 — 📎 Context clarity.** Uploaded files now remain visible on the user message after sending, while the composer separates user attachments from the current open file.
+
+<details>
+<summary>Earlier updates from the first community release path (2026-06-23 — 2026-06-26)</summary>
+
+- **2026-06-26 — 0.5.0 UI refresh.** AI Studio-inspired sidebar polish, cleaner activity rows, better PDF context handling, fixed duplicate Thinking indicators, and improved history/session behavior.
+- **2026-06-25 — 0.4.3 release polish.** Better PDF and image workflow guidance, `xhigh` reasoning-effort support, safer selection capture, and custom API tool-call fixes.
+- **2026-06-23 — 0.4.2 submission follow-up.** Obsidian release-readiness cleanup, trusted SVG rendering without unsafe `innerHTML`, and GitHub Actions artifact provenance.
+- **2026-06-23 — 0.4.1 initial community submission pass.** Added `read_pdf`, release checks, local CLI warning banners, conservative default permissions, and safer large-diff previews.
+
+</details>
 
 ## Highlights
 
@@ -84,7 +94,7 @@ Then reload Obsidian and enable **Glossa** under Community plugins.
 | 🖼 Image | Ask about screenshots, diagrams, UI bugs, or visual evidence. |
 | 🗂 Folder / tag | Give the model a scoped view of a project area. |
 | ✂ Selection | Transform exactly the selected passage without pasting it manually. |
-| 🌐 Web page | Fetch and use external context with explicit intent. |
+| 🌐 Web page / search | Fetch a known page, search current sources, or download public assets with explicit approval. |
 
 Glossa treats user-attached files as the primary target for phrases like “this file” or “this PDF”. The current open file is kept as ambient context unless you explicitly ask for it.
 

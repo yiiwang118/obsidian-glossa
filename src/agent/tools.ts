@@ -28,6 +28,9 @@ import { semanticSearch } from './tools/semantic_search';
 import { viewImage } from './tools/view_image';
 import { readPdf } from './tools/read_pdf';
 import { webFetch } from './tools/web_fetch';
+import { webSearch } from './tools/web_search';
+import { webResearch } from './tools/web_research';
+import { downloadFile } from './tools/download_file';
 import { skillTool } from './tools/skill';
 import { toolSearchTool } from './tools/tool_search';
 
@@ -102,7 +105,10 @@ export const TOOLS: Record<string, ToolImpl> = {
   semantic_search: semanticSearch,
   view_image: viewImage,
   read_pdf: readPdf,
+  web_research: webResearch,
+  web_search: webSearch,
   web_fetch: webFetch,
+  download_file: downloadFile,
   // Unified skill tool (P0-3) — supersedes the legacy pair below, which remain
   // registered with [deprecated] markers so old sessions / docs still work.
   skill: skillTool,

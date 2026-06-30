@@ -119,6 +119,21 @@ export const TOOL_META: Record<string, ToolMeta> = {
     color: '#b66cf0', category: 'web',
     summarize: a => a.url,
   },
+  web_search: {
+    icon: ICON.globe, label: 'Web search', verb: 'Searching web',
+    color: '#4f7cff', category: 'web',
+    summarize: a => `"${String(a.query ?? '').slice(0, 48)}"`,
+  },
+  web_research: {
+    icon: ICON.globe, label: 'Web research', verb: 'Researching web',
+    color: '#4f7cff', category: 'web',
+    summarize: a => `"${String(a.goal ?? a.query ?? '').slice(0, 48)}"`,
+  },
+  download_file: {
+    icon: ICON.file, label: 'Download', verb: 'Downloading',
+    color: '#2f9e73', category: 'web',
+    summarize: a => a.save_to || a.filename || a.url,
+  },
   attempt_completion: {
     icon: ICON.check, label: 'Complete', verb: 'Wrapping up',
     color: '#3fb950', category: 'system',

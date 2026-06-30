@@ -193,6 +193,7 @@ export interface CustomPrompt {
 
 export type PermissionLevel = 'read-only' | 'workspace-write' | 'full';
 export type RunMode = 'plan' | 'act';
+export type WebSearchProvider = 'auto' | 'duckduckgo' | 'brave' | 'tavily' | 'exa' | 'serpapi';
 
 /** A persisted decision the user made during a prior approval — used to auto-resolve
  *  future calls of the same tool against the same scope.
@@ -323,6 +324,15 @@ export interface GlossaSettings {
   globalProxy: string;
   customApiUseObsidianFetch: boolean;
 
+  // web research / downloads
+  webSearchProvider: WebSearchProvider;
+  webSearchApiKey: string;
+  webAutoApproveNetworkReads: boolean;
+  webDefaultDownloadFolder: string;
+  webMaxDownloadBytes: number;
+  webAllowAutoDownload: boolean;
+  webSaveProvenance: boolean;
+
   // UI
   uiLanguage: 'en' | 'zh' | 'auto';
   /** Font size (px) for reasoning card body. Range 10–18. Default 12. */
@@ -412,6 +422,13 @@ export const DEFAULT_SETTINGS: GlossaSettings = {
   chatsFolder: 'Chats',
   globalProxy: '',
   customApiUseObsidianFetch: false,
+  webSearchProvider: 'auto',
+  webSearchApiKey: '',
+  webAutoApproveNetworkReads: false,
+  webDefaultDownloadFolder: 'Downloads/Glossa',
+  webMaxDownloadBytes: 80 * 1024 * 1024,
+  webAllowAutoDownload: false,
+  webSaveProvenance: true,
   encryptionEnabled: false,
   encryptionSaltBase64: '',
   encryptionVerifier: '',
