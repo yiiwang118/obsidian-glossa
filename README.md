@@ -11,6 +11,8 @@ Chat with your notes, attach real context, run careful vault tools, and switch b
 [![CI](https://github.com/yiiwang118/obsidian-glossa/actions/workflows/ci.yml/badge.svg)](https://github.com/yiiwang118/obsidian-glossa/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-111827.svg)](LICENSE)
 
+<img src="docs/assets/glossa-hero.png" alt="Glossa running inside Obsidian" width="100%">
+
 </div>
 
 ---

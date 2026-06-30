@@ -12,6 +12,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-111827.svg)](LICENSE)
 [![English](https://img.shields.io/badge/English-README-2563EB)](README.md)
 
+<img src="docs/assets/glossa-hero.png" alt="Glossa 在 Obsidian 中运行" width="100%">
+
 </div>
 
 ---
