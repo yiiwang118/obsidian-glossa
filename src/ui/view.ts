@@ -66,6 +66,8 @@ interface MsgUI {
   wrap: HTMLElement;
   body: HTMLElement;
   activityEl?: HTMLElement;
+  elapsedEl?: HTMLElement;
+  activityTimeEl?: HTMLElement;
   toolStack?: HTMLElement;
   actionsEl?: HTMLElement;
   reasoningCard?: HTMLElement;
@@ -91,6 +93,8 @@ export class GlossaView extends ItemView {
   private rootEl: HTMLElement;
   private modelBtn: HTMLElement;
   private tokenBadge: HTMLElement;
+  private updatePillEl: HTMLElement;
+  private updatePopoverEl: HTMLElement | null = null;
   private contextBarEl: HTMLElement;
   private selectionPreviewEl: HTMLElement;
   private planBoardEl: HTMLElement;
@@ -102,6 +106,7 @@ export class GlossaView extends ItemView {
   private activeRailId: string | null = null;
   private hoverRailId: string | null = null;
   private railScrollRaf = 0;
+  private railActiveUpdateRaf = 0;
   private emptyEl: HTMLElement | null = null;
   inputEl: HTMLTextAreaElement;     // public so /commands can populate it
   private inputWrap: HTMLElement;   // composer card — Aurora ring lives on it
@@ -246,7 +251,7 @@ export class GlossaView extends ItemView {
     if (this.railScrollRaf) return;
     this.railScrollRaf = window.requestAnimationFrame(() => {
       this.railScrollRaf = 0;
-      this.updateActiveRailItem();
+      this.scheduleThreadRailActiveUpdate();
     });
   };
 
@@ -309,6 +314,10 @@ export class GlossaView extends ItemView {
     this.tokenBadge = el('span', { className: 'nc-token-badge', parent: header, title: t('token_total') });
     this.updateTokenBadge();
 
+    this.updatePillEl = el('button', { className: 'nc-update-pill', parent: header, type: 'button' });
+    this.updatePillEl.onclick = () => this.toggleUpdatePopover();
+    this.updateUpdatePill();
+
     el('span', { className: 'nc-header-spacer', parent: header });
 
     const newBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('new_chat'), type: 'button', attrs: { 'aria-label': t('new_chat') } });
@@ -332,8 +341,85 @@ export class GlossaView extends ItemView {
   refreshFromSettings() {
     this.updateModelBtn();
     this.updateModeToggle();
+    this.updateUpdatePill();
     this.renderCostBar();
     this.refreshComposerPills?.();
+  }
+
+  private updateUpdatePill() {
+    if (!this.updatePillEl) return;
+    const info = this.plugin.updateInfo;
+    if (!info) {
+      setStyle(this.updatePillEl, { display: 'none' });
+      this.hideUpdatePopover();
+      return;
+    }
+    setStyle(this.updatePillEl, { display: '' });
+    this.updatePillEl.empty();
+    const icon = el('span', { className: 'nc-update-pill-icon', parent: this.updatePillEl });
+    setTrustedSvg(icon, ICON.sparkles);
+    el('span', { className: 'nc-update-pill-text', text: `Update ${info.latestVersion}`, parent: this.updatePillEl });
+  }
+
+  private toggleUpdatePopover() {
+    if (this.updatePopoverEl?.isConnected) { this.hideUpdatePopover(); return; }
+    this.showUpdatePopover();
+  }
+
+  private showUpdatePopover() {
+    const info = this.plugin.updateInfo;
+    if (!info || !this.rootEl || !this.updatePillEl) return;
+    this.hideUpdatePopover();
+    const pop = el('div', { className: 'nc-update-popover', parent: this.rootEl });
+    const head = el('div', { className: 'nc-update-popover-head', parent: pop });
+    const mark = el('span', { className: 'nc-update-popover-icon', parent: head });
+    setTrustedSvg(mark, ICON.sparkles);
+    const title = el('div', { className: 'nc-update-popover-title', parent: head });
+    el('strong', { text: bi('Update available', '发现新版本'), parent: title });
+    el('span', { text: `${info.currentVersion} → ${info.latestVersion}`, parent: title });
+    const close = el('button', { className: 'nc-update-popover-close', parent: head, type: 'button' });
+    setTrustedSvg(close, ICON.x);
+    close.onclick = () => this.hideUpdatePopover();
+
+    const body = el('div', { className: 'nc-update-popover-body', parent: pop });
+    if (info.notes.length) {
+      const list = el('ul', { parent: body });
+      for (const note of info.notes.slice(0, 4)) el('li', { text: note, parent: list });
+    } else {
+      el('p', {
+        text: bi(
+          'A new GitHub release is available. It may take a little while to appear in Obsidian updates.',
+          'GitHub 已发布新版本，Obsidian 插件市场同步可能稍有延迟。',
+        ),
+        parent: body,
+      });
+    }
+    const actions = el('div', { className: 'nc-update-popover-actions', parent: pop });
+    const release = el('button', { className: 'nc-update-action primary', text: 'GitHub Release', parent: actions, type: 'button' });
+    release.onclick = () => { window.open(info.releaseUrl); };
+    const market = el('button', { className: 'nc-update-action', text: 'Obsidian', parent: actions, type: 'button' });
+    market.onclick = () => { window.open(info.obsidianUrl); };
+    const dismiss = el('button', { className: 'nc-update-action subtle', text: bi('Dismiss this version', '忽略此版本'), parent: actions, type: 'button' });
+    dismiss.onclick = () => { this.plugin.dismissUpdate(info.latestVersion).catch(() => {}); };
+
+    const pillRect = this.updatePillEl.getBoundingClientRect();
+    const rootRect = this.rootEl.getBoundingClientRect();
+    const left = Math.max(8, Math.min(rootRect.width - 332, pillRect.left - rootRect.left - 8));
+    setStyle(pop, { top: `${pillRect.bottom - rootRect.top + 8}px`, left: `${left}px` });
+    this.updatePopoverEl = pop;
+
+    const onDocClick = (evt: MouseEvent) => {
+      const target = evt.target as HTMLElement;
+      if (pop.contains(target) || this.updatePillEl.contains(target)) return;
+      this.hideUpdatePopover();
+      activeDocument.removeEventListener('mousedown', onDocClick, true);
+    };
+    window.setTimeout(() => activeDocument.addEventListener('mousedown', onDocClick, true), 0);
+  }
+
+  private hideUpdatePopover() {
+    this.updatePopoverEl?.remove();
+    this.updatePopoverEl = null;
   }
 
   private updateModeToggle() {
@@ -819,6 +905,7 @@ export class GlossaView extends ItemView {
 
     const role = el('div', { className: 'nc-msg-role', parent: wrap });
     const ricon = el('span', { className: 'nc-role-icon', parent: role });
+    let elapsedEl: HTMLElement | undefined;
     if (m.compactSummary) {
       // Distinct icon + label + interactive collapse/undo controls
       setTrustedSvg(ricon, ICON.folderFile);
@@ -863,13 +950,14 @@ export class GlossaView extends ItemView {
       // Live elapsed-time counter — only updates while the message is in the
       // `.streaming` state. Surfaces during the long codex-CLI "Thinking…" wait
       // (xhigh reasoning can take 30–60s before a single token surfaces).
-      el('span', { className: 'nc-msg-elapsed', parent: role, text: '' });
+      elapsedEl = el('span', { className: 'nc-msg-elapsed', parent: role, text: '' });
     }
 
     // DOM order matches the model's thought→speech progression: reasoning FIRST,
     // then prose, then tool actions. Read top-to-bottom = chronologically correct.
 
     let activityEl: HTMLElement | undefined;
+    let activityTimeEl: HTMLElement | undefined;
 
     // Persistent reasoning card (separate from inline <thinking> blocks). Goes ABOVE
     // the body so reasoning visually precedes the prose it produced.
@@ -970,10 +1058,10 @@ export class GlossaView extends ItemView {
       activityEl = el('div', { className: 'nc-turn-activity', parent: wrap });
       el('span', { className: 'nc-turn-activity-dot', parent: activityEl });
       el('span', { className: 'nc-turn-activity-text', text: 'Thinking...', parent: activityEl });
-      el('span', { className: 'nc-turn-activity-time', parent: activityEl });
+      activityTimeEl = el('span', { className: 'nc-turn-activity-time', parent: activityEl });
     }
 
-    const ui: MsgUI = { msg: m, wrap, body, activityEl, toolStack, reasoningCard, reasoningBody };
+    const ui: MsgUI = { msg: m, wrap, body, activityEl, elapsedEl, activityTimeEl, toolStack, reasoningCard, reasoningBody };
     this.msgUIs.set(m.id, ui);
     this.registerThreadRailItem(m, ui);
 
@@ -988,6 +1076,10 @@ export class GlossaView extends ItemView {
   }
 
   private resetThreadRail() {
+    if (this.railActiveUpdateRaf) {
+      window.cancelAnimationFrame(this.railActiveUpdateRaf);
+      this.railActiveUpdateRaf = 0;
+    }
     this.railItems = [];
     this.activeRailId = null;
     this.threadRailEl?.empty();
@@ -1000,25 +1092,14 @@ export class GlossaView extends ItemView {
     // only user turns mirrors Codex's "jump back to my prompt" workflow and
     // avoids duplicate/stacked previews from assistant/tool segments.
     if (m.role !== 'user') return;
-    const visibleTools = (m.toolEvents ?? []).filter(shouldRenderToolEvent);
-    const hasError = visibleTools.some(ev => ev.status === 'error' || ev.status === 'denied');
-    const kind: ThreadRailItem['kind'] = m.compactSummary
-      ? 'summary'
-      : m.role === 'user'
-        ? 'user'
-        : hasError
-          ? 'error'
-          : visibleTools.length
-            ? 'tool'
-            : 'assistant';
-    const title = this.threadRailTitle(m, visibleTools);
-    const snippet = this.threadRailSnippet(m, visibleTools);
+    const kind: ThreadRailItem['kind'] = 'user';
+    const title = this.threadRailTitle(m);
+    const snippet = this.threadRailSnippet(m);
     const marker = el('button', {
       className: `nc-thread-rail-marker ${kind}`,
       parent: this.threadRailEl,
       attrs: {
         type: 'button',
-        'aria-label': title,
       },
     }) as HTMLButtonElement;
     setVars(marker, { ['--rail-i']: String(this.railItems.length) });
@@ -1043,35 +1124,30 @@ export class GlossaView extends ItemView {
     });
     this.threadRailEl.classList.toggle('dense', this.railItems.length > 28);
     this.threadRailEl.classList.toggle('very-dense', this.railItems.length > 56);
-    window.requestAnimationFrame(() => this.updateActiveRailItem());
+    this.scheduleThreadRailActiveUpdate();
   }
 
-  private threadRailTitle(m: ChatMessage, tools: ToolEvent[]): string {
+  private threadRailTitle(m: ChatMessage): string {
     if (m.compactSummary) return 'Compacted summary';
-    if (m.role === 'user') return this.oneLine(m.displayContent || m.content || bi('User message', '用户消息'), 64);
-    if (tools.length) {
-      const first = tools[0];
-      const more = tools.length > 1 ? ` + ${tools.length - 1}` : '';
-      return `${metaFor(first.name).label}${more}`;
-    }
-    return this.oneLine(m.content || m.reasoningContent || 'Glossa reply', 64);
+    return this.oneLine(m.displayContent || m.content || bi('User message', '用户消息'), 64);
   }
 
-  private threadRailSnippet(m: ChatMessage, tools: ToolEvent[]): string {
+  private threadRailSnippet(m: ChatMessage): string {
     const context = (m.contextSnapshot ?? []).filter(it => !it.isCurrent).map(it => it.label).slice(0, 3);
-    const contextLine = context.length ? `${bi('Attachments', '附件')}: ${context.join(', ')}` : '';
-    if (tools.length) {
-      const toolLine = tools.slice(0, 3).map(ev => `${metaFor(ev.name).label}${ev.status === 'error' ? ' failed' : ''}`).join(' · ');
-      const prose = this.oneLine(stripMarkdown(m.content || ''), 140);
-      return [toolLine, prose, contextLine].filter(Boolean).join('\n');
-    }
-    const body = this.oneLine(stripMarkdown(m.displayContent || m.content || m.reasoningContent || ''), 220);
-    return [body, contextLine].filter(Boolean).join('\n') || this.formatMessageTime(m.timestamp);
+    return context.length ? `${bi('Attachments', '附件')}: ${context.join(', ')}` : '';
   }
 
   private oneLine(text: string, max: number): string {
     const s = String(text || '').replace(/\s+/g, ' ').trim();
     return s.length > max ? `${s.slice(0, Math.max(0, max - 1)).trim()}…` : s;
+  }
+
+  private scheduleThreadRailActiveUpdate() {
+    if (this.railActiveUpdateRaf) return;
+    this.railActiveUpdateRaf = window.requestAnimationFrame(() => {
+      this.railActiveUpdateRaf = 0;
+      this.updateActiveRailItem();
+    });
   }
 
   private updateActiveRailItem() {
@@ -1122,8 +1198,10 @@ export class GlossaView extends ItemView {
     const header = el('div', { className: 'nc-thread-preview-head', parent: preview });
     el('span', { className: 'nc-thread-preview-title', text: item.title, parent: header });
     el('span', { className: 'nc-thread-preview-time', text: this.relativePreviewTime(item.time), parent: header });
-    const body = el('div', { className: 'nc-thread-preview-body', parent: preview });
-    body.textContent = item.snippet || item.title;
+    if (item.snippet) {
+      const body = el('div', { className: 'nc-thread-preview-body', parent: preview });
+      body.textContent = item.snippet;
+    }
     const railRect = item.markerEl.getBoundingClientRect();
     const rootRect = this.rootEl.getBoundingClientRect();
     const top = Math.max(8, Math.min(rootRect.height - 116, railRect.top - rootRect.top - 28));
@@ -1188,8 +1266,7 @@ export class GlossaView extends ItemView {
     if (status === 'idle') {
       ui.activityEl.classList.remove('active', 'tool', 'thinking');
       ui.activityEl.removeAttribute('data-started-at');
-      const time = ui.activityEl.querySelector('.nc-turn-activity-time') as HTMLElement | null;
-      if (time) time.textContent = '';
+      if (ui.activityTimeEl) ui.activityTimeEl.textContent = '';
       return;
     }
     ui.activityEl.classList.add('active');
@@ -1350,11 +1427,13 @@ export class GlossaView extends ItemView {
 
     // Elapsed time
     const elapsed = ev.endedAt ? ev.endedAt - ev.startedAt : Date.now() - ev.startedAt;
-    el('span', { className: 'nc-tool-event-elapsed', text: formatElapsed(elapsed), parent: hdr });
+    const elapsedEl = el('span', { className: 'nc-tool-event-elapsed', text: formatElapsed(elapsed), parent: hdr });
 
     // Status pill
     const statusText = ev.status === 'success' ? '✓' : ev.status === 'error' ? '✕' : ev.status === 'denied' ? '−' : '·';
-    el('span', { className: `nc-tool-event-status ${ev.status}`, text: statusText, parent: hdr });
+    const statusEl = el('span', { className: `nc-tool-event-status ${ev.status}`, text: statusText, parent: hdr });
+    (box as any)._elapsedEl = elapsedEl;
+    (box as any)._statusEl = statusEl;
 
     // Chevron
     const chev = el('span', { className: 'nc-tool-event-chev', parent: hdr });
@@ -1666,7 +1745,7 @@ export class GlossaView extends ItemView {
     const snapshot = this.streamingBuf;
     try {
       const safe = trimIncompleteMath(snapshot);
-      const ui = this.streamingMsgUI as MsgUI & { _committedParas?: number; _tailEl?: HTMLElement };
+      const ui = this.streamingMsgUI as MsgUI & { _committedParas?: number; _tailEl?: HTMLElement; _tailRaw?: string; _tailPlain?: string };
       const paras = safe.split('\n\n');
       const committed = ui._committedParas ?? 0;
       // Stable paragraphs: everything except the last one (which is still
@@ -1698,9 +1777,17 @@ export class GlossaView extends ItemView {
       // turns each tick from ~10-30ms into <1ms.
       const hasMarkdown = /[`$]|^\s*[#>\-*\d]|\[\[/m.test(tailText);
       if (!hasMarkdown) {
-        ui._tailEl.textContent = tailText;
+        if (ui._tailPlain !== tailText) {
+          ui._tailEl.textContent = tailText;
+          ui._tailPlain = tailText;
+          ui._tailRaw = tailText;
+        }
       } else {
-        await renderInto(this.app, tailText, ui._tailEl, this);
+        if (ui._tailRaw !== tailText) {
+          await renderInto(this.app, tailText, ui._tailEl, this);
+          ui._tailRaw = tailText;
+          ui._tailPlain = undefined;
+        }
       }
     } catch (e) { /* ignore */ }
     this.streamRenderInFlight = false;
@@ -1946,7 +2033,7 @@ export class GlossaView extends ItemView {
     // Update the per-message elapsed counter on the role label.
     if (this.streamingMsgUI && this.streamingStartedAt > 0) {
       const elapsed = (Date.now() - this.streamingStartedAt) / 1000;
-      const elEl = this.streamingMsgUI.wrap.querySelector('.nc-msg-elapsed') as HTMLElement | null;
+      const elEl = this.streamingMsgUI.elapsedEl;
       if (elEl) {
         if (elapsed < 1.0) elEl.textContent = '';
         else if (elapsed < 60) elEl.textContent = `${elapsed.toFixed(1)}s`;
@@ -1955,23 +2042,24 @@ export class GlossaView extends ItemView {
     }
     const activity = this.streamingMsgUI?.activityEl;
     if (activity?.classList.contains('active')) {
-      const time = activity.querySelector('.nc-turn-activity-time') as HTMLElement | null;
+      const time = this.streamingMsgUI?.activityTimeEl;
       const started = parseInt(activity.getAttribute('data-started-at') || String(this.currentActivityStartedAt || Date.now()));
       if (time && started) time.textContent = formatElapsed(Date.now() - started);
     }
     if (!this.streamingMsgUI?.toolStack) return;
     const now = Date.now();
-    this.streamingMsgUI.toolStack.querySelectorAll('.nc-tool-event').forEach(card => {
-      const statusEl = card.querySelector('.nc-tool-event-status') as HTMLElement | null;
-      if (!statusEl) return;
+    for (const card of Array.from(this.streamingMsgUI.toolStack.children) as HTMLElement[]) {
+      if (!card.classList.contains('nc-tool-event')) continue;
+      const statusEl = (card as any)._statusEl as HTMLElement | undefined;
+      if (!statusEl) continue;
       const isActive = statusEl.classList.contains('running') || statusEl.classList.contains('pending');
-      if (!isActive) return;
-      const elapsedEl = card.querySelector('.nc-tool-event-elapsed');
-      const startedAttr = (card as HTMLElement).dataset.startedAt;
+      if (!isActive) continue;
+      const elapsedEl = (card as any)._elapsedEl as HTMLElement | undefined;
+      const startedAttr = card.dataset.startedAt;
       if (elapsedEl && startedAttr) {
         elapsedEl.textContent = formatElapsed(now - parseInt(startedAttr));
       }
-    });
+    }
   }
 
   /* ============================================================

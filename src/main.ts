@@ -12,6 +12,9 @@ import { McpHub } from './agent/mcp';
 import { setLanguage, bi } from './utils/i18n';
 import { loadShellEnv } from './utils/env';
 import { GLOSSA_RIBBON_SVG } from './ui/icons';
+import type { UpdateInfo } from './features/update_check';
+import { UPDATE_CHECK_INTERVAL_MS, fetchLatestUpdate } from './features/update_check';
+import { compareSemver, normalizeVersion } from './utils/version';
 
 export default class GlossaPlugin extends Plugin {
   settings: GlossaSettings;
@@ -25,6 +28,8 @@ export default class GlossaPlugin extends Plugin {
   checkpoint: CheckpointManager;
   mcp: McpHub;
   fileIndex: import('./agent/file_index').FileIndex;
+  updateInfo: UpdateInfo | null = null;
+  private updateCheckInFlight: Promise<UpdateInfo | null> | null = null;
 
   async onload() {
     // Snapshot the user's login-shell env asynchronously at startup so spawned
@@ -38,6 +43,7 @@ export default class GlossaPlugin extends Plugin {
     const raw = (await this.loadData()) ?? {};
     const { __chats: legacy, ...settingsRaw } = raw as any;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, settingsRaw);
+    this.hydrateCachedUpdateInfo();
     // Experimental PDF citation hover is currently hidden and hard-disabled.
     // Keep the implementation files in-tree for later work, but never register
     // its DOM listeners from the plugin lifecycle.
@@ -121,6 +127,8 @@ export default class GlossaPlugin extends Plugin {
       callback: () => this.tryUnlock() });
     this.addCommand({ id: 'rebuild-index', name: 'Rebuild embedding index',
       callback: () => this.rebuildEmbeddings() });
+    this.addCommand({ id: 'check-for-updates', name: 'Check for updates',
+      callback: () => this.checkForUpdates({ force: true, notify: true }) });
 
     for (const cmd of BUILTIN_SLASH_COMMANDS) {
       this.addCommand({
@@ -189,6 +197,12 @@ export default class GlossaPlugin extends Plugin {
       import('./agent/plugin_bridges').then(m => m.watchPluginBridges(this.app)).catch(e => console.warn('[plugin-bridges] failed', e));
     });
 
+    this.app.workspace.onLayoutReady(() => {
+      window.setTimeout(() => {
+        this.checkForUpdates({ force: false, notify: false }).catch(e => console.warn('[Glossa] update check failed', e));
+      }, 8000);
+    });
+
     // Skill conditional activation: every time a file is opened or modified,
     // check if any conditional skill's `paths` matches and activate it.
     //
@@ -254,6 +268,63 @@ export default class GlossaPlugin extends Plugin {
   getView(): GlossaView | null {
     const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_GLOSSA)[0];
     return (leaf?.view as GlossaView) ?? null;
+  }
+
+  async checkForUpdates(opts: { force?: boolean; notify?: boolean } = {}): Promise<UpdateInfo | null> {
+    if (!this.settings.updateCheckEnabled && !opts.force) return null;
+    const now = Date.now();
+    if (!opts.force && this.settings.updateLastCheckedAt && now - this.settings.updateLastCheckedAt < UPDATE_CHECK_INTERVAL_MS) {
+      this.hydrateCachedUpdateInfo();
+      return this.updateInfo;
+    }
+    if (this.updateCheckInFlight) return this.updateCheckInFlight;
+    this.updateCheckInFlight = (async () => {
+      try {
+        const info = await fetchLatestUpdate(this.manifest.version);
+        this.settings.updateLastCheckedAt = Date.now();
+        this.settings.updateLatestVersion = info?.latestVersion ?? '';
+        this.settings.updateLatestReleaseUrl = info?.releaseUrl ?? '';
+        this.updateInfo = info && this.settings.updateDismissedVersion !== info.latestVersion ? info : null;
+        await this.saveSettings();
+        this.getView()?.refreshFromSettings?.();
+        if (opts.notify) {
+          new Notice(this.updateInfo
+            ? bi(`Glossa ${this.updateInfo.latestVersion} is available.`, `Glossa ${this.updateInfo.latestVersion} 有新版本。`)
+            : bi('Glossa is up to date.', 'Glossa 已是最新版本。'));
+        } else if (this.updateInfo) {
+          new Notice(bi(`Glossa ${this.updateInfo.latestVersion} is available.`, `Glossa ${this.updateInfo.latestVersion} 有新版本。`), 7000);
+        }
+        return this.updateInfo;
+      } finally {
+        this.updateCheckInFlight = null;
+      }
+    })();
+    return this.updateCheckInFlight;
+  }
+
+  async dismissUpdate(version: string) {
+    this.settings.updateDismissedVersion = version;
+    if (this.updateInfo?.latestVersion === version) this.updateInfo = null;
+    await this.saveSettings();
+    this.getView()?.refreshFromSettings?.();
+  }
+
+  private hydrateCachedUpdateInfo() {
+    const latest = normalizeVersion(this.settings.updateLatestVersion || '');
+    if (!latest || this.settings.updateDismissedVersion === latest || compareSemver(latest, this.manifest.version) <= 0) {
+      this.updateInfo = null;
+      return;
+    }
+    this.updateInfo = {
+      currentVersion: normalizeVersion(this.manifest.version),
+      latestVersion: latest,
+      releaseUrl: this.settings.updateLatestReleaseUrl || `https://github.com/yiiwang118/obsidian-glossa/releases/tag/${latest}`,
+      obsidianUrl: 'https://obsidian.md/plugins?id=glossa',
+      releaseName: latest,
+      body: '',
+      notes: [],
+      checkedAt: this.settings.updateLastCheckedAt || Date.now(),
+    };
   }
 
   /* ============================================================

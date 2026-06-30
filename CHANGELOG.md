@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] — 2026-06-30
+
+Update awareness and long-session polish.
+
+### Added
+- Added a lightweight update checker that can surface newer GitHub releases inside the Glossa sidebar, with a dismiss option and a manual "Check for updates" command.
+- Added a General settings toggle for update checks plus a "Check now" control for explicit refreshes.
+- Added semver comparison coverage so patch releases like `0.5.10` sort correctly after `0.5.2`.
+
+### Fixed
+- Fixed left conversation-rail hover previews duplicating the selected prompt or leaving multiple native/browser tooltips visible.
+- Fixed narrow composer layouts where the current-file context chip could overflow or repeat labels.
+- Fixed unsupported Markdown image-source handling without paying the full post-render scan cost on ordinary messages.
+
+### Changed
+- Reduced repeated DOM queries during long-running agent turns by caching elapsed/status elements and coalescing rail active-state updates with animation frames.
+- Kept the update notice quiet and local: it checks GitHub releases on a throttle, can be disabled in settings, and does not change provider behavior.
+
 ## [0.5.2] — 2026-06-29
 
 Long-chat navigation and render-noise cleanup.
@@ -151,6 +169,7 @@ First open-source release. Focuses on hardening: 6 high/medium-severity findings
 
 Last pre-open-source version. Internal-only. Not published.
 
+[0.5.3]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.5.3
 [0.5.2]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.5.2
 [0.5.1]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.5.1
 [0.5.0]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.5.0

@@ -334,6 +334,13 @@ export interface GlossaSettings {
   /** When true, citation previews only trigger while Alt/Option is held. */
   citationHoverRequireModifier: boolean;
 
+  // updates
+  updateCheckEnabled: boolean;
+  updateLastCheckedAt: number;
+  updateDismissedVersion: string;
+  updateLatestVersion: string;
+  updateLatestReleaseUrl: string;
+
   // Workflows
   workflows: Workflow[];
 
@@ -425,6 +432,11 @@ export const DEFAULT_SETTINGS: GlossaSettings = {
   citationHoverEnabled: false,
   citationHoverDelayMs: 700,
   citationHoverRequireModifier: false,
+  updateCheckEnabled: true,
+  updateLastCheckedAt: 0,
+  updateDismissedVersion: '',
+  updateLatestVersion: '',
+  updateLatestReleaseUrl: '',
   workflows: [],
 };
 

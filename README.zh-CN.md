@@ -22,6 +22,14 @@
 
 Glossa 不是云服务。它运行在 Obsidian 桌面端，本身不会接管你的数据。你的内容只会发送到你配置的模型 provider、embedding 端点、网页、MCP 服务或本地 CLI 工具，并且敏感操作需要经过权限和审批流程。
 
+## 0.5.3 新增
+
+| | |
+|---|---|
+| ✨ **版本更新提示** | Glossa 现在可以在侧栏里提示新的 GitHub Release，支持忽略当前版本，也可以手动检查。 |
+| 🧭 **长对话更清爽** | 左侧对话轨道只记录用户提问，预览更稳定，长会话回跳时不再被重复弹窗干扰。 |
+| ⚙️ **运行更轻** | 流式输出缓存更多 UI 状态，减少重复 Markdown 扫描，窄侧栏下的上下文 chip 也更稳。 |
+
 ## 亮点
 
 | | |
@@ -38,10 +46,7 @@ Glossa 不是云服务。它运行在 Obsidian 桌面端，本身不会接管你
 
 ### 推荐：Obsidian 插件市场
 
-1. 打开 **设置 → 第三方插件 → 浏览**。
-2. 搜索 **Glossa**。
-3. 安装并启用插件。
-4. 打开 Glossa 侧栏，在 **Settings → Providers** 添加一个模型端点。
+打开 **设置 → 第三方插件 → 浏览**，搜索 **Glossa**，安装并启用。然后在 **Glossa Settings → Providers** 添加第一个模型端点。
 
 [在 Obsidian 插件市场打开 Glossa](https://obsidian.md/plugins?id=glossa)
 
@@ -118,7 +123,8 @@ GLOSSA_PLUGIN_DIR="/path/to/vault/.obsidian/plugins/glossa" npm run dev
 
 - 当前主要面向桌面端，因为完整 agent 模式依赖 Node/Electron 能力。
 - 新安装默认采用保守配置：Plan 模式 + read-only 权限。
-- Release 资产由 GitHub Actions 从源码构建。
+- Release 资产由 GitHub Actions 从源码构建并附加到 GitHub Release。
+- 版本更新检查可以在设置中关闭。
 - 欢迎 issue、PR 和可复现的 bug report。
 
 ## 社区

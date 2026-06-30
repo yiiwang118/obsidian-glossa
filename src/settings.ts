@@ -303,6 +303,29 @@ export class GlossaSettingTab extends PluginSettingTab {
       });
     fontSetting.settingEl.dataset.tab = 'general';
 
+    const updateSetting = new Setting(containerEl)
+      .setName(bi('Update checks', '版本更新检查'))
+      .setDesc(bi('Check GitHub releases every 12 hours. Obsidian marketplace updates may appear later.', '每 12 小时检查 GitHub Release。Obsidian 插件市场同步可能稍晚。'))
+      .addToggle(tg => tg
+        .setValue(this.plugin.settings.updateCheckEnabled)
+        .onChange(async v => {
+          this.plugin.settings.updateCheckEnabled = v;
+          await this.plugin.saveSettings();
+        }))
+      .addButton(btn => btn
+        .setButtonText(bi('Check now', '立即检查'))
+        .onClick(async () => {
+          btn.setButtonText(bi('Checking...', '检查中...'));
+          btn.setDisabled(true);
+          try {
+            await this.plugin.checkForUpdates({ force: true, notify: true });
+          } finally {
+            btn.setDisabled(false);
+            btn.setButtonText(bi('Check now', '立即检查'));
+          }
+        }));
+    updateSetting.settingEl.dataset.tab = 'general';
+
     /* ----- Active endpoint ----- */
     const activeEpSetting = new Setting(containerEl)
       .setName(bi('Active endpoint', '当前 endpoint'))

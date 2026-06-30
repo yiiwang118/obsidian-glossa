@@ -5,6 +5,26 @@ import path from 'path';
 
 const prod = process.argv[2] === 'production';
 
+function loadLocalEnv(file) {
+  if (!fs.existsSync(file)) return;
+  const src = fs.readFileSync(file, 'utf8');
+  for (const line of src.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (!process.env[key]) process.env[key] = value;
+  }
+}
+
+loadLocalEnv('.env');
+loadLocalEnv('.env.local');
+
 // Primary build output is the repo root — that's what release.yml uploads to
 // the GitHub Release, what BRAT pulls down, and what the community plugin
 // market expects. (Earlier versions hardcoded an absolute vault path which

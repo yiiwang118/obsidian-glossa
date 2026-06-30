@@ -19,10 +19,12 @@ export async function renderInto(
   component: Component,
   sourcePath = ''
 ) {
-  const raw = sanitizeMarkdownResourceUrls(src || '');
+  const original = src || '';
+  const mightContainBlockedResources = hasBlockedResourceScheme(original);
+  const raw = mightContainBlockedResources ? sanitizeMarkdownResourceUrls(original) : original;
   target.empty();
   await MarkdownRenderer.render(app, raw, target, sourcePath, component);
-  scrubRenderedResourceUrls(target);
+  if (mightContainBlockedResources) scrubRenderedResourceUrls(target);
   // Only touch MathJax when the source actually contains math. For ordinary
   // prose/tool output this avoids waking Obsidian's MathJax font loader, which
   // can produce noisy "slow network / fallback font" intervention warnings.
@@ -35,6 +37,7 @@ export async function renderInto(
 }
 
 const BLOCKED_IMAGE_SCHEMES = /^(?:upload):\/\//i;
+const BLOCKED_RESOURCE_SCHEME_IN_TEXT = /\b(?:upload):\/\//i;
 
 /**
  * Some imported/web content contains editor-private image URLs such as
@@ -44,7 +47,7 @@ const BLOCKED_IMAGE_SCHEMES = /^(?:upload):\/\//i;
  * user can still tell an omitted image existed.
  */
 export function sanitizeMarkdownResourceUrls(src: string): string {
-  if (!src || !/\b(?:upload):\/\//i.test(src)) return src;
+  if (!hasBlockedResourceScheme(src)) return src;
   let out = src.replace(/!\[([^\]]*)\]\(\s*(upload:\/\/[^)\s]+)(?:\s+["'][^"']*["'])?\s*\)/gi, (_m, alt, url) => {
     return omittedImageText(alt || basenameFromUrl(url));
   });
@@ -55,6 +58,10 @@ export function sanitizeMarkdownResourceUrls(src: string): string {
     return omittedImageText(basenameFromUrl(url));
   });
   return out;
+}
+
+function hasBlockedResourceScheme(src: string): boolean {
+  return !!src && BLOCKED_RESOURCE_SCHEME_IN_TEXT.test(src);
 }
 
 function scrubRenderedResourceUrls(target: HTMLElement) {

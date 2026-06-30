@@ -21,6 +21,14 @@ Most AI note tools are either too small to be useful or too closed to trust. Glo
 
 Glossa is not a cloud service. It runs as a local Obsidian desktop plugin. Your data goes only to the model providers, embedding endpoints, websites, MCP servers, or local CLI tools you explicitly configure or approve.
 
+## New in 0.5.3
+
+| | |
+|---|---|
+| ✨ **Update notice** | Glossa can now tell you when a newer GitHub release is available, with a small dismissible sidebar pill and a manual check command. |
+| 🧭 **Cleaner long chats** | The left conversation rail is quieter, faster, and focused on user prompts only, so long sessions are easier to revisit. |
+| ⚙️ **Smoother runtime** | Streaming turns cache more UI state, avoid redundant Markdown scans, and behave better in narrow sidebars. |
+
 ## Highlights
 
 | | |
@@ -37,10 +45,7 @@ Glossa is not a cloud service. It runs as a local Obsidian desktop plugin. Your 
 
 ### Recommended: Obsidian Plugin Marketplace
 
-1. Open **Settings → Community plugins → Browse**.
-2. Search for **Glossa**.
-3. Install and enable the plugin.
-4. Open the Glossa sidebar and add a provider in **Settings → Providers**.
+Open **Settings → Community plugins → Browse**, search for **Glossa**, then install and enable it. Add your first model endpoint in **Glossa Settings → Providers**.
 
 [Open Glossa in the Obsidian plugin marketplace](https://obsidian.md/plugins?id=glossa)
 
@@ -117,7 +122,8 @@ GLOSSA_PLUGIN_DIR="/path/to/vault/.obsidian/plugins/glossa" npm run dev
 
 - Desktop-only for now, because full agent mode uses Node/Electron capabilities.
 - New installs start conservatively: Plan mode + read-only permissions.
-- Release assets are built from source by GitHub Actions.
+- Release assets are built from source by GitHub Actions and attached to GitHub Releases.
+- Update checks are optional and can be disabled in settings.
 - Contributions, issues, and focused bug reports are welcome.
 
 ## Community

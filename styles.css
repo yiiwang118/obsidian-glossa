@@ -286,6 +286,8 @@
   .nc-popup *,
   .nc-history-popover,
   .nc-history-popover *,
+  .nc-update-popover,
+  .nc-update-popover *,
   .modal.nc-add-modal,
   .modal.nc-add-modal * {
     animation-duration: 1ms !important;
@@ -304,6 +306,150 @@
   height: 34px;
   background: var(--nc-bg-hard);
   position: sticky; top: 0; z-index: 2;
+}
+
+.nc-update-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  min-width: 0;
+  max-width: 116px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 22%, transparent) !important;
+  border-radius: var(--nc-radius-pill) !important;
+  background: color-mix(in srgb, var(--interactive-accent) 9%, transparent) !important;
+  color: color-mix(in srgb, var(--interactive-accent) 76%, var(--text-normal)) !important;
+  box-shadow: none !important;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.nc-update-pill:hover {
+  background: color-mix(in srgb, var(--interactive-accent) 14%, transparent) !important;
+  border-color: color-mix(in srgb, var(--interactive-accent) 34%, transparent) !important;
+}
+.nc-update-pill-icon {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+.nc-update-pill-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.nc-update-pill-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nc-update-popover {
+  position: absolute;
+  z-index: 42;
+  width: min(324px, calc(100% - 16px));
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+  background: color-mix(in srgb, var(--background-primary) 96%, transparent);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.theme-dark .nc-update-popover {
+  background: color-mix(in srgb, var(--background-primary) 91%, #0f172a 9%);
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.34);
+}
+.nc-update-popover-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.nc-update-popover-icon {
+  display: inline-flex;
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+  color: color-mix(in srgb, var(--interactive-accent) 78%, var(--text-normal));
+}
+.nc-update-popover-icon svg,
+.nc-update-popover-close svg {
+  width: 100%;
+  height: 100%;
+}
+.nc-update-popover-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.nc-update-popover-title strong {
+  color: var(--text-normal);
+  font-size: 13px;
+  line-height: 1.2;
+}
+.nc-update-popover-title span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.nc-update-popover-close {
+  width: 22px;
+  height: 22px;
+  padding: 5px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  color: var(--text-muted);
+  box-shadow: none !important;
+}
+.nc-update-popover-close:hover {
+  background: var(--background-modifier-hover) !important;
+  color: var(--text-normal);
+}
+.nc-update-popover-body {
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.nc-update-popover-body ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.nc-update-popover-body li {
+  margin: 3px 0;
+}
+.nc-update-popover-body p {
+  margin: 0;
+}
+.nc-update-popover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.nc-update-action {
+  height: 28px;
+  padding: 0 10px !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  background: var(--background-secondary) !important;
+  color: var(--text-normal);
+  box-shadow: none !important;
+  font-size: 12px;
+  font-weight: 600;
+}
+.nc-update-action.primary {
+  border-color: color-mix(in srgb, var(--interactive-accent) 36%, transparent) !important;
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary)) !important;
+  color: color-mix(in srgb, var(--interactive-accent) 72%, var(--text-normal));
+}
+.nc-update-action.subtle {
+  color: var(--text-muted);
 }
 
 /* Mode pill — borderless at rest, faint hover. The colored dot is the only
@@ -2353,6 +2499,11 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 @container glossa-composer (max-width: 360px) {
   .nc-composer-pill .nc-pill-text { display: none; }
   .nc-model-chip .nc-model-label { display: none; }
+  .nc-context-group-label { display: none; }
+  .nc-context-group { gap: 4px; }
+  .nc-context-group-items { width: 100%; flex-wrap: nowrap; }
+  .nc-pill { max-width: 100%; min-width: 0; }
+  .nc-pill .nc-pill-label { max-width: none; min-width: 0; }
 }
 /* Focus or streaming → reveal the rotating aurora ring + outer glow.
    The static grey border underneath stays in place; the opaque aurora
@@ -6680,6 +6831,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 .glossa-view .nc-context-bar:empty {
   display: none;
@@ -6689,6 +6842,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   align-items: center;
   gap: 7px;
   min-width: 0;
+  max-width: 100%;
 }
 .glossa-view .nc-context-group.current {
   opacity: 0.72;
@@ -6708,4 +6862,39 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
+  max-width: 100%;
+}
+
+.glossa-view .nc-context-group.current .nc-pill {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: min(100%, 260px);
+}
+
+.glossa-view .nc-context-group.current .nc-pill-label {
+  min-width: 0;
+  max-width: none;
+}
+
+@container glossa-composer (max-width: 360px) {
+  .glossa-view .nc-context-group-label {
+    display: none;
+  }
+  .glossa-view .nc-context-group {
+    gap: 4px;
+  }
+  .glossa-view .nc-context-group-items {
+    width: 100%;
+    flex-wrap: nowrap;
+  }
+  .glossa-view .nc-context-group.current .nc-pill,
+  .glossa-view .nc-pill {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .glossa-view .nc-pill .nc-pill-label {
+    min-width: 0;
+    max-width: none;
+  }
 }
