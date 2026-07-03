@@ -18,9 +18,9 @@ export function openHistoryModal(plugin: GlossaPlugin, onPick: (s: ChatSession) 
 export function renderHistoryPopover(
   host: HTMLElement,
   plugin: GlossaPlugin,
-  opts: { onPick: (s: ChatSession) => void; onClose: () => void },
+  opts: { onPick: (s: ChatSession) => void; onClose: () => void; onDelete?: (id: string) => void; onClear?: () => void },
 ): () => void {
-  const view = new HistoryPopover(host, plugin, opts.onPick, opts.onClose);
+  const view = new HistoryPopover(host, plugin, opts.onPick, opts.onClose, opts.onDelete, opts.onClear);
   view.render();
   return () => view.destroy();
 }
@@ -59,6 +59,8 @@ class HistoryPopover {
     private plugin: GlossaPlugin,
     private onPick: (s: ChatSession) => void,
     private onClose: () => void,
+    private onDelete?: (id: string) => void,
+    private onClear?: () => void,
   ) {}
 
   render() {
@@ -201,6 +203,7 @@ class HistoryPopover {
         const { confirmModal } = await import('./confirm_modal');
         if (!await confirmModal(this.plugin.app, { title: t('hist_delete'), body: t('hist_delete_confirm'), danger: true })) return;
         await this.plugin.store.deleteSession(s.id);
+        this.onDelete?.(s.id);
         this.renderList();
       }));
       menu.showAtMouseEvent(e);
@@ -241,7 +244,10 @@ class HistoryPopover {
         body: bi(`Delete ${old.length} session(s) older than 7 days?`, `删除 ${old.length} 条 7 天前的对话？`),
         danger: true,
       })) return;
-      for (const s of old) await this.plugin.store.deleteSession(s.id);
+      for (const s of old) {
+        await this.plugin.store.deleteSession(s.id);
+        this.onDelete?.(s.id);
+      }
       this.renderList();
       new Notice(bi(`Deleted ${old.length} session(s).`, `已删除 ${old.length} 条对话。`));
     }));
@@ -254,6 +260,7 @@ class HistoryPopover {
         danger: true,
       })) return;
       await this.plugin.store.clearAll();
+      this.onClear?.();
       this.renderList();
       new Notice(bi('All chats deleted.', '已清空全部对话。'));
     }));

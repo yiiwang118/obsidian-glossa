@@ -1,7 +1,7 @@
 {
   "name": "glossa",
-  "version": "0.6.0",
-  "description": "AI sidebar for Obsidian — multi-provider, agent mode, context-aware editing.",
+  "version": "0.6.1",
+  "description": "Local-first AI sidebar for Obsidian with context chat, vault search, and approved agent tools.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",

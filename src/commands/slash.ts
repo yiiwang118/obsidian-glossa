@@ -3,7 +3,7 @@ import type { SlashCommand } from '../types';
 export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   {
     id: 'translate', trigger: '/translate', title: 'Translate',
-    description: 'Translate selection (or current note) into the specified language.',
+    description: 'Translate selection (or current note). Tip: select text and press Enter twice.',
     template: `Translate the following into ${'${args:Chinese}'}. Preserve markdown structure, code blocks, and math. Keep proper nouns in their original language.\n\n${'${selection-or-file}'}`,
   },
   {

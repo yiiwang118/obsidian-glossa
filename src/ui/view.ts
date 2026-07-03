@@ -34,7 +34,8 @@ import type { ToolImpl } from '../agent/tools';
 import type { ApprovalResult } from '../agent/approval';
 import { renderDiffInto } from '../utils/diff';
 import { renderInto, decorateCodeBlocks, trimIncompleteMath } from '../utils/markdown';
-import { t, bi, onLanguageChange } from '../utils/i18n';
+import { t, bi, currentLanguage, onLanguageChange } from '../utils/i18n';
+import { inferSelectionTranslationTarget } from '../utils/translation_target';
 import { loadProjectContext } from '../context/project_context';
 
 export const VIEW_TYPE_GLOSSA = 'glossa-view';
@@ -56,6 +57,8 @@ function normalizeModelList(models: string[]): string[] {
 }
 
 const HIDDEN_TOOL_EVENTS = new Set(['attempt_completion']);
+const INPUT_TRIGGER_LOOKBACK = 96;
+const SELECTION_TRANSLATE_ENTER_WINDOW_MS = 520;
 
 function shouldRenderToolEvent(ev: ToolEvent): boolean {
   return !HIDDEN_TOOL_EVENTS.has(ev.name);
@@ -105,6 +108,7 @@ export class GlossaView extends ItemView {
   private railItems: ThreadRailItem[] = [];
   private activeRailId: string | null = null;
   private hoverRailId: string | null = null;
+  private stickToBottom = true;
   private railScrollRaf = 0;
   private railActiveUpdateRaf = 0;
   private emptyEl: HTMLElement | null = null;
@@ -124,6 +128,7 @@ export class GlossaView extends ItemView {
   private historyDraft = '';
   private abortCtl: AbortController | null = null;
   private popup = new Popup();
+  private inputTriggerSig = '';
   private msgUIs = new Map<string, MsgUI>();
   private streamingMsgUI: MsgUI | null = null;
   private currentAsstMsg: ChatMessage | null = null;
@@ -154,6 +159,8 @@ export class GlossaView extends ItemView {
    *  .nc-msg-elapsed counter on the assistant role label). Reset per segment. */
   private streamingStartedAt = 0;
   private currentSelection: { text: string; source: string; file?: TFile } | null = null;
+  private selectionTranslateEnterAt = 0;
+  private selectionTranslateEnterSig = '';
   /** Path of an auto-attached "current file" pill the user has explicitly
    *  dismissed via its × button. While this matches the active file's path,
    *  refreshAutoContext skips re-attaching it — otherwise active-leaf-change
@@ -215,6 +222,7 @@ export class GlossaView extends ItemView {
     this.registerEvent(this.app.workspace.on('file-open', () => this.refreshAutoContext()));
     this.registerEvent(this.app.workspace.on('editor-selection-change' as any, () => this.refreshSelection()));
     activeDocument.addEventListener('selectionchange', this.onDomSelectionChange);
+    activeDocument.addEventListener('keydown', this.onGlobalSelectionTranslateEnter, true);
 
     // Re-render any header / input chrome whose strings come from `t()` when
     // the user toggles language in settings — no plugin reload required.
@@ -245,9 +253,84 @@ export class GlossaView extends ItemView {
     this.refreshFromSettings();
   }
 
-  onDomSelectionChange = debounce(() => this.refreshSelection(), 120);
+  onDomSelectionChange = debounce(() => {
+    // Textarea caret movement fires document selectionchange in Chromium.
+    // Do not run the expensive workspace-selection resolver while the user is
+    // typing/deleting inside Glossa's own composer.
+    if (activeDocument.activeElement === this.inputEl) return;
+    this.refreshSelection();
+  }, 120);
+
+  private onGlobalSelectionTranslateEnter = (e: KeyboardEvent) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.isComposing || (e as any).keyCode === 229) return;
+    if (this.streaming || this.popup.isOpen() || this.histPopEl) return;
+
+    const sel = this.currentSelection;
+    const selectedText = sel?.text.trim() ?? '';
+    if (!sel || !selectedText) {
+      this.selectionTranslateEnterAt = 0;
+      this.selectionTranslateEnterSig = '';
+      return;
+    }
+
+    const active = activeDocument.activeElement as HTMLElement | null;
+    const inComposer = active === this.inputEl;
+    if (this.inputEl.value.trim()) return;
+    if (!inComposer && this.shouldIgnoreSelectionTranslateKeyTarget(active)) return;
+
+    const sig = `${sel.source}\u0000${sel.file?.path ?? ''}\u0000${selectedText}`;
+    const now = Date.now();
+    const isSecondEnter = this.selectionTranslateEnterSig === sig
+      && now - this.selectionTranslateEnterAt <= SELECTION_TRANSLATE_ENTER_WINDOW_MS;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!isSecondEnter) {
+      this.selectionTranslateEnterAt = now;
+      this.selectionTranslateEnterSig = sig;
+      return;
+    }
+
+    this.selectionTranslateEnterAt = 0;
+    this.selectionTranslateEnterSig = '';
+    void this.submitSelectionTranslation(sel);
+  };
+
+  private shouldIgnoreSelectionTranslateKeyTarget(active: HTMLElement | null): boolean {
+    if (!active) return false;
+    if (activeDocument.querySelector('.modal-container')) return true;
+    const tag = active.tagName.toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') return true;
+    if (active.closest('.menu, .suggestion-container, .nc-history-popover, .nc-popup')) return true;
+    if (this.rootEl?.contains(active)) {
+      return !!active.closest('button, a, input, textarea, select, [role="button"]');
+    }
+    return false;
+  }
+
+  private async submitSelectionTranslation(sel: { text: string; source: string; file?: TFile }) {
+    if (this.streaming || !this.inputEl) return;
+    if (this.inputEl.value.trim()) {
+      quickNotice(bi('Clear the input before quick-translating a selection.', '清空输入框后再快速翻译选区。'));
+      return;
+    }
+    this.currentSelection = sel;
+    const target = this.translationTargetForSelection(sel.text);
+    this.inputEl.value = `/translate ${target}`;
+    this.inputEl.selectionStart = this.inputEl.selectionEnd = this.inputEl.value.length;
+    this.recomputeInputHeight();
+    this.inputEl.focus();
+    await this.submit();
+  }
+
+  private translationTargetForSelection(text: string): 'Chinese' | 'English' {
+    return inferSelectionTranslationTarget(text, currentLanguage());
+  }
 
   private onMessagesScroll = () => {
+    this.stickToBottom = this.isMessagesNearBottom();
     if (this.railScrollRaf) return;
     this.railScrollRaf = window.requestAnimationFrame(() => {
       this.railScrollRaf = 0;
@@ -274,6 +357,7 @@ export class GlossaView extends ItemView {
 
   async onClose() {
     activeDocument.removeEventListener('selectionchange', this.onDomSelectionChange);
+    activeDocument.removeEventListener('keydown', this.onGlobalSelectionTranslateEnter, true);
     this.popup.destroy();
     this.langUnsub?.();
     this.langUnsub = null;
@@ -465,6 +549,8 @@ export class GlossaView extends ItemView {
         window.requestAnimationFrame(() => this.loadSession(s.id));
       },
       onClose: () => this.closeHistoryPopover(),
+      onDelete: (id) => this.handleHistorySessionDeleted(id),
+      onClear: () => this.handleHistoryCleared(),
     });
 
     const onKey = (ev: KeyboardEvent) => {
@@ -662,6 +748,7 @@ export class GlossaView extends ItemView {
   private renderSelectionPreview() {
     if (!this.selectionPreviewEl) return;
     clear(this.selectionPreviewEl);
+    this.updateInputPlaceholder();
     if (!this.currentSelection) { setStyle(this.selectionPreviewEl, { display: 'none' }); return; }
     const sel = this.currentSelection;
     const text = sel.text;
@@ -687,6 +774,15 @@ export class GlossaView extends ItemView {
     const close = el('button', { className: 'nc-selection-preview-close', parent: this.selectionPreviewEl, title: 'Detach selection', type: 'button', attrs: { 'aria-label': 'Detach selection' } });
     setTrustedSvg(close, ICON.x);
     close.onclick = () => { this.currentSelection = null; this.renderSelectionPreview(); };
+  }
+
+  private updateInputPlaceholder() {
+    if (!this.inputEl) return;
+    const hasSelection = !!this.currentSelection?.text.trim();
+    const hasDraft = !!this.inputEl.value.trim();
+    this.inputEl.placeholder = hasSelection && !hasDraft
+      ? bi('Ask about selection · Enter twice to translate', '询问选区 · 连按 Enter 翻译')
+      : t('placeholder_input');
   }
 
   private selectionSourceLabel(source: string) {
@@ -1707,15 +1803,21 @@ export class GlossaView extends ItemView {
     };
   }
 
-  private scrollToBottom() {
-    // Only auto-scroll if the user is already near the bottom. If they scrolled
-    // up to read history, leave them alone — don't yank them down. 96px
-    // tolerance allows for the bottom action row + a bit of padding.
+  private isMessagesNearBottom(thresholdPx = 40) {
     const msgsEl = this.messagesEl;
     const distanceFromBottom = msgsEl.scrollHeight - (msgsEl.scrollTop + msgsEl.clientHeight);
-    if (distanceFromBottom < 96) {
-      msgsEl.scrollTo({ top: msgsEl.scrollHeight, behavior: 'smooth' });
-    }
+    return distanceFromBottom <= thresholdPx;
+  }
+
+  private scrollToBottom(force = false) {
+    // Auto-follow is stateful: once the user scrolls away from the bottom, new
+    // streamed text must not yank the viewport down. Checking only after DOM
+    // growth is unreliable because the added content itself increases
+    // scrollHeight; `stickToBottom` preserves the user's pre-growth intent.
+    if (!force && !this.stickToBottom && !this.isMessagesNearBottom()) return;
+    const msgsEl = this.messagesEl;
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+    this.stickToBottom = true;
   }
 
   /* ============================================================
@@ -1791,6 +1893,7 @@ export class GlossaView extends ItemView {
       }
     } catch (e) { /* ignore */ }
     this.streamRenderInFlight = false;
+    this.scrollToBottom();
     if (this.streamingMsgUI && this.streamingBuf !== snapshot) this.scheduleStreamingRender();
   }
 
@@ -2125,6 +2228,7 @@ export class GlossaView extends ItemView {
       this.handleTrigger();
       this.historyCursor = -1;
       this.recomputeInputHeight();
+      this.renderSelectionPreview();
     });
     this.inputEl.addEventListener('keydown', (e) => {
       // IME composition guard: Chinese / Japanese / Korean input methods open
@@ -2134,9 +2238,15 @@ export class GlossaView extends ItemView {
       // doesn't set it but reports keyCode 229. Cover both.
       if (e.isComposing || (e as any).keyCode === 229) return;
       if (this.popup.onKey(e)) { e.preventDefault(); return; }
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.submit(); return; }
-      if (e.key === 'Enter' && !e.shiftKey && this.inputEl.value.trim() && !this.streaming) {
-        e.preventDefault(); this.submit(); return;
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        if (this.inputEl.value.trim() && !this.streaming) this.submit();
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (this.inputEl.value.trim() && !this.streaming) this.submit();
+        return;
       }
       if (e.key === 'ArrowUp' && this.caretAtTop()) {
         if (this.recallHistory(-1)) e.preventDefault();
@@ -2512,12 +2622,33 @@ export class GlossaView extends ItemView {
     const v = this.inputEl.value;
     const cur = this.inputEl.selectionStart;
     let i = cur - 1;
-    while (i >= 0 && !/\s/.test(v[i])) i--;
+    let scanned = 0;
+    while (i >= 0 && scanned < INPUT_TRIGGER_LOOKBACK && !/\s/.test(v[i])) {
+      i--;
+      scanned++;
+    }
+    // Long CJK / URL-ish runs without whitespace should not make every
+    // Backspace scan the whole paragraph. If the token is already too long,
+    // it is not a useful @ or / trigger candidate.
+    if (i >= 0 && scanned >= INPUT_TRIGGER_LOOKBACK && !/\s/.test(v[i])) {
+      this.inputTriggerSig = '';
+      if (this.popup.isOpen()) this.popup.hide();
+      return;
+    }
     const tokenStart = i + 1;
     const token = v.slice(tokenStart, cur);
-    if (token.startsWith('@')) this.showMentionPopup(token.slice(1), tokenStart);
-    else if (token.startsWith('/')) this.showSlashPopup(token.slice(1), tokenStart);
-    else this.popup.hide();
+    const kind = token.startsWith('@') ? '@' : token.startsWith('/') ? '/' : '';
+    if (!kind) {
+      this.inputTriggerSig = '';
+      if (this.popup.isOpen()) this.popup.hide();
+      return;
+    }
+    const query = token.slice(1);
+    const sig = `${kind}:${tokenStart}:${query}`;
+    if (sig === this.inputTriggerSig) return;
+    this.inputTriggerSig = sig;
+    if (kind === '@') this.showMentionPopup(query, tokenStart);
+    else this.showSlashPopup(query, tokenStart);
   }
 
   private showMentionPopup(query: string, tokenStart: number) {
@@ -2620,6 +2751,7 @@ export class GlossaView extends ItemView {
     const v = this.inputEl.value;
     const cur = this.inputEl.selectionStart;
     this.inputEl.value = v.slice(0, tokenStart) + v.slice(cur);
+    this.inputTriggerSig = '';
     this.inputEl.focus();
   }
 
@@ -2831,7 +2963,7 @@ export class GlossaView extends ItemView {
       this.messagesEl.classList.add('no-anim');
       for (const m of this.session.messages) this.renderMessage(m);
       this.compactAllProcessGroups();
-      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      this.scrollToBottom(true);
       window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
       await this.flushPersistNow();
       quickNotice(`Compacted ${result.summarisedCount} msgs → 1 summary (~${formatTokenCount(result.tokensSaved)} tok saved)`);
@@ -2851,7 +2983,7 @@ export class GlossaView extends ItemView {
     this.messagesEl.classList.add('no-anim');
     for (const m of this.session.messages) this.renderMessage(m);
     this.compactAllProcessGroups();
-    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    this.scrollToBottom(true);
     window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
     await this.flushPersistNow();
     quickNotice('Restored pre-compact history.');
@@ -3485,7 +3617,10 @@ export class GlossaView extends ItemView {
 
   private async loadSession(id: string) {
     const s = this.plugin.store.getSession(id);
-    if (!s) return;
+    if (!s) {
+      if (this.session.id === id) this.resetToEmptySession();
+      return;
+    }
     if (this.streaming) this.cancelStream();
     await this.flushPersistNow();
     // Bump BEFORE swapping session so any chunk callback that was queued
@@ -3508,7 +3643,7 @@ export class GlossaView extends ItemView {
       this.messagesEl.classList.add('no-anim');
       for (const m of this.session.messages) this.renderMessage(m);
       this.compactAllProcessGroups();
-      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      this.scrollToBottom(true);
       window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
     }
     this.rebuildPlanFromSession();
@@ -3536,6 +3671,45 @@ export class GlossaView extends ItemView {
       this.plugin.store.saveSession(session);
     }, 1000);
   }
+
+  private clearPendingPersist() {
+    if (!this._persistTimer) return;
+    window.clearTimeout(this._persistTimer);
+    this._persistTimer = null;
+  }
+
+  private resetToEmptySession() {
+    if (this.streaming) this.cancelStream();
+    this.clearPendingPersist();
+    this.sessionToken++;
+    this.session = this.newSession();
+    this.sessionCostUSD = 0;
+    this.sessionInputTokens = 0;
+    this.sessionOutputTokens = 0;
+    this.currentTurnId = null;
+    this.streamingBuf = '';
+    this.streamingMsgUI = null;
+    this.currentAsstMsg = null;
+    this.msgUIs.clear();
+    clear(this.messagesEl);
+    this.resetThreadRail();
+    this.renderPlanBoard();
+    this.renderEmpty();
+    this.renderCostBar();
+    this.stickToBottom = true;
+  }
+
+  private handleHistorySessionDeleted(id: string) {
+    if (this.session.id !== id) return;
+    this.closeHistoryPopover({ immediate: true });
+    this.resetToEmptySession();
+  }
+
+  private handleHistoryCleared() {
+    this.closeHistoryPopover({ immediate: true });
+    this.resetToEmptySession();
+  }
+
   /** Force-write the current session now (bypasses debounce). Use at stream
    *  end, before navigation, or before destructive operations like compact. */
   private async flushPersistNow() {
@@ -3651,7 +3825,7 @@ export class GlossaView extends ItemView {
       this.messagesEl.classList.add('no-anim');
       for (const m of this.session.messages) this.renderMessage(m);
       this.compactAllProcessGroups();
-      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      this.scrollToBottom(true);
       window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
     }
     // Persist the trimmed history before re-submit. Without this, an Obsidian

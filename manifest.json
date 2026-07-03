@@ -1,9 +1,9 @@
 {
   "id": "glossa",
   "name": "Glossa",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "minAppVersion": "1.12.3",
-  "description": "AI sidebar with multi-provider chat, @-context, semantic search (RAG), agent mode with sandboxed file edits, MCP bridge, encrypted keys, and Codex CLI integration.",
+  "description": "Local-first AI sidebar for Obsidian with context chat, vault search, and approved agent tools.",
   "author": "yiiwang",
   "authorUrl": "https://github.com/yiiwang118",
   "isDesktopOnly": true

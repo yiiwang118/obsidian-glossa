@@ -9,6 +9,26 @@ const path = require('path');
 const fs = require('fs');
 const esbuild = require('esbuild');
 
+function installBrowserGlobalsForNode() {
+  const win = globalThis.window ?? {};
+  win.setTimeout = globalThis.setTimeout.bind(globalThis);
+  win.clearTimeout = globalThis.clearTimeout.bind(globalThis);
+  win.setInterval = globalThis.setInterval.bind(globalThis);
+  win.clearInterval = globalThis.clearInterval.bind(globalThis);
+  win.requestAnimationFrame ??= (cb) => win.setTimeout(() => cb(Date.now()), 16);
+  win.cancelAnimationFrame ??= (id) => win.clearTimeout(id);
+  win.queueMicrotask ??= globalThis.queueMicrotask?.bind(globalThis);
+  win.AbortController ??= globalThis.AbortController;
+  win.AbortSignal ??= globalThis.AbortSignal;
+  win.URL ??= globalThis.URL;
+  win.URLSearchParams ??= globalThis.URLSearchParams;
+  globalThis.window = win;
+  globalThis.requestAnimationFrame ??= win.requestAnimationFrame;
+  globalThis.cancelAnimationFrame ??= win.cancelAnimationFrame;
+}
+
+installBrowserGlobalsForNode();
+
 let passed = 0, failed = 0;
 const failures = [];
 

@@ -2,9 +2,9 @@
 
 # 𝓖𝓵𝓸𝓼𝓼𝓪
 
-**A clean, local-first AI sidebar for Obsidian.**
+**Local-first AI for Obsidian.**
 
-Chat with your notes, attach real context, run careful vault tools, and switch between API providers or local coding agents without leaving your workspace.
+Chat with notes, attach real context, search the vault, and run approved agent tools without leaving your workspace.
 
 [![Obsidian plugin](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md/plugins?id=glossa)
 [![Release](https://img.shields.io/github/v/release/yiiwang118/obsidian-glossa?display_name=tag&sort=semver)](https://github.com/yiiwang118/obsidian-glossa/releases)
@@ -25,6 +25,8 @@ Glossa is not a cloud service. It runs as a local Obsidian desktop plugin. Your 
 
 ## What's New
 
+- **2026-07-03 — ⚡ Faster selection translation.** Select text and press Enter twice to translate; mixed-language Markdown now detects the natural-language source more carefully.
+- **2026-07-03 — 🧹 Cleaner selection card.** The selection preview stays compact, with the quick-translate hint moved into the composer placeholder.
 - **2026-06-30 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 🌐 Web research pipeline.** Glossa can now search through the free auto provider or Brave, Tavily, Exa, and SerpAPI, then fetch bounded source notes instead of dumping raw pages.
 - **2026-06-30 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 📥 Safer downloads.** Public PDFs, images, release assets, datasets, and other files can be saved into the vault with size caps, private-network redirect blocking, SHA-256 hashes, and optional `.source.json` provenance.
 - **2026-06-30 — ✨ Update awareness.** A small sidebar notice can tell you when a newer GitHub release is available, with a manual check command and a dismiss option.
