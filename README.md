@@ -2,9 +2,9 @@
 
 # 𝓖𝓵𝓸𝓼𝓼𝓪
 
-**Local-first AI for Obsidian.**
+**Local-first AI assistant for your vault.**
 
-Chat with notes, attach real context, search the vault, and run approved agent tools without leaving your workspace.
+Chat with notes, attach selections and files, search your vault, and run approved agent tools without leaving your workspace.
 
 [![Obsidian plugin](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md/plugins?id=glossa)
 [![Release](https://img.shields.io/github/v/release/yiiwang118/obsidian-glossa?display_name=tag&sort=semver)](https://github.com/yiiwang118/obsidian-glossa/releases)
@@ -19,12 +19,13 @@ Chat with notes, attach real context, search the vault, and run approved agent t
 
 ## Why Glossa
 
-Most AI note tools are either too small to be useful or too closed to trust. Glossa is built for people who actually work inside Obsidian: researchers, engineers, writers, and anyone who needs an assistant that can read context, explain files, edit notes, and stay accountable.
+Most AI note tools are either too small to be useful or too closed to trust. Glossa is built for people who work in long-lived knowledge bases: researchers, engineers, writers, and anyone who needs an assistant that can read context, explain files, edit notes, and stay accountable.
 
-Glossa is not a cloud service. It runs as a local Obsidian desktop plugin. Your data goes only to the model providers, embedding endpoints, websites, MCP servers, or local CLI tools you explicitly configure or approve.
+Glossa is not a cloud service. It runs locally as a desktop plugin. Your data goes only to the model providers, embedding endpoints, websites, MCP servers, or local CLI tools you explicitly configure or approve.
 
 ## What's New
 
+- **2026-07-04 — 0.6.2 release-readiness polish.** Tightened marketplace metadata, refreshed the README and changelog, and added stricter release checks for manifest description rules.
 - **2026-07-03 — ⚡ Faster selection translation.** Select text and press Enter twice to translate; mixed-language Markdown now detects the natural-language source more carefully.
 - **2026-07-03 — 🧹 Cleaner selection card.** The selection preview stays compact, with the quick-translate hint moved into the composer placeholder.
 - **2026-06-30 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 🌐 Web research pipeline.** Glossa can now search through the free auto provider or Brave, Tavily, Exa, and SerpAPI, then fetch bounded source notes instead of dumping raw pages.
@@ -124,6 +125,7 @@ npm install
 npm run build
 npm run typecheck
 npm test
+npm run release:check
 ```
 
 For local development:
@@ -137,6 +139,7 @@ GLOSSA_PLUGIN_DIR="/path/to/vault/.obsidian/plugins/glossa" npm run dev
 - Desktop-only for now, because full agent mode uses Node/Electron capabilities.
 - New installs start conservatively: Plan mode + read-only permissions.
 - Release assets are built from source by GitHub Actions and attached to GitHub Releases.
+- `npm run release:check` verifies version metadata, release files, and manifest description constraints.
 - Update checks are optional and can be disabled in settings.
 - Contributions, issues, and focused bug reports are welcome.
 

@@ -30,8 +30,21 @@ if (!versions[manifest.version]) fail(`versions.json is missing ${manifest.versi
 if (versions[manifest.version] !== manifest.minAppVersion) {
   fail(`versions.json ${manifest.version} (${versions[manifest.version]}) does not match manifest.minAppVersion (${manifest.minAppVersion}).`);
 }
-if (typeof manifest.description !== 'string' || !manifest.description.trim().endsWith('.')) {
+const description = typeof manifest.description === 'string' ? manifest.description.trim() : '';
+if (!description.endsWith('.')) {
   fail('manifest.description must end with a period.');
+}
+if (description.length > 250) {
+  fail(`manifest.description must be 250 characters or fewer (${description.length}).`);
+}
+if (/\bobsidian\b/i.test(description)) {
+  fail('manifest.description must not include "Obsidian"; the plugin directory context already implies it.');
+}
+if (/[\r\n]/.test(description)) {
+  fail('manifest.description must be a single line.');
+}
+if (pkg.description !== manifest.description) {
+  fail('package description must match manifest.description.');
 }
 for (const path of ['README.md', 'LICENSE', 'PRIVACY.md', 'SECURITY.md', 'CHANGELOG.md', 'styles.css']) {
   if (!fs.existsSync(path)) fail(`${path} is missing.`);

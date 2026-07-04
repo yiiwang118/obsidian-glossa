@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] — 2026-07-04
+
+Release-readiness polish for community directory review.
+
+### Changed
+- Refreshed README positioning around vault context, local execution, approvals, and release checks.
+- Updated marketplace metadata to keep the manifest description concise and free of redundant platform wording.
+- Added this changelog entry so the 0.6.2 release has a clear review-facing summary.
+
+### Checks
+- Tightened `npm run release:check` so future releases fail if the manifest description includes redundant platform wording or exceeds the review-friendly length cap.
+
+## [0.6.1] — 2026-07-03
+
+Selection translation and review feedback fixes.
+
+### Added
+- Added double-Enter quick translation for selected text when the composer is empty.
+- Added mixed-language selection detection that ignores Markdown URLs and lowers the weight of model names, provider names, and other proper nouns.
+- Added browser-global shims for the Node test runner so integration tests can exercise browser-oriented code paths.
+
+### Changed
+- Kept the selection preview compact by moving the quick-translate hint into the composer placeholder.
+- Shortened the marketplace description and removed redundant platform wording from metadata.
+- Updated README release notes for selection translation behavior.
+
+### Fixed
+- Reset the active chat cleanly if the current session is deleted from history.
+- Preserved scroll position during streaming unless the user is already following the bottom of the conversation.
+
 ## [0.6.0] — 2026-06-30
 
 Web research, safer downloads, and source provenance.
@@ -188,6 +218,9 @@ First open-source release. Focuses on hardening: 6 high/medium-severity findings
 
 Last pre-open-source version. Internal-only. Not published.
 
+[0.6.2]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.2
+[0.6.1]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.1
+[0.6.0]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.0
 [0.5.3]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.5.3
 [0.5.2]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.5.2
 [0.5.1]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.5.1
