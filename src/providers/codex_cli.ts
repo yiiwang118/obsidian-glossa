@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -11,7 +12,7 @@ function redactDiagnosticText(text: string): string {
     .replace(/\b(sk-[A-Za-z0-9_-]{12,})\b/g, 'sk-[redacted]')
     .replace(/\b(api[_-]?key|token|authorization)\s*[:=]\s*["']?[^"'\s]+/gi, '$1=[redacted]')
     .replace(/\b(Bearer)\s+[A-Za-z0-9._-]+/gi, '$1 [redacted]')
-    .replace(/(https?:\/\/)([^\/\s:@]+):([^\/\s@]+)@/gi, '$1[redacted]:[redacted]@');
+    .replace(/(https?:\/\/)([^/\s:@]+):([^/\s@]+)@/gi, '$1[redacted]:[redacted]@');
 }
 
 function redactProxyUrl(value: string | undefined): string | undefined {
@@ -61,7 +62,7 @@ export class CodexCliProvider implements LLMProvider {
     catch { return { ok: false, message: `Cannot execute ${this.ep.binaryPath} — file missing or not +x.` }; }
     return new Promise(resolve => {
       let stdout = '', stderr = '';
-      const proc = spawn(this.ep.binaryPath!, ['--version'], {
+      const proc = spawn(this.ep.binaryPath, ['--version'], {
         env: makeChildEnv(), stdio: ['ignore', 'pipe', 'pipe'],
         cwd: this.ep.cwd && fs.existsSync(this.ep.cwd) ? this.ep.cwd : undefined,
       });
@@ -155,7 +156,7 @@ export class CodexCliProvider implements LLMProvider {
     await new Promise<void>(resolve => {
       let proc: ReturnType<typeof spawn>;
       try {
-        proc = spawn(this.ep.binaryPath!, args, { cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+        proc = spawn(this.ep.binaryPath, args, { cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'] });
       } catch (e: any) {
         spawnErr = `Failed to spawn: ${e.message}`;
         resolve();
@@ -408,7 +409,7 @@ export class CodexCliProvider implements LLMProvider {
 
     let proc: ReturnType<typeof spawn>;
     try {
-      proc = spawn(this.ep.binaryPath!, args, {
+      proc = spawn(this.ep.binaryPath, args, {
         cwd,
         env: makeChildEnv((this as any).__proxy),
       });

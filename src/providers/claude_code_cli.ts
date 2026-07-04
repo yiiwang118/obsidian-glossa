@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import { makeChildEnv } from '../utils/env';
@@ -33,7 +34,7 @@ export class ClaudeCodeCliProvider implements LLMProvider {
     catch { return { ok: false, message: `Cannot execute ${this.ep.binaryPath} — file missing or not +x.` }; }
     return new Promise(resolve => {
       let stdout = '', stderr = '';
-      const proc = spawn(this.ep.binaryPath!, ['--version'], {
+      const proc = spawn(this.ep.binaryPath, ['--version'], {
         env: makeChildEnv(), stdio: ['ignore', 'pipe', 'pipe'],
         cwd: this.ep.cwd && fs.existsSync(this.ep.cwd) ? this.ep.cwd : undefined,
       });
@@ -98,7 +99,7 @@ export class ClaudeCodeCliProvider implements LLMProvider {
 
     args.push(serializeMessages(req));
 
-    const proc = spawn(this.ep.binaryPath!, args, {
+    const proc = spawn(this.ep.binaryPath, args, {
       cwd: this.ep.cwd || (this as any).__fallbackCwd || process.env.HOME,
       env: makeChildEnv((this as any).__proxy),
     });

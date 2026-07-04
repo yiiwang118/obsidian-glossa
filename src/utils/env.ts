@@ -47,7 +47,7 @@ let _shellEnvPromise: Promise<NodeJS.ProcessEnv> | null = null;
  *  HTTPS_PROXY etc. for spawned CLIs. */
 export function loadShellEnv(): Promise<NodeJS.ProcessEnv> {
   if (_shellEnvCache) return Promise.resolve(_shellEnvCache);
-  if (_shellEnvPromise) return _shellEnvPromise;
+  if (_shellEnvPromise !== null) return _shellEnvPromise;
   _shellEnvPromise = (async () => {
     try {
       const shell = process.env.SHELL ?? '/bin/zsh';

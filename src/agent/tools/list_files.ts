@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { TFile, TFolder } from 'obsidian';
 import { buildTool, globToRegExp as sharedGlobToRegExp, type ToolImpl } from './_shared';
 

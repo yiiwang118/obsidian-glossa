@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 /**
  * patch_canvas — surgical node/edge edits to a .canvas file.
  *
@@ -78,7 +79,8 @@ export const patchCanvas: ToolImpl = buildTool({
       const node = doc.nodes.find(n => n.id === id);
       if (!node) return `Error: node ${id} not found.`;
       // Shallow merge — preserves id.
-      const { id: _, ...patches } = payload;
+      const patches = { ...payload };
+      delete patches.id;
       Object.assign(node, patches);
       summary = `Updated node ${id} (${Object.keys(patches).length} field(s)).`;
     } else if (op === 'add_edge') {

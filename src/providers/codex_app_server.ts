@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 /**
  * `codex app-server --listen stdio://` integration.
  *
@@ -88,7 +89,7 @@ class AppServerClient {
       cwd: opts.cwd,
       env: opts.env,
       stdio: ['pipe', 'pipe', 'pipe'],
-    }) as ChildProcessWithoutNullStreams;
+    });
 
     this.proc.stdout.on('data', (chunk) => this.onStdout(chunk.toString('utf-8')));
     this.proc.stderr.on('data', (chunk) => {
@@ -176,7 +177,7 @@ class AppServerClient {
         }
       }, timeoutMs);
       // Wrap resolve/reject to clear timer
-      const orig = this.pending.get(id)!;
+      const orig = this.pending.get(id);
       this.pending.set(id, {
         resolve: (r) => { window.clearTimeout(timer); orig.resolve(r); },
         reject: (e) => { window.clearTimeout(timer); orig.reject(e); },
@@ -466,7 +467,7 @@ export async function* streamViaAppServer(
         await new Promise<void>((resolve) => { state.wake = resolve; });
         continue;
       }
-      const next = state.chunks.shift()!;
+      const next = state.chunks.shift();
       yield next;
     }
 

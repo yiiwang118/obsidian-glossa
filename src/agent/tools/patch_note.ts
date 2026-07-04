@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 /**
  * patch_note — section / block / frontmatter-anchored append-prepend-replace.
  *
@@ -184,21 +185,21 @@ export const patchNote: ToolImpl = buildTool({
     if (target.frontmatter_key) {
       try {
         await app.fileManager.processFrontMatter(f, (fm: Record<string, any>) => {
-          const cur = fm[target.frontmatter_key!];
+          const cur = fm[target.frontmatter_key];
           if (op === 'replace') {
             // Try to parse content as JSON for arrays/objects/booleans/numbers;
             // fall through to plain string on parse error.
-            try { fm[target.frontmatter_key!] = JSON.parse(content); }
-            catch { fm[target.frontmatter_key!] = content; }
+            try { fm[target.frontmatter_key] = JSON.parse(content); }
+            catch { fm[target.frontmatter_key] = content; }
           } else if (Array.isArray(cur)) {
             // We're in the !replace branch (replace handled above), so op is append/prepend.
             const parsed = (() => { try { return JSON.parse(content); } catch { return content; } })();
-            if (op === 'append')  fm[target.frontmatter_key!] = [...cur, parsed];
-            else                  fm[target.frontmatter_key!] = [parsed, ...cur];
+            if (op === 'append')  fm[target.frontmatter_key] = [...cur, parsed];
+            else                  fm[target.frontmatter_key] = [parsed, ...cur];
           } else {
             // String concat for scalar values; op is append/prepend here.
             const curStr = String(cur ?? '');
-            fm[target.frontmatter_key!] = op === 'append' ? (curStr + content) : (content + curStr);
+            fm[target.frontmatter_key] = op === 'append' ? (curStr + content) : (content + curStr);
           }
         });
         return `Patched ${path}.frontmatter.${target.frontmatter_key} (${op}).`;

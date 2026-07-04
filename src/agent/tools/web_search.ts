@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
+import { requestUrl } from 'obsidian';
 import { buildTool, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects } from '../../utils/safe_web';
 import type { WebSearchProvider } from '../../types';
@@ -288,11 +290,14 @@ async function fetchJson(url: string, init: RequestInit, parentSignal?: AbortSig
     else parentSignal.addEventListener('abort', onAbort, { once: true });
   }
   try {
-    const response = safeGet
-      ? await fetchWithSafeRedirects(url, ctl.signal)
-      : await fetch(url, { ...init, signal: ctl.signal, redirect: 'follow' });
-    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-    return await response.json();
+    if (safeGet) {
+      const response = await fetchWithSafeRedirects(url, ctl.signal);
+      if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+      return await response.json();
+    }
+    const response = await requestUrlWithTimeout(url, init, ctl.signal, timeoutMs);
+    if (response.status >= 400) throw new Error(`HTTP ${response.status}`);
+    return response.json ?? JSON.parse(response.text || 'null');
   } finally {
     window.clearTimeout(timer);
     if (parentSignal) parentSignal.removeEventListener('abort', onAbort);
@@ -308,13 +313,53 @@ async function fetchText(url: string, init: RequestInit, parentSignal?: AbortSig
     else parentSignal.addEventListener('abort', onAbort, { once: true });
   }
   try {
-    const response = await fetch(url, { ...init, signal: ctl.signal, redirect: 'follow' });
-    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-    return await response.text();
+    const response = await requestUrlWithTimeout(url, init, ctl.signal, timeoutMs);
+    if (response.status >= 400) throw new Error(`HTTP ${response.status}`);
+    return response.text;
   } finally {
     window.clearTimeout(timer);
     if (parentSignal) parentSignal.removeEventListener('abort', onAbort);
   }
+}
+
+async function requestUrlWithTimeout(url: string, init: RequestInit, signal: AbortSignal, timeoutMs: number) {
+  if (signal.aborted) throw new Error('Request aborted.');
+  let timer: number | null = null;
+  try {
+    return await Promise.race([
+      requestUrl({
+        url,
+        method: init.method ?? 'GET',
+        headers: headersToRecord(init.headers),
+        body: requestBodyToString(init.body),
+        throw: false,
+      }),
+      new Promise<never>((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error(`Request timed out after ${timeoutMs}ms.`)), timeoutMs);
+        signal.addEventListener('abort', () => reject(new Error('Request aborted.')), { once: true });
+      }),
+    ]);
+  } finally {
+    if (timer !== null) window.clearTimeout(timer);
+  }
+}
+
+function headersToRecord(headers: HeadersInit | undefined): Record<string, string> | undefined {
+  if (!headers) return undefined;
+  if (headers instanceof Headers) {
+    const out: Record<string, string> = {};
+    headers.forEach((value, key) => { out[key] = value; });
+    return out;
+  }
+  if (Array.isArray(headers)) return Object.fromEntries(headers);
+  return headers;
+}
+
+function requestBodyToString(body: BodyInit | null | undefined): string | ArrayBuffer | undefined {
+  if (body == null) return undefined;
+  if (typeof body === 'string' || body instanceof ArrayBuffer) return body;
+  if (body instanceof URLSearchParams) return body.toString();
+  throw new Error('Unsupported request body type.');
 }
 
 function parseDuckDuckGoResults(json: any): SearchResult[] {

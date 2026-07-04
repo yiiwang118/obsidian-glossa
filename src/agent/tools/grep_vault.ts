@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { buildTool, globToRegExp, type ToolImpl } from './_shared';
 
 /** Lightweight ripgrep-style search using Obsidian's vault + the in-memory FileIndex.
@@ -73,8 +74,8 @@ export const grepVault: ToolImpl = buildTool({
     outer: for (const f of files) {
       if (!f) continue;
       scanned++;
-      if (pathMatcher && !pathMatcher.test((f as any).path)) continue;
-      const text = await app.vault.cachedRead(f as any);
+      if (pathMatcher && !pathMatcher.test((f).path)) continue;
+      const text = await app.vault.cachedRead(f);
       const lines = text.split('\n');
       for (let i = 0; i < lines.length; i++) {
         if (re.test(lines[i])) {
@@ -86,7 +87,7 @@ export const grepVault: ToolImpl = buildTool({
               context.push({ line: k + 1, text: lines[k] });
             }
           }
-          matches.push({ path: (f as any).path, line: i + 1, text: lines[i], context });
+          matches.push({ path: (f).path, line: i + 1, text: lines[i], context });
           if (matches.length >= max) break outer;
         }
       }

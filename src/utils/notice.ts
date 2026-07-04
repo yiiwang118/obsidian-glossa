@@ -16,7 +16,7 @@ export function quickNotice(text: string, timeoutMs = 1600): Notice {
     setStyle(x, { opacity: '0.55' });
     setStyle(x, { fontSize: '11px' });
     x.onclick = (e) => { e.stopPropagation(); n.hide(); };
-    n.noticeEl.appendChild(x);
+    n.messageEl.appendChild(x);
   } catch { /* ignore */ }
   return n;
 }

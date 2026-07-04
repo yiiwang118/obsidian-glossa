@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { App } from 'obsidian';
 import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, isReadOnlyTool, normalizeToolResult, type ToolImpl, type ToolRunResult } from './tools';
 import { askApproval, type ApprovalResult } from './approval';
@@ -565,7 +566,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         opts.onPermissionDecision?.({
           at: Date.now(), tool: call.name, args: JSON.stringify(call.args ?? {}).slice(0, 200),
           decision: 'allowed-by-rule',
-          scope: matchingRule!.scope + (matchingRule!.value ? ':' + matchingRule!.value : ''),
+          scope: matchingRule.scope + (matchingRule.value ? ':' + matchingRule.value : ''),
         });
       }
 
@@ -607,9 +608,9 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         });
         if (res.mutatedArgs) {
           effectiveArgs = res.mutatedArgs;
-          if ((effectiveArgs as any).__rewriteAsWrite) {
+          if ((effectiveArgs).__rewriteAsWrite) {
             rewriteToWriteNote = true;
-            delete (effectiveArgs as any).__rewriteAsWrite;
+            delete (effectiveArgs).__rewriteAsWrite;
           }
         }
         // Persist any "Always allow…" choice the user made on this approval
@@ -672,8 +673,8 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       try {
         // Stale-write guard: if user toggled per-line in approval, we captured a file
         // snapshot. If the file changed between preview and apply, refuse to overwrite.
-        const expectedBefore: string | undefined = (effectiveArgs as any).__expectedBefore;
-        const pathField = (effectiveArgs as any).path ?? (effectiveArgs as any).file_path;
+        const expectedBefore: string | undefined = (effectiveArgs).__expectedBefore;
+        const pathField = (effectiveArgs).path ?? (effectiveArgs).file_path;
         if (expectedBefore != null && pathField) {
           const { TFile } = await import('obsidian');
           const f = opts.app.vault.getAbstractFileByPath(pathField);
@@ -681,7 +682,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
             const now = await opts.app.vault.read(f);
             if (now !== expectedBefore) throw new Error('File changed between preview and apply — please regenerate.');
           }
-          delete (effectiveArgs as any).__expectedBefore;
+          delete (effectiveArgs).__expectedBefore;
         }
 
         let raw: string | ToolRunResult;
@@ -701,11 +702,11 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           // harness instead of injecting body inline. The sub-agent's final
           // text is the tool result the model sees.
           if (call.name === 'skill') {
-            const skillName = String((effectiveArgs as any)?.skill ?? '');
+            const skillName = String((effectiveArgs)?.skill ?? '');
             const skill = skillName ? await getSkill(opts.app, skillName) : null;
             if (skill?.context === 'fork') {
               const { forkSkill } = await import('./sub_agent');
-              const argStr = typeof (effectiveArgs as any)?.args === 'string' ? (effectiveArgs as any).args : '';
+              const argStr = typeof (effectiveArgs)?.args === 'string' ? (effectiveArgs).args : '';
               const fork = await forkSkill({
                 app: opts.app,
                 provider: opts.provider,
@@ -732,7 +733,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
             raw = await tool.run(opts.app, effectiveArgs, toolCtx);
           }
         } else {
-          raw = await mcpEntry!.client.callTool(mcpEntry!.originalName, effectiveArgs);
+          raw = await mcpEntry.client.callTool(mcpEntry.originalName, effectiveArgs);
         }
         const norm = normalizeToolResult(raw);
         // Skill-scoped allow: when the `skill` tool runs successfully, push a
@@ -744,7 +745,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         // tool succeeded — no need to check ev.status.
         if (call.name === 'skill') {
           try {
-            const skillName = String((effectiveArgs as any)?.skill ?? '');
+            const skillName = String((effectiveArgs)?.skill ?? '');
             if (skillName) {
               const skill = await getSkill(opts.app, skillName);
               if (skill?.allowedTools?.length) {

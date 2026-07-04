@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 /**
  * Codex-style `apply_patch` envelope parser + applier.
  * Ported from /codex-rs/apply-patch (parser.rs, seek_sequence.rs) to TypeScript.

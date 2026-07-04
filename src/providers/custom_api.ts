@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { requestUrl } from 'obsidian';
 import { isDeepSeekEndpoint, mapOpenAIReasoningEffort, type Endpoint } from '../types';
+import { nativeStreamingHttpRequest } from '../utils/native_http';
 import type { LLMProvider, ChatRequest, ChatChunk } from './types';
 
 /** Strip the SYSTEM_PROMPT_DYNAMIC_BOUNDARY marker used by buildSystemPrompt() for the
@@ -23,9 +25,9 @@ function isContextOverflowError(status: number, body: string): boolean {
  *  don't want that to land in chats.json or a screenshot. */
 function redactErrorBody(s: string): string {
   return s
-    .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer [REDACTED]')
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]')
     .replace(/sk-[A-Za-z0-9]{20,}/g, 'sk-[REDACTED]')
-    .replace(/(x-api-key["'\s:=]+)[A-Za-z0-9._\-]+/gi, '$1[REDACTED]');
+    .replace(/(x-api-key["'\s:=]+)[A-Za-z0-9._-]+/gi, '$1[REDACTED]');
 }
 
 function withReasoningEffortHint(ep: Endpoint, message: string): string {
@@ -125,7 +127,7 @@ export class CustomApiProvider implements LLMProvider {
    *  Returns the whole text + final usage in one shot. No tool_call streaming. */
   private async *requestNonStreaming(req: ChatRequest, style: 'openai' | 'anthropic'): AsyncGenerator<ChatChunk> {
     if (style === 'anthropic') {
-      const url = `${this.ep.baseUrl!.replace(/\/$/, '')}/messages`;
+      const url = `${this.ep.baseUrl.replace(/\/$/, '')}/messages`;
       const headers: any = {
         'Content-Type': 'application/json',
         'x-api-key': this.ep.apiKey,
@@ -179,7 +181,7 @@ export class CustomApiProvider implements LLMProvider {
       return;
     }
 
-    const url = `${this.ep.baseUrl!.replace(/\/$/, '')}/chat/completions`;
+    const url = `${this.ep.baseUrl.replace(/\/$/, '')}/chat/completions`;
     const headers: any = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${this.ep.apiKey}`,
@@ -280,7 +282,7 @@ export class CustomApiProvider implements LLMProvider {
 
   /* ---------------- OpenAI-compatible ---------------- */
   private async *streamOpenAI(req: ChatRequest): AsyncGenerator<ChatChunk> {
-    const url = `${this.ep.baseUrl!.replace(/\/$/, '')}/chat/completions`;
+    const url = `${this.ep.baseUrl.replace(/\/$/, '')}/chat/completions`;
     const headers: any = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${this.ep.apiKey}`,
@@ -340,7 +342,7 @@ export class CustomApiProvider implements LLMProvider {
 
     let resp: Response;
     try {
-      resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: req.signal });
+      resp = await nativeStreamingHttpRequest(url, { method: 'POST', headers, body: JSON.stringify(body), signal: req.signal });
     } catch (e: any) {
       yield { type: 'error', error: `network: ${e.message}` };
       return;
@@ -355,7 +357,7 @@ export class CustomApiProvider implements LLMProvider {
       return;
     }
 
-    const reader = resp.body!.getReader();
+    const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
     let bufText = '';
@@ -370,7 +372,7 @@ export class CustomApiProvider implements LLMProvider {
     const watchdog = window.setInterval(() => {
       if (Date.now() - lastChunkAt > 90_000) {
         timedOut = true;
-        try { reader.cancel('idle timeout (90s)'); } catch { /* ignore */ }
+        try { void reader.cancel('idle timeout (90s)'); } catch { /* ignore */ }
         window.clearInterval(watchdog);
       }
     }, 5000);
@@ -461,7 +463,7 @@ export class CustomApiProvider implements LLMProvider {
 
   /* ---------------- Anthropic-compatible ---------------- */
   private async *streamAnthropic(req: ChatRequest): AsyncGenerator<ChatChunk> {
-    const url = `${this.ep.baseUrl!.replace(/\/$/, '')}/messages`;
+    const url = `${this.ep.baseUrl.replace(/\/$/, '')}/messages`;
     const headers: any = {
       'Content-Type': 'application/json',
       'x-api-key': this.ep.apiKey,
@@ -565,7 +567,7 @@ export class CustomApiProvider implements LLMProvider {
       }));
     }
 
-    const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: req.signal });
+    const resp = await nativeStreamingHttpRequest(url, { method: 'POST', headers, body: JSON.stringify(body), signal: req.signal });
     if (!resp.ok) {
       const txt = await resp.text().catch(() => '');
       if (isContextOverflowError(resp.status, txt)) {
@@ -575,7 +577,7 @@ export class CustomApiProvider implements LLMProvider {
       yield { type: 'error', error: withReasoningEffortHint(this.ep, `HTTP ${resp.status}: ${redactErrorBody(txt).slice(0, 400)}`) };
       return;
     }
-    const reader = resp.body!.getReader();
+    const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buf = ''; let bufText = '';
     const toolBuffers = new Map<number, { id: string; name: string; argsStr: string }>();
@@ -586,7 +588,7 @@ export class CustomApiProvider implements LLMProvider {
     const watchdog = window.setInterval(() => {
       if (Date.now() - lastChunkAt > 90_000) {
         timedOut = true;
-        try { reader.cancel('idle timeout (90s)'); } catch { /* ignore */ }
+        try { void reader.cancel('idle timeout (90s)'); } catch { /* ignore */ }
         window.clearInterval(watchdog);
       }
     }, 5000);

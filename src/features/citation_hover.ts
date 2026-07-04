@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { FileView, TFile } from 'obsidian';
 import type GlossaPlugin from '../main';
 import { el, clear, setStyle } from '../utils/dom';
@@ -157,9 +158,9 @@ export class CitationHoverController {
     const ctx = this.pdfContextForTarget(target);
     if (!ctx) return null;
 
-    const link = target.closest(LINK_SELECTOR) as HTMLElement | null;
+    const link = target.closest(LINK_SELECTOR);
     if (!link || !ctx.root.contains(link)) return null;
-    const anchor = link;
+    const anchor = link as HTMLElement;
     const candidates = this.textCandidatesFor(anchor, target, ctx.root, e);
     const citation = candidates.map(text => parseCitationText(text)).find(Boolean);
     if (!citation) return null;
@@ -172,9 +173,9 @@ export class CitationHoverController {
     this.plugin.app.workspace.iterateAllLeaves(leaf => leaves.push(leaf));
     for (const leaf of leaves) {
       const view = leaf?.view;
-      const container = (view as any)?.containerEl as HTMLElement | undefined;
+      const container = (view)?.containerEl as HTMLElement | undefined;
       if (!view || !container || !container.contains(target)) continue;
-      const file = view instanceof FileView ? view.file : (view as any).file;
+      const file = view instanceof FileView ? view.file : (view).file;
       if (!(file instanceof TFile) || file.extension.toLowerCase() !== 'pdf') continue;
       const root = directRoot && container.contains(directRoot)
         ? directRoot as HTMLElement

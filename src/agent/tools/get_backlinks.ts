@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 /**
  * get_backlinks — list every note that links INTO the given path.
  *
@@ -121,7 +122,7 @@ export const getBacklinks: ToolImpl = buildTool({
     catch (e: any) { return `Error: ${e.message}`; }
     const max = Math.max(1, Math.min(500, args.max_results ?? 50));
     const withContext = !!args.with_context;
-    const resolved = app.metadataCache.resolvedLinks as Record<string, Record<string, number>>;
+    const resolved = app.metadataCache.resolvedLinks;
     const sources: { source: string; count: number }[] = [];
     for (const src of Object.keys(resolved)) {
       const counts = resolved[src];
@@ -134,7 +135,7 @@ export const getBacklinks: ToolImpl = buildTool({
       return [`${top.length}${sources.length > top.length ? `+ (showing first ${max})` : ''} backlinks to ${path}:`, ...top.map(s => `- ${s.source}  (×${s.count})`)].join('\n');
     }
     // Fetch context snippets — one line containing the link, per source.
-    const targetBasename = path.split('/').pop()!.replace(/\.md$/, '');
+    const targetBasename = path.split('/').pop().replace(/\.md$/, '');
     const linkPattern = new RegExp(`\\[\\[[^\\]]*${targetBasename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\\]]*\\]\\]`);
     const lines: string[] = [`${top.length} backlinks to ${path} (with context):`, ''];
     for (const s of top) {

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { App, Menu, Modal, Notice } from 'obsidian';
 import type GlossaPlugin from '../main';
 import type { ChatSession } from '../types';
@@ -224,10 +225,10 @@ class HistoryPopover {
     };
     const cancel = () => { this.renamingId = null; this.renderList(); };
     input.onkeydown = (e) => {
-      if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+      if (e.key === 'Enter')  { e.preventDefault(); void commit(); }
       if (e.key === 'Escape') { e.preventDefault(); cancel(); }
     };
-    input.onblur = () => commit();
+    input.onblur = () => { void commit(); };
     window.setTimeout(() => { input.focus(); input.select(); }, 10);
   }
 

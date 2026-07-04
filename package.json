@@ -8,6 +8,7 @@
     "build": "node esbuild.config.mjs production",
     "test": "node tests/run.cjs",
     "typecheck": "tsc --noEmit",
+    "lint:review": "eslint \"src/**/*.ts\" --max-warnings=0",
     "release:check": "node scripts/release_check.cjs"
   },
   "keywords": [
@@ -31,7 +32,10 @@
   "homepage": "https://github.com/yiiwang118/obsidian-glossa#readme",
   "devDependencies": {
     "@types/node": "^20",
-    "esbuild": "^0.21.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^8.57.1",
     "obsidian": "^1.4.11",
     "tslib": "^2.6.0",
     "typescript": "^5.4.0"

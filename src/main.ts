@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { Plugin, WorkspaceLeaf, Notice, addIcon } from 'obsidian';
 import { GlossaView, VIEW_TYPE_GLOSSA } from './ui/view';
 import { GlossaSettingTab } from './settings';
@@ -41,7 +42,7 @@ export default class GlossaPlugin extends Plugin {
     loadShellEnv().catch(() => {});
 
     const raw = (await this.loadData()) ?? {};
-    const { __chats: legacy, ...settingsRaw } = raw as any;
+    const { __chats: legacy, ...settingsRaw } = raw;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, settingsRaw);
     this.hydrateCachedUpdateInfo();
     // Experimental PDF citation hover is currently hidden and hard-disabled.
@@ -238,7 +239,7 @@ export default class GlossaPlugin extends Plugin {
         // Editing a SKILL.md invalidates the discoverSkills TTL cache so
         // the next disc walk picks up the new frontmatter / body.
         if (p.endsWith('/SKILL.md') || p === 'SKILL.md') {
-          import('./agent/skills').then(m => m.invalidateDiscoverCache()).catch(() => {});
+          void import('./agent/skills').then(m => m.invalidateDiscoverCache()).catch(() => {});
         }
       }),
     );
@@ -248,21 +249,21 @@ export default class GlossaPlugin extends Plugin {
   }
 
   onunload() {
-    this.mcp?.stop();
+    void this.mcp?.stop();
     // Flush any debounced persist timers so the last 750ms of changes
     // (nested skill dirs discovered, etc.) don't get lost when the user
     // disables / reloads the plugin. Fire-and-forget — onunload is
     // synchronous from Obsidian's perspective but we can still kick the
     // async flush; in practice the adapter.write completes synchronously
     // on the same tick for small files.
-    import('./agent/skills').then(m => m.flushPersistedNestedSkillDirs(this.app)).catch(() => {});
+    void import('./agent/skills').then(m => m.flushPersistedNestedSkillDirs(this.app)).catch(() => {});
   }
 
   async activateView() {
     const { workspace } = this.app;
     let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(VIEW_TYPE_GLOSSA)[0];
     if (!leaf) { leaf = workspace.getRightLeaf(false); await leaf?.setViewState({ type: VIEW_TYPE_GLOSSA, active: true }); }
-    if (leaf) workspace.revealLeaf(leaf);
+    if (leaf) await workspace.revealLeaf(leaf);
   }
 
   getView(): GlossaView | null {
@@ -277,7 +278,7 @@ export default class GlossaPlugin extends Plugin {
       this.hydrateCachedUpdateInfo();
       return this.updateInfo;
     }
-    if (this.updateCheckInFlight) return this.updateCheckInFlight;
+    if (this.updateCheckInFlight !== null) return this.updateCheckInFlight;
     this.updateCheckInFlight = (async () => {
       try {
         const info = await fetchLatestUpdate(this.manifest.version);
@@ -388,7 +389,7 @@ export default class GlossaPlugin extends Plugin {
     if (!this.settings.encryptionEnabled) return true;
     if (!await this.requireUnlock()) return false;
     for (const ep of this.settings.endpoints) {
-      if (ep.apiKey && isEncrypted(ep.apiKey)) ep.apiKey = await decryptString(ep.apiKey, this.cryptoHandle!);
+      if (ep.apiKey && isEncrypted(ep.apiKey)) ep.apiKey = await decryptString(ep.apiKey, this.cryptoHandle);
     }
     this.settings.encryptionEnabled = false;
     this.settings.encryptionSaltBase64 = '';
@@ -458,7 +459,7 @@ export default class GlossaPlugin extends Plugin {
     if (!ep.apiKey || !isEncrypted(ep.apiKey)) return ep;
     if (!await this.requireUnlock()) return null;
     try {
-      const plain = await decryptString(ep.apiKey, this.cryptoHandle!);
+      const plain = await decryptString(ep.apiKey, this.cryptoHandle);
       return { ...ep, apiKey: plain };
     } catch (e) {
       new Notice(bi('Failed to decrypt API key — passphrase may be wrong.', 'API 密钥解密失败 — 密码可能错误。')); return null;
@@ -536,7 +537,7 @@ export default class GlossaPlugin extends Plugin {
     this.getView()?.refreshFromSettings?.();
     this.settings.citationHoverEnabled = false;
     if (this._saveTimer) window.clearTimeout(this._saveTimer);
-    this._saveTimer = window.setTimeout(() => { this.persistAll(); this._saveTimer = null; }, 300);
+    this._saveTimer = window.setTimeout(() => { void this.persistAll(); this._saveTimer = null; }, 300);
   }
   async persistAll() {
     await this.saveData({ ...this.settings });

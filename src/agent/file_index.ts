@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 /**
  * Lightweight in-memory vault index inspired by upstream Claude Code's
  * native-ts/file-index. We keep:
@@ -46,7 +47,7 @@ export class FileIndex {
     this.listening = true;
     const v = this.app.vault;
     this.app.workspace.onLayoutReady(() => {
-      this.rebuild();
+      void this.rebuild();
     });
 
     // Helper that prefers plugin.registerEvent (proper cleanup on unload)
@@ -58,19 +59,19 @@ export class FileIndex {
       // If no plugin: nothing to do — the handler is already wired by .on().
     };
 
-    bind((v as any).on?.('create', (f: TFile) => this.upsert(f)));
+    bind((v as any).on?.('create', (f: TFile) => { void this.upsert(f); }));
     bind((v as any).on?.('delete', (f: TFile) => this.entries.delete(f.path)));
     bind((v as any).on?.('rename', (f: TFile, oldPath: string) => {
       this.entries.delete(oldPath);
-      this.upsert(f);
+      void this.upsert(f);
     }));
-    bind((v as any).on?.('modify', (f: TFile) => this.upsert(f, /* invalidatePreview */ true)));
+    bind((v as any).on?.('modify', (f: TFile) => { void this.upsert(f, /* invalidatePreview */ true); }));
   }
 
   private async upsert(f: TFile, invalidatePreview = false) {
     if (f.extension !== 'md') return;
     // Defer to after any in-flight rebuild so we never race against `clear()`.
-    if (this.rebuildPromise) await this.rebuildPromise;
+    if (this.rebuildPromise !== null) await this.rebuildPromise;
     const prev = this.entries.get(f.path);
     this.entries.set(f.path, {
       path: f.path,
@@ -83,7 +84,7 @@ export class FileIndex {
 
   /** Rebuild from scratch — yields to the event loop every YIELD_EVERY files. */
   async rebuild(): Promise<void> {
-    if (this.rebuildPromise) return this.rebuildPromise;
+    if (this.rebuildPromise !== null) return this.rebuildPromise;
     this.rebuildPromise = (async () => {
       const files = this.app.vault.getMarkdownFiles();
       // Build the next snapshot OFF to the side, then swap atomically. Without

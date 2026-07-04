@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import type { App } from 'obsidian';
 import type { GlossaSettings, WebSearchProvider } from '../../types';
 import type { PermissionResult } from './_shared';

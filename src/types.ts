@@ -515,7 +515,7 @@ export function modelContextWindow(model: string | undefined | null): number | n
   // 4.5 and Haiku remain 200k.
   if (/claude-(opus|sonnet)-4-7/.test(m)) return 1_000_000;
   if (/claude-(opus|sonnet)-4-6/.test(m)) return 1_000_000;
-  if (/claude-(3[\.-]5|3[\.-]7|sonnet-4-5|haiku-4-5)/.test(m)) return 200_000;
+  if (/claude-(3[.-]5|3[.-]7|sonnet-4-5|haiku-4-5)/.test(m)) return 200_000;
   if (/claude/.test(m)) return 200_000;
 
   // OpenAI. GPT-4.1 is the long-context 1M family; GPT-4o / 4 Turbo are 128k.

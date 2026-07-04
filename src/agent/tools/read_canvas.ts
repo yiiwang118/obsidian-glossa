@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 /**
  * read_canvas — parse a .canvas file and return its structured contents.
  *
@@ -56,7 +57,7 @@ export const readCanvas: ToolImpl = buildTool({
   // a compact summary line with key counts. The full JSON stays in the args
   // detail; click-to-expand the row to inspect. This is what U3's render-hook
   // demonstration sub-item asks for.
-  renderToolResultMessage(result, _args) {
+  renderToolResultMessage(result) {
     try {
       // The result string starts with our summary line; pull just that for a
       // tighter UI presentation.

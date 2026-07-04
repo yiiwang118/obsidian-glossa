@@ -97,7 +97,7 @@ export function applySelectedDiff(a: string, b: string, accepts: Map<number, boo
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, ch =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string)
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])
   );
 }
 

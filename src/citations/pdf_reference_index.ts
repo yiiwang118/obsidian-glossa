@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { App, TFile, loadPdfJs } from 'obsidian';
 import { textItemsToString } from '../utils/pdf';
 
@@ -405,12 +406,6 @@ function cleanReferenceText(text: string): string {
     .trim();
 }
 
-function trimReferenceSnippet(text: string): string {
-  const cleaned = cleanReferenceText(text);
-  if (cleaned.length <= 720) return cleaned;
-  return cleaned.slice(0, 700).trimEnd() + '...';
-}
-
 function isReferenceHeading(text: string): boolean {
   return /^(references|bibliography|works cited|literature cited|参考文献|参考资料)$/i.test(text.trim());
 }
@@ -518,7 +513,7 @@ function shouldJoinWithSpace(prev: TextRun, next: TextRun): boolean {
   const b = next.text[0] ?? '';
   if (!a || !b) return false;
   if (/\s/.test(a) || /\s/.test(b)) return false;
-  if (/[(\[{/]$/.test(a) || /^[,.;:!?%)]/.test(b)) return false;
+  if (a === '(' || a === '[' || a === '{' || a === '/' || /^[,.;:!?%)]/.test(b)) return false;
   const gap = next.x - (prev.x + prev.width);
   return gap > Math.max(1.5, prev.height * 0.18);
 }

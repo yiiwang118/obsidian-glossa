@@ -25,7 +25,7 @@ Glossa is not a cloud service. It runs locally as a desktop plugin. Your data go
 
 ## What's New
 
-- **2026-07-04 — 0.6.2 release-readiness polish.** Tightened marketplace metadata, refreshed the README and changelog, and added stricter release checks for manifest description rules.
+- **2026-07-04 — 0.6.2 release-readiness polish.** Tightened marketplace metadata, refreshed the README and changelog, removed review-scan noise from CSS/network/lint checks, and added stricter release checks.
 - **2026-07-03 — ⚡ Faster selection translation.** Select text and press Enter twice to translate; mixed-language Markdown now detects the natural-language source more carefully.
 - **2026-07-03 — 🧹 Cleaner selection card.** The selection preview stays compact, with the quick-translate hint moved into the composer placeholder.
 - **2026-06-30 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 🌐 Web research pipeline.** Glossa can now search through the free auto provider or Brave, Tavily, Exa, and SerpAPI, then fetch bounded source notes instead of dumping raw pages.
@@ -124,6 +124,7 @@ cd obsidian-glossa
 npm install
 npm run build
 npm run typecheck
+npm run lint:review
 npm test
 npm run release:check
 ```
@@ -139,6 +140,7 @@ GLOSSA_PLUGIN_DIR="/path/to/vault/.obsidian/plugins/glossa" npm run dev
 - Desktop-only for now, because full agent mode uses Node/Electron capabilities.
 - New installs start conservatively: Plan mode + read-only permissions.
 - Release assets are built from source by GitHub Actions and attached to GitHub Releases.
+- `npm run lint:review` mirrors the TypeScript rules that commonly surface in community review scans.
 - `npm run release:check` verifies version metadata, release files, and manifest description constraints.
 - Update checks are optional and can be disabled in settings.
 - Contributions, issues, and focused bug reports are welcome.

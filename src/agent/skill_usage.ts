@@ -58,7 +58,7 @@ async function flush(app: App): Promise<void> {
 /** Record one invocation. Side-effect-only — fire and forget. */
 export function recordSkillUsage(app: App, name: string): void {
   // We don't await; persistence is best-effort.
-  (async () => {
+  void (async () => {
     await ensureLoaded(app);
     if (!cache) cache = {};
     const prev = cache[name];

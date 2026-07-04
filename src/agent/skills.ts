@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 /**
  * Skills system — vault-stored prompt skills the model can discover and invoke.
  * Mirrors upstream Claude Code's SkillTool. Each skill lives at

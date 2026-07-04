@@ -193,9 +193,9 @@ export function inferExtension(contentType: string, url: string): string {
 }
 
 export function sanitizeFilename(name: string, fallback = 'download'): string {
-  const cleaned = name
-    .normalize('NFKC')
-    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-')
+  const cleaned = Array.from(name.normalize('NFKC'))
+    .map(ch => ch.charCodeAt(0) <= 31 || /[\\/:*?"<>|]/.test(ch) ? '-' : ch)
+    .join('')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^\.+/, '')

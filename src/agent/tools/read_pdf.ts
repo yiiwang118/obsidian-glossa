@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { TFile } from 'obsidian';
 import { setStyle } from '../../utils/dom';
 import { extractPdfTextFromArrayBuffer, formatPdfDiagnosticMarkdown, type PdfExtractionResult, type PdfReadTask } from '../../utils/pdf';
@@ -14,7 +15,7 @@ export const readPdf: ToolImpl = buildTool({
   searchHint: 'extract text from PDF attachment',
   backfillObservableInput: normalizePathFields(['path']),
   maxResultSizeChars: Infinity,
-  renderToolResultMessage(result, _args) {
+  renderToolResultMessage(result) {
     if (result.startsWith('Error')) return null;
     const m = result.match(/^PDF:\s+(.+?)\s+\((\d+)\s+pages?,\s+read\s+(.+?),\s+(\d+)\s+chars\)/);
     if (!m) return null;

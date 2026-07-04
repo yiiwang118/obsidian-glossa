@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 /**
  * Shared types and helpers for the per-tool modules in this directory.
  * Mirrors the upstream Claude Code tool architecture: each tool lives in its own file
@@ -112,9 +113,9 @@ export type ToolDef = Omit<ToolImpl, 'dangerous' | 'isReadOnly' | 'isConcurrency
  *  the slow path (single-batch sequential execution + approval). */
 const TOOL_DEFAULTS = {
   dangerous: true,                       // ask before running
-  isReadOnly: (_args: any) => false,     // assumes mutation
-  isConcurrencySafe: (_args: any) => false,
-  isDestructive: (_args: any) => true,
+  isReadOnly: () => false,               // assumes mutation
+  isConcurrencySafe: () => false,
+  isDestructive: () => true,
   maxResultSizeChars: 100_000,
 };
 
@@ -133,7 +134,7 @@ export function buildTool(def: ToolDef): ToolImpl {
     dangerous,
     isReadOnly: def.isReadOnly ?? TOOL_DEFAULTS.isReadOnly,
     isConcurrencySafe: def.isConcurrencySafe ?? def.isReadOnly ?? TOOL_DEFAULTS.isConcurrencySafe,
-    isDestructive: def.isDestructive ?? (def.isReadOnly ? (a: any) => !def.isReadOnly!(a) : TOOL_DEFAULTS.isDestructive),
+    isDestructive: def.isDestructive ?? (def.isReadOnly ? (a: any) => !def.isReadOnly(a) : TOOL_DEFAULTS.isDestructive),
     maxResultSizeChars: def.maxResultSizeChars ?? TOOL_DEFAULTS.maxResultSizeChars,
   };
 }

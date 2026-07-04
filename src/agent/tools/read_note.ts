@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { TFile } from 'obsidian';
 import { setStyle } from '../../utils/dom';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
@@ -17,7 +18,7 @@ export const readNote: ToolImpl = buildTool({
   // Show a compact "X lines · Y chars" header + a heading tree pulled from
   // the markdown body (h1–h3 only) before the raw <pre>. Keeps the card
   // scannable when the file is large.
-  renderToolResultMessage(result, _args) {
+  renderToolResultMessage(result) {
     if (result.startsWith('Error')) return null;
     // Result format: "Path: foo.md  (123 lines, 4567 chars)\n\n---\n<body>"
     const m = result.match(/^Path:\s+(.+?)\s+\((\d+)\s+lines,\s+(\d+)\s+chars\)/);

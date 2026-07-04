@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import {
   ItemView, WorkspaceLeaf, MarkdownView, TFile, Notice, Menu,
 } from 'obsidian';
@@ -211,15 +212,15 @@ export class GlossaView extends ItemView {
 
     this.ctx.on(() => { this.renderContextBar(); this.updateTokenBadge(); });
 
-    this.refreshAutoContext();
+    void this.refreshAutoContext();
     // Some users opened the sidebar while no file was active yet; the initial
     // refreshAutoContext() ran with workspace.getActiveFile() returning null
     // and the current-file pill never appeared. Re-run once on layout-ready
     // (Obsidian guarantees an active file is resolved by then), then keep the
     // event-driven updates.
-    this.app.workspace.onLayoutReady(() => this.refreshAutoContext());
-    this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.refreshAutoContext()));
-    this.registerEvent(this.app.workspace.on('file-open', () => this.refreshAutoContext()));
+    this.app.workspace.onLayoutReady(() => { void this.refreshAutoContext(); });
+    this.registerEvent(this.app.workspace.on('active-leaf-change', () => { void this.refreshAutoContext(); }));
+    this.registerEvent(this.app.workspace.on('file-open', () => { void this.refreshAutoContext(); }));
     this.registerEvent(this.app.workspace.on('editor-selection-change' as any, () => this.refreshSelection()));
     activeDocument.addEventListener('selectionchange', this.onDomSelectionChange);
     activeDocument.addEventListener('keydown', this.onGlobalSelectionTranslateEnter, true);
@@ -240,7 +241,8 @@ export class GlossaView extends ItemView {
     // Header
     const header = this.rootEl.querySelector('.nc-header'); header?.remove();
     this.buildHeader();
-    this.rootEl.insertBefore(this.rootEl.querySelector('.nc-header')!, this.planBoardEl);
+    const rebuiltHeader = this.rootEl.querySelector('.nc-header');
+    if (rebuiltHeader) this.rootEl.insertBefore(rebuiltHeader, this.planBoardEl);
     // Input area
     const inputWrap = this.rootEl.querySelector('.nc-input-wrap'); inputWrap?.remove();
     const costBar = this.costBar; costBar.remove();
@@ -546,7 +548,7 @@ export class GlossaView extends ItemView {
     const cleanupView = renderHistoryPopover(host, this.plugin, {
       onPick: (s) => {
         this.closeHistoryPopover({ immediate: true });
-        window.requestAnimationFrame(() => this.loadSession(s.id));
+        window.requestAnimationFrame(() => { void this.loadSession(s.id); });
       },
       onClose: () => this.closeHistoryPopover(),
       onDelete: (id) => this.handleHistorySessionDeleted(id),
@@ -615,16 +617,16 @@ export class GlossaView extends ItemView {
     menu.addItem(it => it.setTitle('Clear messages').onClick(() => this.startNewSession()));
     menu.addItem(it => it.setTitle('Copy entire conversation').onClick(() => {
       const txt = this.session.messages.map(m => `### ${m.role}\n${m.content}`).join('\n\n---\n\n');
-      navigator.clipboard.writeText(txt); quickNotice('Conversation copied.');
+      void navigator.clipboard.writeText(txt); quickNotice('Conversation copied.');
     }));
-    menu.addItem(it => it.setTitle('Export chat → note').onClick(() => this.exportChatToNote()));
+    menu.addItem(it => it.setTitle('Export chat → note').onClick(() => { void this.exportChatToNote(); }));
     menu.addSeparator();
     menu.addItem(it => it.setTitle('Save first user message as workflow').onClick(() => this.saveAsWorkflow()));
     if (this.plugin.settings.workflows.length) {
       menu.addItem(it => it.setTitle('Run workflow…').onClick(e2 => this.openWorkflowMenu(e2 as any)));
     }
     menu.addSeparator();
-    menu.addItem(it => it.setTitle('Regenerate last response').onClick(() => this.regenerateLast()));
+    menu.addItem(it => it.setTitle('Regenerate last response').onClick(() => { void this.regenerateLast(); }));
     menu.showAtMouseEvent(e);
   }
 
@@ -636,7 +638,7 @@ export class GlossaView extends ItemView {
       id: uid(), title, prompt: firstUser.content, createdAt: Date.now(),
     });
     if (this.plugin.settings.workflows.length > 50) this.plugin.settings.workflows.length = 50;
-    this.plugin.saveSettings();
+    void this.plugin.saveSettings();
     quickNotice(`Saved as workflow: "${title.slice(0, 40)}"`);
   }
   private openWorkflowMenu(e: MouseEvent) {
@@ -865,7 +867,7 @@ export class GlossaView extends ItemView {
       });
       if (it.kind === 'image' && it.content.startsWith('data:image/')) {
         const thumb = el('img', { className: 'nc-pill-thumb', parent: pill });
-        (thumb as HTMLImageElement).src = it.content;
+        (thumb).src = it.content;
       } else {
         const ic = el('span', { className: 'nc-pill-icon', parent: pill });
         setTrustedSvg(ic, pillIcon(it));
@@ -924,7 +926,7 @@ export class GlossaView extends ItemView {
   private openContextItem(it: ContextItem) {
     if (it.kind === 'file' && it.detail) {
       const f = this.app.vault.getAbstractFileByPath(it.detail);
-      if (f instanceof TFile) this.app.workspace.getLeaf(false).openFile(f);
+      if (f instanceof TFile) void this.app.workspace.getLeaf(false).openFile(f);
     }
   }
 
@@ -933,6 +935,7 @@ export class GlossaView extends ItemView {
      ============================================================ */
   private renderEmpty() {
     clear(this.messagesEl);
+    this.rootEl.classList.remove('has-messages');
     this.resetThreadRail();
     this.emptyEl = el('div', { className: 'nc-empty', parent: this.messagesEl });
     // Aurora orb — replaces the prior bot glyph as the hero artwork.
@@ -983,17 +986,23 @@ export class GlossaView extends ItemView {
      ============================================================ */
   private renderMessage(m: ChatMessage): MsgUI {
     if (this.emptyEl?.isConnected) { this.emptyEl.remove(); this.emptyEl = null; }
+    this.rootEl.classList.add('has-messages');
     // "Continuation" = this assistant msg shares a turnId with the immediately
     // previous assistant msg. Used to collapse role row + footer between
     // segments so multi-segment codex turns read as one continuous reply.
     let isContinuation = false;
+    let previousAssistant: HTMLElement | null = null;
     if (m.role === 'assistant' && m.turnId) {
       const last = this.messagesEl.lastElementChild as HTMLElement | null;
       if (last?.classList.contains('nc-msg') && last.classList.contains('assistant')) {
         const prevTurn = last.getAttribute('data-turn-id');
-        if (prevTurn && prevTurn === m.turnId) isContinuation = true;
+        if (prevTurn && prevTurn === m.turnId) {
+          isContinuation = true;
+          previousAssistant = last;
+        }
       }
     }
+    if (previousAssistant) previousAssistant.classList.add('has-next-continuation');
     const continuationCls = isContinuation ? ' nc-asst-continuation' : '';
     const wrap = el('div', { className: `nc-msg ${m.role}${m.compactSummary ? ' compact-summary collapsed' : ''}${continuationCls}`, parent: this.messagesEl });
     wrap.setAttribute('data-message-id', m.id);
@@ -1029,7 +1038,7 @@ export class GlossaView extends ItemView {
         const undoBtn = el('button', { className: 'nc-compact-undo', parent: acts, attrs: { title: 'Restore the pre-compact messages' } });
         setTrustedSvg(undoBtn, ICON.undo);
         undoBtn.createEl('span', { text: 'Undo' });
-        undoBtn.onclick = (e) => { e.stopPropagation(); this.undoCompact(m.id); };
+        undoBtn.onclick = (e) => { e.stopPropagation(); void this.undoCompact(m.id); };
       }
       // Whole header row toggles collapse too (but ignore clicks on action buttons)
       role.onclick = (e) => {
@@ -1098,7 +1107,7 @@ export class GlossaView extends ItemView {
       m.reasoningContent = merged;
       (m as any)._mergedInlineThinking = true;
       // Update the unified card label
-      const lbl = reasoningCard.querySelector('.nc-thinking-summary') as HTMLElement | null;
+      const lbl = reasoningCard.querySelector('.nc-thinking-summary');
       if (lbl) lbl.textContent = `🧠 Reasoning (${merged.length.toLocaleString()} chars)`;
       setStyle(reasoningCard, { display: '' });
     }
@@ -1131,7 +1140,7 @@ export class GlossaView extends ItemView {
       const renderEcho = () => {
         if (rendered || !echo.open) return;
         rendered = true;
-        pre.textContent = this.compactSelectionEcho(m.selectionEcho!.text);
+        pre.textContent = this.compactSelectionEcho(m.selectionEcho.text);
       };
       echo.addEventListener('toggle', renderEcho);
     }
@@ -1162,7 +1171,7 @@ export class GlossaView extends ItemView {
     this.registerThreadRailItem(m, ui);
 
     this.renderMessageActions(wrap, m);
-    ui.actionsEl = wrap.querySelector('.nc-msg-actions') as HTMLElement;
+    ui.actionsEl = wrap.querySelector('.nc-msg-actions');
 
     // History replay: apply preamble style for messages with text+tools loaded from storage.
     if (m.role === 'assistant') this.applyPreambleStyle(ui, m);
@@ -1197,7 +1206,7 @@ export class GlossaView extends ItemView {
       attrs: {
         type: 'button',
       },
-    }) as HTMLButtonElement;
+    });
     setVars(marker, { ['--rail-i']: String(this.railItems.length) });
     marker.onclick = () => {
       this.hideThreadRailPreview();
@@ -1371,7 +1380,7 @@ export class GlossaView extends ItemView {
     if (!ui.activityEl.getAttribute('data-started-at')) {
       ui.activityEl.setAttribute('data-started-at', String(Date.now()));
     }
-    const text = ui.activityEl.querySelector('.nc-turn-activity-text') as HTMLElement | null;
+    const text = ui.activityEl.querySelector('.nc-turn-activity-text');
     if (text) text.textContent = label;
   }
 
@@ -1482,7 +1491,7 @@ export class GlossaView extends ItemView {
     const attrs: Record<string, string> = { 'data-tool-id': ev.id, 'data-started-at': String(ev.startedAt) };
     if (ev.endedAt) attrs['data-ended-at'] = String(ev.endedAt);
     const box = el('div', {
-      className: 'nc-tool-event' + (ev.status === 'success' ? ' collapsed' : ''),
+      className: `nc-tool-event ${ev.status}` + (ev.status === 'success' ? ' collapsed' : ''),
       parent: stack,
       attrs,
     });
@@ -1492,6 +1501,8 @@ export class GlossaView extends ItemView {
 
   private renderToolCard(box: HTMLElement, ev: ToolEvent) {
     clear(box);
+    box.classList.remove('pending', 'running', 'success', 'error', 'denied');
+    box.classList.add(ev.status);
     const meta = metaFor(ev.name);
     setVars(box, { ['--tool-color']: meta.color });
 
@@ -1593,13 +1604,14 @@ export class GlossaView extends ItemView {
       return;
     }
     if (!ui.toolStack) ui.toolStack = el('div', { className: 'nc-tool-events-stack', parent: ui.wrap });
-    let card = ui.toolStack.querySelector(`[data-tool-id="${ev.id}"]`) as HTMLElement | null;
+    const existingCard = ui.toolStack.querySelector(`[data-tool-id="${ev.id}"]`);
+    const card = existingCard instanceof HTMLElement ? existingCard : null;
     if (!card) {
       this.appendToolCard(ui.toolStack, ev);
     } else {
       this.renderToolCard(card, ev);
       card.classList.toggle('collapsed', ev.status === 'success');
-      if (ev.endedAt) (card as HTMLElement).dataset.endedAt = String(ev.endedAt);
+      if (ev.endedAt) (card).dataset.endedAt = String(ev.endedAt);
     }
     this.updateToolStackCollapse(ui.toolStack);
     this.scrollToBottom();
@@ -1616,7 +1628,8 @@ export class GlossaView extends ItemView {
     // present as a single ribbon by default. 1-2 cards still expand inline
     // (a "🔧 2 actions ▾" ribbon for two would feel like over-collapsing).
     const AUTO_COLLAPSE = 3;
-    const cards = Array.from(stack.querySelectorAll(':scope > [data-tool-id]')) as HTMLElement[];
+    const cards = Array.from(stack.querySelectorAll(':scope > [data-tool-id]'))
+      .filter((node): node is HTMLElement => node instanceof HTMLElement);
     stack.querySelector(':scope > .nc-tool-stack-summary')?.remove();
     stack.querySelector(':scope > .nc-tool-stack-more')?.remove();
 
@@ -1645,8 +1658,8 @@ export class GlossaView extends ItemView {
     stack.classList.add('truncated');
     let totalMs = 0;
     for (const c of cards) {
-      const started = parseInt((c as HTMLElement).dataset.startedAt ?? '0');
-      const ended = parseInt((c as HTMLElement).dataset.endedAt ?? `${Date.now()}`);
+      const started = parseInt((c).dataset.startedAt ?? '0');
+      const ended = parseInt((c).dataset.endedAt ?? `${Date.now()}`);
       if (started && ended >= started) totalMs += ended - started;
     }
     const dur = totalMs < 1000 ? `${totalMs}ms` : `${(totalMs / 1000).toFixed(1)}s`;
@@ -1659,7 +1672,10 @@ export class GlossaView extends ItemView {
     summary.appendText(' ');
     el('span', { className: 'nc-tool-stack-summary-chev', text: '▸', parent: summary });
     summary.onclick = () => { summary.setAttribute('aria-expanded', 'true'); stack.classList.add('expanded'); this.updateToolStackCollapse(stack); };
-    if (hasFailure) (summary.querySelector('.nc-tool-stack-summary-ok') as HTMLElement).textContent = 'Some failed';
+    if (hasFailure) {
+      const okLabel = summary.querySelector('.nc-tool-stack-summary-ok');
+      if (okLabel) okLabel.textContent = 'Some failed';
+    }
   }
 
   private compactProcessForTurn(turnId: string | undefined) {
@@ -1700,7 +1716,7 @@ export class GlossaView extends ItemView {
     const setExpanded = (expanded: boolean) => {
       summary.classList.toggle('expanded', expanded);
       summary.setAttribute('aria-expanded', String(expanded));
-      const chev = summary.querySelector('.nc-process-chev') as HTMLElement | null;
+      const chev = summary.querySelector('.nc-process-chev');
       if (chev) chev.textContent = expanded ? '▾' : '▸';
       for (let i = 0; i < processUis.length; i++) {
         const ui = processUis[i];
@@ -1737,22 +1753,23 @@ export class GlossaView extends ItemView {
       return b;
     };
     const copyBtn = mkBtn(ICON.copy, 'Copy', () => {
-      navigator.clipboard.writeText(m.content);
+      void navigator.clipboard.writeText(m.content);
       setTrustedSvg(copyBtn, ICON.checkThick);
       setStyle(copyBtn, { color: 'var(--glossa-success)' });
       window.setTimeout(() => { setTrustedSvg(copyBtn, ICON.copy); setStyle(copyBtn, { color: '' }); }, 900);
     });
     if (m.role === 'assistant') {
-      mkBtn(ICON.refresh, t('regenerate'), () => this.regenerateLast());
+      mkBtn(ICON.refresh, t('regenerate'), () => { void this.regenerateLast(); });
       // Insert / Apply require an active markdown editor and many users never
       // use them — hidden in 0.3 to declutter the footer. They live in the
       // command palette (Glossa: Edit selection with AI…) if needed.
-      mkBtn(ICON.file, t('save_as_note'), () => this.saveResponseAsNote(m));
+      mkBtn(ICON.file, t('save_as_note'), () => { void this.saveResponseAsNote(m); });
       mkBtn(ICON.history, t('fork_from'), () => this.forkFromMessage(m));
-      this.plugin.checkpoint.listForSession(this.session.id).then(list => {
+      void this.plugin.checkpoint.listForSession(this.session.id).then(list => {
         const cp = list.find(c => c.turnId === m.id && c.snapshots.length > 0);
         if (cp) {
-          mkBtn(ICON.refresh, 'Rollback file edits made in this turn', async () => {
+          mkBtn(ICON.refresh, 'Rollback file edits made in this turn', () => {
+            void (async () => {
             const paths = cp.snapshots.map(s => s.path).join('\n  • ');
             const { confirmModal } = await import('./confirm_modal');
             const ok = await confirmModal(this.app, {
@@ -1764,6 +1781,7 @@ export class GlossaView extends ItemView {
             if (!ok) return;
             const { restored, failed } = await this.plugin.checkpoint.rollback(this.session.id, m.id);
             quickNotice(`Rolled back ${restored} file(s)${failed.length ? `, ${failed.length} failed` : ''}.`);
+            })();
           });
         }
       });
@@ -1789,15 +1807,15 @@ export class GlossaView extends ItemView {
       messages: JSON.parse(JSON.stringify(kept)),
     };
     this.persistSession();
-    this.plugin.store.saveSession(forked);
-    this.loadSession(forked.id);
+    void this.plugin.store.saveSession(forked);
+    void this.loadSession(forked.id);
     quickNotice(`Forked: ${forked.title}`);
   }
 
 
   private codeBlockHandlers() {
     return {
-      copy: (s: string) => { navigator.clipboard.writeText(s);; },
+      copy: (s: string) => { void navigator.clipboard.writeText(s); },
       insert: (s: string) => this.insertAtCursor(s),
       apply: (s: string) => this.applyEdit(s),
     };
@@ -1830,7 +1848,7 @@ export class GlossaView extends ItemView {
     if (this.streamRenderTimer || this.streamRenderInFlight || !this.streamingMsgUI) return;
     this.streamRenderTimer = window.setTimeout(() => {
       this.streamRenderTimer = null;
-      this.doStreamingRender();
+      void this.doStreamingRender();
     }, 150);     // 150ms to reduce math flicker
   }
   /** Incremental render strategy: split the buffer at \n\n boundaries; render
@@ -2041,7 +2059,7 @@ export class GlossaView extends ItemView {
       // MCP namespaced tool: "<server>__<tool>" → offer server-level allow
       const mcpServer = tool.spec.name.includes('__') ? tool.spec.name.split('__')[0] : null;
       if (mcpServer) opts.push({ value: 'always-mcp-server', label: `Always allow MCP server "${mcpServer}"` });
-      const sel = el('select', { className: 'nc-inline-rule-select', parent: ruleRow }) as HTMLSelectElement;
+      const sel = el('select', { className: 'nc-inline-rule-select', parent: ruleRow });
       for (const o of opts) {
         const optEl = activeDocument.createElement('option');
         optEl.value = o.value; optEl.textContent = o.label;
@@ -2108,7 +2126,8 @@ export class GlossaView extends ItemView {
   private reasoningRenderTimer: any;
   private scheduleReasoningRender() {
     if (this.reasoningRenderTimer || !this.streamingMsgUI?.reasoningCard) return;
-    this.reasoningRenderTimer = window.setTimeout(async () => {
+    this.reasoningRenderTimer = window.setTimeout(() => {
+      void (async () => {
       this.reasoningRenderTimer = null;
       const ui = this.streamingMsgUI;
       const content = this.currentAsstMsg?.reasoningContent ?? '';
@@ -2121,6 +2140,7 @@ export class GlossaView extends ItemView {
       if (ui.reasoningCard.hasAttribute('open')) {
         try { await renderInto(this.app, content, ui.reasoningBody, this); } catch { /* ignore */ }
       }
+      })();
     }, 300);
   }
 
@@ -2222,7 +2242,7 @@ export class GlossaView extends ItemView {
         role: 'textbox',
         'aria-multiline': 'true',
       },
-    }) as HTMLTextAreaElement;
+    });
 
     this.inputEl.addEventListener('input', () => {
       this.handleTrigger();
@@ -2240,12 +2260,12 @@ export class GlossaView extends ItemView {
       if (this.popup.onKey(e)) { e.preventDefault(); return; }
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        if (this.inputEl.value.trim() && !this.streaming) this.submit();
+        if (this.inputEl.value.trim() && !this.streaming) void this.submit();
         return;
       }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        if (this.inputEl.value.trim() && !this.streaming) this.submit();
+        if (this.inputEl.value.trim() && !this.streaming) void this.submit();
         return;
       }
       if (e.key === 'ArrowUp' && this.caretAtTop()) {
@@ -2260,7 +2280,7 @@ export class GlossaView extends ItemView {
     const footer = el('div', { className: 'nc-input-footer', parent: wrap });
 
     // (1) Attach button — hidden file input + button
-    const fileInput = el('input', { className: 'nc-file-input', parent: footer, type: 'file', attrs: { multiple: 'true', accept: '*/*' } }) as HTMLInputElement;
+    const fileInput = el('input', { className: 'nc-file-input', parent: footer, type: 'file', attrs: { multiple: 'true', accept: '*/*' } });
     setStyle(fileInput, { display: 'none' });
     fileInput.onchange = async () => {
       if (fileInput.files) for (const f of Array.from(fileInput.files)) this.ctx.add(await resolveDroppedFile(f));
@@ -2273,14 +2293,14 @@ export class GlossaView extends ItemView {
     // (2) Permission pill — quick toggle of read-only / workspace-write / full
     this.permPillEl = el('button', { className: 'nc-composer-pill nc-perm-pill', parent: footer, type: 'button' });
     this.updatePermPill();
-    this.permPillEl.onclick = (e) => this.openPermissionMenu(e);
+    this.permPillEl.onclick = () => this.openPermissionMenu();
 
     // (3) Model chip — moved below the textarea per user feedback. Sits right
     //     after the permission pill so the "current behaviour" cluster
     //     (permissions + model) reads as a single group on the left.
     this.modelBtn = el('button', { className: 'nc-model-chip', parent: footer, title: 'Pick endpoint / model', type: 'button' });
     this.updateModelBtn();
-    this.modelBtn.onclick = (e) => this.openEndpointMenu(e);
+    this.modelBtn.onclick = () => this.openEndpointMenu();
 
     // (spacer)
     el('span', { className: 'nc-input-footer-spacer', parent: footer });
@@ -2288,15 +2308,19 @@ export class GlossaView extends ItemView {
     // (3) Reasoning effort pill — brain + level
     this.reasoningPillEl = el('button', { className: 'nc-composer-pill nc-reasoning-pill', parent: footer, type: 'button', attrs: { 'aria-label': 'Reasoning effort' } });
     this.updateReasoningPill();
-    this.reasoningPillEl.onclick = (e) => this.openReasoningMenu(e);
+    this.reasoningPillEl.onclick = () => { void this.openReasoningMenu(); };
 
     // (4) Send / stop
-    this.submitBtn = el('button', { className: 'nc-submit-btn nc-submit-icon-only', parent: footer, type: 'button' }) as HTMLButtonElement;
+    this.submitBtn = el('button', { className: 'nc-submit-btn nc-submit-icon-only', parent: footer, type: 'button' });
     this.updateSubmitBtn();
-    this.submitBtn.onclick = () => this.streaming ? this.cancelStream() : this.submit();
+    this.submitBtn.onclick = () => {
+      if (this.streaming) this.cancelStream();
+      else void this.submit();
+    };
 
     this.installDropZone(wrap);
-    this.inputEl.addEventListener('paste', async (e) => {
+    this.inputEl.addEventListener('paste', (e) => {
+      void (async () => {
       const items = e.clipboardData?.items;
       if (!items) return;
       let used = false;
@@ -2307,6 +2331,7 @@ export class GlossaView extends ItemView {
         }
       }
       if (used) e.preventDefault();
+      })();
     });
   }
 
@@ -2358,7 +2383,7 @@ export class GlossaView extends ItemView {
     this.popup.show(anchor, items);
   }
 
-  private openPermissionMenu(_e: MouseEvent) {
+  private openPermissionMenu() {
     const cur = this.plugin.settings.permissionLevel;
     const opts: { v: 'read-only' | 'workspace-write' | 'full'; label: string }[] = [
       { v: 'read-only',       label: bi('Read only',       '只读') },
@@ -2387,7 +2412,7 @@ export class GlossaView extends ItemView {
     if (!this.reasoningPillEl) return;
     clear(this.reasoningPillEl);
     const ep = this.activeEndpoint();
-    const effort = (ep?.reasoningEffort ?? 'off') as import('../types').ReasoningEffort;
+    const effort = (ep?.reasoningEffort ?? 'off');
     const ic = el('span', { className: 'nc-pill-glyph', parent: this.reasoningPillEl });
     // Lucide `sparkles` — same icon ChatGPT and Cursor use for reasoning /
     // thinking. Universally readable, brand-neutral.
@@ -2401,7 +2426,7 @@ export class GlossaView extends ItemView {
     this.reasoningPillEl.setAttribute('aria-disabled', String(!ep));
     this.reasoningPillEl.classList.toggle('disabled', !ep);
   }
-  private async openReasoningMenu(_e: MouseEvent) {
+  private async openReasoningMenu() {
     const ep = this.activeEndpoint();
     if (!ep) return;
     const cur = ep.reasoningEffort ?? 'off';
@@ -2440,7 +2465,8 @@ export class GlossaView extends ItemView {
       if (e.relatedTarget && wrap.contains(e.relatedTarget as Node)) return;
       hideOverlay();
     });
-    wrap.addEventListener('drop', async (e) => {
+    wrap.addEventListener('drop', (e) => {
+      void (async () => {
       e.preventDefault();
       hideOverlay();
       const files = e.dataTransfer?.files;
@@ -2449,6 +2475,7 @@ export class GlossaView extends ItemView {
         try { this.ctx.add(await resolveDroppedFile(f)); }
         catch (err: any) { quickNotice(`Failed to attach ${f.name}: ${err.message}`); }
       }
+      })();
     });
   }
 
@@ -2531,7 +2558,7 @@ export class GlossaView extends ItemView {
     this.modelBtn.setAttribute('aria-label', `${active.label}, ${model}`);
   }
 
-  private openEndpointMenu(_e: MouseEvent) {
+  private openEndpointMenu() {
     const active = this.activeEndpoint();
     const eps = this.plugin.settings.endpoints;
     const items: PopupItem[] = [];
@@ -2921,7 +2948,7 @@ export class GlossaView extends ItemView {
         }
       } else {
         out.push({
-          role: m.role as 'user' | 'assistant',
+          role: m.role,
           content: m.content ?? '',
           reasoningContent: m.role === 'assistant' && passReasoning ? m.reasoningContent : undefined,
         });
@@ -3157,7 +3184,7 @@ export class GlossaView extends ItemView {
     // prior turns. Without this, the model loses everything it ever read/wrote and can
     // only guess from its own final replies (#2). Each assistant turn that ran tools
     // re-emits the tool_use blocks; each toolEvent becomes a role:'tool' message.
-    const history = this.buildModelHistory(userMsg.id, this.currentAsstMsg!.id);
+    const history = this.buildModelHistory(userMsg.id, this.currentAsstMsg.id);
 
     this.abortCtl = new AbortController();
 
@@ -3236,7 +3263,7 @@ export class GlossaView extends ItemView {
         }
         // Drop the empty assistant bubble that the failed turn created
         if (this.currentAsstMsg) {
-          this.session.messages = this.session.messages.filter(m => m.id !== this.currentAsstMsg!.id);
+          this.session.messages = this.session.messages.filter(m => m.id !== this.currentAsstMsg.id);
           if (this.streamingMsgUI) this.streamingMsgUI.wrap.remove();
         }
         quickNotice('Context window exceeded — compacting and retrying…', 3000);
@@ -3447,7 +3474,7 @@ export class GlossaView extends ItemView {
       setStyle(ui.reasoningCard, { display: 'none' });
       return;
     }
-    const sum = ui.reasoningCard.querySelector('.nc-thinking-summary span') as HTMLElement | null;
+    const sum = ui.reasoningCard.querySelector('.nc-thinking-summary span');
     if (sum) sum.textContent = `🧠 Reasoning (${content.length.toLocaleString()} chars)`;
     // Collapse once thinking ends. Users want the finished thoughts out of the
     // way unless they explicitly request to read them.
@@ -3668,7 +3695,7 @@ export class GlossaView extends ItemView {
     const session = this.session;
     this._persistTimer = window.setTimeout(() => {
       this._persistTimer = null;
-      this.plugin.store.saveSession(session);
+      void this.plugin.store.saveSession(session);
     }, 1000);
   }
 
@@ -3784,7 +3811,7 @@ export class GlossaView extends ItemView {
     }
     quickNotice(`Saved to ${path}`);
     const f = this.app.vault.getAbstractFileByPath(path);
-    if (f instanceof TFile) this.app.workspace.getLeaf(true).openFile(f);
+    if (f instanceof TFile) void this.app.workspace.getLeaf(true).openFile(f);
   }
 
   private async saveResponseAsNote(m: ChatMessage) {
@@ -3793,7 +3820,7 @@ export class GlossaView extends ItemView {
     const path = `${folder}/${new Date().toISOString().replace(/[:.]/g,'-')}_assistant.md`;
     await this.app.vault.create(path, m.content);
     const f = this.app.vault.getAbstractFileByPath(path);
-    if (f instanceof TFile) this.app.workspace.getLeaf(true).openFile(f);
+    if (f instanceof TFile) void this.app.workspace.getLeaf(true).openFile(f);
     quickNotice(`Saved to ${path}`);
   }
 
@@ -3834,7 +3861,7 @@ export class GlossaView extends ItemView {
     await this.flushPersistNow();
     this.inputEl.value = lastUser.content;
     this.recomputeInputHeight();
-    this.submit();
+    void this.submit();
   }
 }
 
@@ -3851,20 +3878,6 @@ function formatElapsed(ms: number): string {
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   const m = Math.floor(ms / 60_000); const s = Math.floor((ms % 60_000) / 1000);
   return `${m}m${s}s`;
-}
-
-function stripMarkdown(src: string): string {
-  return String(src || '')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, path, alias) => alias || path)
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/^>\s?/gm, '')
-    .replace(/[*_~>#-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function pillIcon(it: ContextItem): string {

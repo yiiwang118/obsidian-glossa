@@ -169,7 +169,7 @@ const D: Dict = {
   'sec_prompts':               { en: 'Custom system prompts', zh: '自定义 system prompt' },
 };
 
-export function t(key: keyof typeof D | string): string {
+export function t(key: keyof typeof D  ): string {
   const entry = D[key];
   if (!entry) return key;
   return entry[_lang];

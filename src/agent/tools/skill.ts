@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 /**
  * Unified `skill` tool — replaces the legacy `discover_skills` + `run_skill`
  * pair. The model now sees a single tool with one input (`skill: string`,

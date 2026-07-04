@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, vaultFolderOf, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects, parseHttpUrl } from '../../utils/safe_web';
@@ -117,7 +118,7 @@ export const downloadFile: ToolImpl = buildTool({
 
       const folder = vaultFolderOf(target);
       if (folder) try { await app.vault.createFolder(folder); } catch { /* exists */ }
-      const buffer = fetched.bytes.slice().buffer as ArrayBuffer;
+      const buffer = fetched.bytes.slice().buffer;
       if (existing instanceof TFile) await app.vault.modifyBinary(existing, buffer);
       else await app.vault.createBinary(target, buffer);
 

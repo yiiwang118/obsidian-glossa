@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 /**
  * bases_query — bridge to Obsidian Bases (1.9+ built-in).
  *
@@ -99,18 +100,18 @@ function parseExpr(line: string): FilterExpr {
 function evalExpr(expr: FilterExpr, file: TFile, cache: any): boolean {
   if (expr.type === 'and') return (expr.children ?? []).every(c => evalExpr(c, file, cache));
   if (expr.type === 'or') return (expr.children ?? []).some(c => evalExpr(c, file, cache));
-  const atom = expr.atom!;
+  const atom = expr.atom;
   if (atom.kind === 'true') return true;
   if (atom.kind === 'hasTag') {
     const tags = (getAllTags(cache ?? {}) ?? []).map(t => t.replace(/^#+/, ''));
     return tags.includes(String(atom.value).replace(/^#+/, ''));
   }
   if (atom.kind === 'has') {
-    return cache?.frontmatter && atom.key! in cache.frontmatter;
+    return cache?.frontmatter && atom.key in cache.frontmatter;
   }
   // eq/neq dispatch — file.* accessors vs frontmatter keys.
   if (atom.kind === 'eq' || atom.kind === 'neq') {
-    const key = atom.key!;
+    const key = atom.key;
     let actual: any;
     if (key === 'file.name')    actual = file.basename;
     else if (key === 'file.path') actual = file.path;

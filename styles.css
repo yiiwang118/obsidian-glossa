@@ -659,7 +659,7 @@
 }
 .nc-thread-rail.dense { gap: 2px; }
 .nc-thread-rail.very-dense { gap: 1px; }
-.glossa-view:has(.nc-msg) .nc-thread-rail {
+.glossa-view.has-messages .nc-thread-rail {
   opacity: 1;
 }
 .nc-thread-rail-marker {
@@ -903,8 +903,8 @@
    message. They visually belong to the same answer, so hide the role badge,
    footer (timestamp + action icons) and tighten vertical spacing. Only the
    FIRST segment of the turn shows the role; only the LAST segment shows the
-   footer. The last-segment selector uses :has(+ .nc-asst-continuation) so we
-   don't need extra JS to tag the final segment explicitly.
+   footer. The renderer tags a segment with .has-next-continuation when another
+   segment from the same turn follows it.
    margin-top:0 + parent gap:6px → segments sit immediately under each other
    regardless of whether `gap` or margins win the layout race. */
 .nc-msg.assistant.nc-asst-continuation {
@@ -915,10 +915,8 @@
    reads as one continuous reply. The parent's `gap` would otherwise add a
    visible step between every tool/text segment. */
 .nc-msg.assistant + .nc-msg.assistant.nc-asst-continuation { margin-top: -6px; }
-/* Hide footer on any non-final continuation. The final segment doesn't carry
-   .nc-asst-continuation OR is followed by no further continuation, so we use
-   :has() to detect "has another continuation right after me" → hide footer. */
-.nc-msg.assistant:has(+ .nc-msg.assistant.nc-asst-continuation) > .nc-msg-footer {
+/* Hide footer on any non-final continuation. */
+.nc-msg.assistant.has-next-continuation > .nc-msg-footer {
   display: none;
 }
 .nc-msg-role {
@@ -1019,13 +1017,7 @@
 .nc-msg.assistant.streaming > .nc-msg-body:empty::before {
   content: none;
 }
-/* Hide the placeholder once anything else (reasoning card / tool card) is present */
-.nc-msg.assistant.streaming:has(.nc-tool-events-stack:not(:empty)) > .nc-msg-body:empty::before,
-.nc-msg.assistant.streaming:has(.nc-thinking-card:not([style*='display: none'])) > .nc-msg-body:empty::before { content: none; }
-/* And collapse the body entirely when sibling content already speaks for itself,
-   so the assistant card doesn't show a phantom empty line above the cards. */
-.nc-msg.assistant.streaming:has(.nc-tool-events-stack:not(:empty)) > .nc-msg-body:empty,
-.nc-msg.assistant.streaming:has(.nc-thinking-card:not([style*='display: none'])) > .nc-msg-body:empty { display: none; }
+.nc-msg.assistant.streaming > .nc-msg-body:empty { display: none; }
 /* Don't show edit/copy/regen actions on a message that's still being produced. */
 .nc-msg.assistant.streaming > .nc-msg-actions { display: none !important; }
 /* When two assistant bubbles share a turn but neither is the explicit
@@ -1889,7 +1881,6 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 .nc-msg-actions button.nc-icon-action:hover {
   opacity: 1;
-  color: var(--text-normal);
   background: transparent !important;
   color: var(--nc-accent);
 }
@@ -2010,9 +2001,9 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 /* Hide tool cards that are pending. They become visible only when the result
    is available. For long-running 'running' cards we reveal after 1.5s so the
    user knows the agent is alive (without flashing a card per quick call). */
-.nc-tool-events-stack > [data-tool-id]:has(.nc-tool-event-status.pending) { display: none; }
+.nc-tool-events-stack > .nc-tool-event.pending { display: none; }
 @keyframes nc-running-reveal { to { opacity: 1; visibility: visible; } }
-.nc-tool-events-stack > [data-tool-id]:has(.nc-tool-event-status.running) {
+.nc-tool-events-stack > .nc-tool-event.running {
   opacity: 0; visibility: hidden;
   animation: nc-running-reveal 0s linear 1.5s forwards;
 }
@@ -2053,7 +2044,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   background-size: 200% 100%;
   border-radius: 50%;
   display: inline-block;
-  text-indent: -9999px;
+  font-size: 0;
+  line-height: 0;
   overflow: hidden;
   flex-shrink: 0;
   box-shadow: 0 0 8px var(--aurora-tint-22);
@@ -2261,8 +2253,6 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   overflow-wrap: anywhere;
   max-width: 100%;
   font-size: 11px;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 .nc-tool-event.collapsed .nc-tool-event-body { display: none; }
 .nc-tool-event .nc-tool-event-chev {
@@ -3707,7 +3697,6 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-plan-item.completed   {
   color: var(--text-faint);
   text-decoration: line-through;
-  text-decoration-color: color-mix(in srgb, var(--text-faint) 60%, transparent);
 }
 .nc-plan-mark {
   flex-shrink: 0;
@@ -6739,7 +6728,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   margin-top: 0;
 }
 
-.nc-tool-events-stack > [data-tool-id]:has(.nc-tool-event-status.running) {
+.nc-tool-events-stack > .nc-tool-event.running {
   opacity: 1;
   visibility: visible;
   animation: none;

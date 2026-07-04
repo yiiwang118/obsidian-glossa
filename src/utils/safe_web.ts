@@ -1,5 +1,6 @@
 import { lookup } from 'dns/promises';
 import { isIP } from 'net';
+import { nativeStreamingHttpRequest } from './native_http';
 
 /** True for any IPv4 address in a non-routable / private / loopback / CGNAT
  *  / link-local block. */
@@ -68,7 +69,7 @@ export async function fetchWithSafeRedirects(url: string, signal: AbortSignal): 
   for (let i = 0; i < MAX_HOPS; i++) {
     const u = parseHttpUrl(current);
     await assertPublicHost(u.hostname);
-    const r = await fetch(current, {
+    const r = await nativeStreamingHttpRequest(current, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
       signal,
       redirect: 'manual',

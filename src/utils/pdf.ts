@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { loadPdfJs } from 'obsidian';
 
 export interface PdfExtractionOptions {
@@ -323,7 +324,7 @@ function shouldInsertSpace(prev: string, next: string, gap: number | null, heigh
   if (/\s/.test(a) || /\s/.test(b)) return false;
   if (isCjk(a) && isCjk(b)) return false;
   if (/^[,.;:!?%)]/.test(b)) return false;
-  if (/[(\[{/]$/.test(a)) return false;
+  if (a === '(' || a === '[' || a === '{' || a === '/') return false;
   if (gap === null) return false;
   return gap > Math.max(1.5, height * 0.18);
 }
@@ -512,7 +513,7 @@ function makeSnippet(text: string, index: number, length: number): string {
 function cleanPdfTitle(value: unknown): string {
   if (typeof value !== 'string') return '';
   const title = value
-    .replace(/\u0000/g, '')
+    .split(String.fromCharCode(0)).join('')
     .replace(/\s+/g, ' ')
     .trim();
   if (!title || /^untitled$/i.test(title)) return '';

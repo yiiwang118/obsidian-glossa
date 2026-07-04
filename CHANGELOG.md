@@ -10,9 +10,13 @@ Release-readiness polish for community directory review.
 - Refreshed README positioning around vault context, local execution, approvals, and release checks.
 - Updated marketplace metadata to keep the manifest description concise and free of redundant platform wording.
 - Added this changelog entry so the 0.6.2 release has a clear review-facing summary.
+- Replaced direct browser fetch calls in review-facing code paths with `requestUrl` or a small streaming HTTP boundary where response streaming is required.
+- Replaced CSS `:has()` selectors with renderer-managed state classes for older WebView compatibility.
 
 ### Checks
 - Tightened `npm run release:check` so future releases fail if the manifest description includes redundant platform wording or exceeds the review-friendly length cap.
+- Added `npm run lint:review` for the TypeScript rules used by review scans and cleaned the current tree to pass it with zero warnings.
+- Updated dev tooling so `npm audit --omit=optional` reports zero known vulnerabilities.
 
 ## [0.6.1] — 2026-07-03
 

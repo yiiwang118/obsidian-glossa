@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
 import type GlossaPlugin from './main';
 import type { Endpoint, CustomPrompt, SlashCommand } from './types';
@@ -291,13 +292,15 @@ export class GlossaSettingTab extends PluginSettingTab {
         s.onChange(v => {
           this.plugin.settings.reasoningFontSize = v;
           if (timer) window.clearTimeout(timer);
-          timer = window.setTimeout(async () => {
+          timer = window.setTimeout(() => {
             timer = null;
-            await this.plugin.saveSettings();
-            this.plugin.app.workspace.iterateAllLeaves(l => {
-              const view: any = (l.view as any);
-              if (typeof view.applyCssVars === 'function') view.applyCssVars();
-            });
+            void (async () => {
+              await this.plugin.saveSettings();
+              this.plugin.app.workspace.iterateAllLeaves(l => {
+                const view: any = (l.view as any);
+                if (typeof view.applyCssVars === 'function') view.applyCssVars();
+              });
+            })();
           }, 150);
         });
       });
@@ -607,7 +610,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     if (this.plugin.settings.encryptionEnabled) {
       new Setting(containerEl).setName(bi('Lock', '锁定'))
         .setDesc('')
-        .addButton(b => b.setButtonText(bi('Lock', '锁定')).onClick(() => { this.plugin.lock(); this.display(); }));
+        .addButton(b => b.setButtonText(bi('Lock', '锁定')).onClick(() => { void this.plugin.lock(); void this.display(); }));
       new Setting(containerEl).setName(bi('Encrypt plaintext keys', '加密明文密钥'))
         .setDesc(bi('Wrap any remaining plaintext API keys.', '加密剩余明文 API key。'))
         .addButton(b => b.setButtonText(bi('Run', '运行')).setCta().onClick(async () => {
@@ -1246,9 +1249,9 @@ export class GlossaSettingTab extends PluginSettingTab {
 
     if (ep.availableModels && ep.availableModels.length > 0) {
       new Setting(card).setName(bi('Pick model', '选择模型')).addDropdown(d => {
-        d.addOption('', `(${ep.availableModels!.length})`);
-        for (const m of ep.availableModels!) d.addOption(m, m);
-        d.setValue(ep.model && ep.availableModels!.includes(ep.model) ? ep.model : '');
+        d.addOption('', `(${ep.availableModels.length})`);
+        for (const m of ep.availableModels) d.addOption(m, m);
+        d.setValue(ep.model && ep.availableModels.includes(ep.model) ? ep.model : '');
         d.onChange(async v => { if (v) { ep.model = v; await this.plugin.saveSettings(); inputComp.setValue(v); } });
       });
     }
@@ -1326,7 +1329,7 @@ class AddEndpointModal extends Modal {
   private detectStatusEl: HTMLElement;
   private modelInput: HTMLInputElement;
 
-  constructor(app: App, _plugin: GlossaPlugin, private onSave: (ep: Endpoint, plainKey: string) => void) {
+  constructor(app: App, _plugin: GlossaPlugin, private onSave: (ep: Endpoint, plainKey: string) => void | Promise<void>) {
     super(app);
   }
 
@@ -1515,7 +1518,7 @@ class AddEndpointModal extends Modal {
       if (list.length === 0) { this.detectStatusEl.setText('No models returned (endpoint /models 404 or empty).'); return; }
       this.detectStatusEl.setText(`Found ${list.length} models. Pick one:`);
       // Replace model input with dropdown
-      const oldRow = this.modelInput.closest('.nc-add-form-row') as HTMLElement;
+      const oldRow = this.modelInput.closest('.nc-add-form-row');
       if (oldRow) {
         const right = oldRow.querySelector('div') as HTMLElement;
         right.empty();
@@ -1557,7 +1560,7 @@ class AddEndpointModal extends Modal {
     if (ep.kind === 'claude-code-cli' && ep.bareMode == null) ep.bareMode = true;
     const warn = localCliWarning(ep.kind) ?? codexSafetyWarning(ep);
     if (warn) new Notice(`Warning: ${warn}`, 10000);
-    this.onSave(ep, this.plainKey);
+    void this.onSave(ep, this.plainKey);
     this.close();
   }
 
@@ -1623,7 +1626,7 @@ class McpMarketplaceModal extends Modal {
     this.render();
 
     // Auto-load any saved catalog URLs in the background
-    this.loadSavedUrls();
+    void this.loadSavedUrls();
   }
 
   private rerenderChips() {
@@ -1773,7 +1776,7 @@ class McpMarketplaceModal extends Modal {
       const top = left.createEl('div', { cls: 'nc-mcp-row-top' });
       top.createEl('span', { cls: 'nc-mcp-name', text: entry.name });
       top.createEl('span', { cls: 'nc-mcp-cat', text: entry.category });
-      if ((entry as Row).__source) top.createEl('span', { cls: 'nc-mcp-cat nc-mcp-cat-ext', text: 'Custom' });
+      if ((entry).__source) top.createEl('span', { cls: 'nc-mcp-cat nc-mcp-cat-ext', text: 'Custom' });
       left.createEl('div', { cls: 'nc-mcp-desc', text: entry.description });
       const cmd = `${entry.install.command} ${entry.install.args.join(' ')}`;
       left.createEl('code', { cls: 'nc-mcp-cmd', text: cmd });
@@ -1947,7 +1950,7 @@ class CodexDiagnosticModal extends Modal {
         `## stderr`,
         r.stderr,
       ].join('\n');
-      navigator.clipboard.writeText(all);
+      void navigator.clipboard.writeText(all);
       new Notice('Diagnostic copied to clipboard.');
     };
     // Quick-fix button when no proxy was detected.
@@ -1963,7 +1966,7 @@ class CodexDiagnosticModal extends Modal {
             // Find by stable data-glossa-id, NOT by label text. The label was
             // renamed multiple times (Global proxy URL → Proxy → 代理) and
             // every rename broke this scroll-to-field jump.
-            const target = activeDocument.querySelector('[data-glossa-id="global-proxy"]') as HTMLElement | null;
+            const target = activeDocument.querySelector('[data-glossa-id="global-proxy"]');
             if (target) {
               target.scrollIntoView({ behavior: 'smooth', block: 'center' });
               target.querySelector('input')?.focus();

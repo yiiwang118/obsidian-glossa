@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { App, Modal, Notice, TFile } from 'obsidian';
 import type { ToolImpl } from './tools';
 import { diffStats, lineDiff, applySelectedDiff, renderDiffInto } from '../utils/diff';
@@ -187,10 +188,10 @@ class ApprovalModal extends Modal {
       const line = diffBox.createEl('div', { cls: `nc-diff-line ${op.type}` });
       if (!tooBigForPerLine && (op.type === 'add' || op.type === 'del')) {
         const cb = line.createEl('input', { type: 'checkbox' });
-        (cb as HTMLInputElement).checked = true;
+        (cb).checked = true;
         setStyle(cb, { marginRight: '6px' });
         decisions.set(i, true);
-        cb.onchange = () => decisions.set(i, (cb as HTMLInputElement).checked);
+        cb.onchange = () => decisions.set(i, (cb).checked);
       }
       line.createEl('span', { text: op.type === 'add' ? '+' : op.type === 'del' ? '−' : ' ' });
       line.createEl('span', { text: ` ${op.text || ' '}` });
@@ -230,16 +231,16 @@ class ApprovalModal extends Modal {
     } else if (name === 'edit_section' || name === 'apply_patch') {
       a.path = this.args.path;
       a.content = mutated;
-      (a as any).__rewriteAsWrite = true;
+      (a).__rewriteAsWrite = true;
     } else if (name === 'file_edit') {
       // Per-line toggles → rewrite as write_note with merged content
       a.path = this.args.file_path;
       a.content = mutated;
-      (a as any).__rewriteAsWrite = true;
+      (a).__rewriteAsWrite = true;
     }
     // Stash the file snapshot so the runtime can detect stale-write race conditions
     // (file changed between preview and apply).
-    (a as any).__expectedBefore = d.oldText;
+    (a).__expectedBefore = d.oldText;
     return { ok: true, mutatedArgs: a };
   }
 

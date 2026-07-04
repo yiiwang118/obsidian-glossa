@@ -7,7 +7,7 @@ export function estimateTokens(text: string | undefined | null): number {
   let cjk = 0;
   let other = 0;
   for (const ch of text) {
-    const code = ch.codePointAt(0)!;
+    const code = ch.codePointAt(0);
     if ((code >= 0x4e00 && code <= 0x9fff) ||      // CJK Unified
         (code >= 0x3000 && code <= 0x30ff) ||      // CJK symbols + hiragana/katakana
         (code >= 0xac00 && code <= 0xd7af)) {       // hangul

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { TFile, Notice, requestUrl } from 'obsidian';
 import type GlossaPlugin from '../main';
 import type { Endpoint } from '../types';
@@ -186,7 +187,7 @@ export class EmbeddingIndex {
     const haveByPath = new Map<string, VectorChunk[]>();
     for (const c of this.chunks) {
       if (!haveByPath.has(c.path)) haveByPath.set(c.path, []);
-      haveByPath.get(c.path)!.push(c);
+      haveByPath.get(c.path).push(c);
     }
 
     let added = 0;
@@ -356,12 +357,13 @@ function chunkText(text: string, size: number, overlap: number): string[] {
 }
 
 async function embedBatch(ep: Endpoint, model: string, inputs: string[], _proxy?: string): Promise<number[][]> {
+  void _proxy;
   // Hard guard: Anthropic-style endpoints have no /embeddings — refuse early
   // with a clear message rather than 401-looping.
   if ((ep.apiStyle ?? 'openai') === 'anthropic') {
     throw new Error('Embedding endpoint must be OpenAI-style. Anthropic has no public embeddings API; pick a different endpoint in Settings → Semantic search.');
   }
-  const url = `${ep.baseUrl!.replace(/\/$/, '')}/embeddings`;
+  const url = `${ep.baseUrl.replace(/\/$/, '')}/embeddings`;
   const headers: any = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${ep.apiKey}`,

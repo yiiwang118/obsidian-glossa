@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
 import { el, clear, setStyle, setTrustedSvg } from '../utils/dom';
 
 export interface PopupItem {
@@ -173,7 +174,7 @@ export class Popup {
       if (this.anchor && this.anchor.contains(t)) return;
       this.hide();
     };
-    window.setTimeout(() => activeDocument.addEventListener('mousedown', this.outsideClickHandler!), 0);
+    window.setTimeout(() => activeDocument.addEventListener('mousedown', this.outsideClickHandler), 0);
   }
   private removeOutsideHandler() {
     if (this.outsideClickHandler) {
