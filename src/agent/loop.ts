@@ -3,7 +3,7 @@ import { App } from 'obsidian';
 import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, isReadOnlyTool, normalizeToolResult, type ToolImpl, type ToolRunResult } from './tools';
 import { askApproval, type ApprovalResult } from './approval';
 import { CheckpointManager, pathsTouchedByTool } from './checkpoint';
-import { McpHub } from './mcp';
+import type { McpHub } from './mcp';
 import type { LLMProvider, MessageInput, ToolSpec } from '../providers/types';
 import type { TokenUsage, ToolEvent, PermissionLevel, PermissionRule } from '../types';
 import { matchPermissionRule, modelContextWindow } from '../types';

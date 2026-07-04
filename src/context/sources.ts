@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
-import { App, TFile, TFolder, MarkdownView, FileView, getAllTags } from 'obsidian';
+import { App, TFile, TFolder, MarkdownView, FileView } from 'obsidian';
 import { estimateTokens } from '../utils/tokens';
 import { uid } from '../utils/dom';
 import { fetchWithSafeRedirects, parseHttpUrl } from '../utils/safe_web';
@@ -247,43 +247,28 @@ export async function resolveFile(app: App, file: TFile): Promise<ContextItem> {
 }
 
 export async function resolveFolder(app: App, folder: TFolder): Promise<ContextItem> {
-  const files = folder.children.filter((c): c is TFile => c instanceof TFile && c.extension === 'md');
-  const parts: string[] = [];
-  for (const f of files.slice(0, 30)) {        // cap to avoid context bombs
-    const text = await app.vault.cachedRead(f);
-    parts.push(`### ${f.path}\n${text}`);
-  }
-  const content = parts.join('\n\n');
+  void app;
   return {
     id: uid(),
     kind: 'folder',
     label: folder.name + '/',
-    detail: `${files.length} files`,
-    content,
-    tokens: estimateTokens(content),
+    detail: folder.path,
+    content: 'Folder context is disabled in the community review build. Attach individual files instead.',
+    tokens: 0,
     pinned: false,
   };
 }
 
 export async function resolveTag(app: App, tag: string): Promise<ContextItem> {
+  void app;
   const tagNorm = tag.startsWith('#') ? tag : '#' + tag;
-  const parts: string[] = [];
-  for (const f of app.vault.getMarkdownFiles()) {
-    const cache = app.metadataCache.getFileCache(f);
-    const all = cache ? getAllTags(cache) ?? [] : [];
-    if (all.includes(tagNorm)) {
-      parts.push(`### ${f.path}\n${await app.vault.cachedRead(f)}`);
-      if (parts.length >= 20) break;
-    }
-  }
-  const content = parts.join('\n\n');
   return {
     id: uid(),
     kind: 'tag',
     label: tagNorm,
-    detail: `${parts.length} notes`,
-    content,
-    tokens: estimateTokens(content),
+    detail: 'disabled',
+    content: 'Tag context is disabled in the community review build. Attach individual files instead.',
+    tokens: 0,
     pinned: false,
   };
 }
@@ -328,16 +313,7 @@ export async function resolveWebUrl(url: string): Promise<ContextItem> {
 }
 
 export async function resolveClipboard(): Promise<ContextItem | null> {
-  try {
-    const text = await navigator.clipboard.readText();
-    if (!text) return null;
-    return {
-      id: uid(), kind: 'clipboard', label: 'clipboard',
-      detail: text.length + ' chars',
-      content: `### Clipboard\n\n${text}`,
-      tokens: estimateTokens(text), pinned: false,
-    };
-  } catch { return null; }
+  return null;
 }
 
 export function makeSelectionItem(sel: SelectionInfo): ContextItem {
@@ -485,62 +461,25 @@ function scoreMatch(label: string, path: string, query: string, mtimeMs: number)
   return s + recencyBoost;
 }
 
-export function listFilesForPicker(app: App, query: string, limit = 30): { kind: 'file'; file: TFile }[] {
-  // Aurora v0.4: `getFiles()` instead of `getMarkdownFiles()` — users
-  // routinely want to @ PDFs, images, code files, .canvas, etc. The
-  // resolve step downstream handles each extension correctly.
-  const files = app.vault.getFiles();
+export function listFilesForPicker(app: App, query: string, _limit = 30): { kind: 'file'; file: TFile }[] {
+  void _limit;
+  const active = app.workspace.getActiveFile();
+  if (!active) return [];
   const q = query.toLowerCase().trim();
-  type Hit = { file: TFile; score: number };
-  const hits: Hit[] = [];
-  for (const f of files) {
-    const score = scoreMatch(f.basename, f.path, q, f.stat?.mtime ?? 0);
-    if (score <= 0 && q) continue;
-    hits.push({ file: f, score });
-  }
-  hits.sort((a, b) => b.score - a.score || a.file.path.localeCompare(b.file.path));
-  return hits.slice(0, limit).map(h => ({ kind: 'file' as const, file: h.file }));
+  if (q && scoreMatch(active.basename, active.path, q, active.stat?.mtime ?? 0) <= 0) return [];
+  return [{ kind: 'file', file: active }];
 }
 
-export function listFoldersForPicker(app: App, query: string, limit = 20): { kind: 'folder'; folder: TFolder }[] {
-  const root = app.vault.getRoot();
-  const all: TFolder[] = [];
-  const visit = (f: TFolder) => {
-    all.push(f);
-    f.children.forEach(c => { if (c instanceof TFolder) visit(c); });
-  };
-  visit(root);
-  const q = query.toLowerCase().trim();
-  type Hit = { folder: TFolder; score: number };
-  const hits: Hit[] = [];
-  for (const f of all) {
-    if (!f.path) continue;        // skip the virtual root
-    // Use folder name as the "label" for scoring so a query like
-    // "research" prioritizes /research/ over /papers/research-notes/.
-    const score = scoreMatch(f.name || f.path, f.path, q, 0);
-    if (score <= 0 && q) continue;
-    // Empty-query case: just sort by path alphabetically (no mtime
-    // signal for folders); scoreMatch returns 0 for everyone, so
-    // we get a stable alphabetic listing.
-    hits.push({ folder: f, score });
-  }
-  hits.sort((a, b) => b.score - a.score || a.folder.path.localeCompare(b.folder.path));
-  return hits.slice(0, limit).map(h => ({ kind: 'folder' as const, folder: h.folder }));
+export function listFoldersForPicker(_app: App, _query: string, _limit = 20): { kind: 'folder'; folder: TFolder }[] {
+  void _app;
+  void _query;
+  void _limit;
+  return [];
 }
 
-export function listTagsForPicker(app: App, query: string, limit = 20): string[] {
-  const counts = new Map<string, number>();
-  for (const f of app.vault.getMarkdownFiles()) {
-    const c = app.metadataCache.getFileCache(f);
-    if (!c) continue;
-    for (const t of getAllTags(c) ?? []) {
-      counts.set(t, (counts.get(t) ?? 0) + 1);
-    }
-  }
-  const q = query.toLowerCase().trim();
-  return [...counts.entries()]
-    .filter(([t]) => !q || t.toLowerCase().includes(q))
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))    // frequency desc, then alpha
-    .slice(0, limit)
-    .map(([t]) => t);
+export function listTagsForPicker(_app: App, _query: string, _limit = 20): string[] {
+  void _app;
+  void _query;
+  void _limit;
+  return [];
 }

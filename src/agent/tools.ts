@@ -6,12 +6,8 @@
  * and exposes the unified registry + helpers.
  */
 import { readNote } from './tools/read_note';
-import { listFiles } from './tools/list_files';
-import { searchVault } from './tools/search_vault';
-import { grepVault } from './tools/grep_vault';
 import { discoverSkillsTool } from './tools/discover_skills';
 import { runSkill } from './tools/run_skill';
-import { searchByTag } from './tools/search_by_tag';
 import { getActiveFile } from './tools/get_active_file';
 import { getSelection } from './tools/get_selection';
 import { queryMetadata } from './tools/query_metadata';
@@ -24,7 +20,6 @@ import { fileEdit } from './tools/file_edit';
 import { applyPatch } from './tools/apply_patch';
 import { todoWrite } from './tools/todo_write';
 import { attemptCompletion } from './tools/attempt_completion';
-import { semanticSearch } from './tools/semantic_search';
 import { viewImage } from './tools/view_image';
 import { readPdf } from './tools/read_pdf';
 import { webFetch } from './tools/web_fetch';
@@ -42,7 +37,6 @@ import { renameNote } from './tools/rename_note';
 import { resolveWikilink } from './tools/resolve_wikilink';
 import { getBacklinks } from './tools/get_backlinks';
 import { getOutgoingLinks } from './tools/get_outgoing_links';
-import { listTags } from './tools/list_tags';
 import { getPeriodicNote } from './tools/get_periodic_note';
 import { readCanvas } from './tools/read_canvas';
 import { patchCanvas } from './tools/patch_canvas';
@@ -58,7 +52,6 @@ import { listCommands } from './tools/list_commands';
 import { dataviewQuery } from './tools/dataview_query';
 import { templaterRender } from './tools/templater_render';
 import { tasksQuery } from './tools/tasks_query';
-import { basesQuery } from './tools/bases_query';
 
 import type { ToolSpec } from '../providers/types';
 import type { ToolImpl } from './tools/_shared';
@@ -83,10 +76,6 @@ export type {
  *  reads → metadata → writes → edits → planning → control → media → network. */
 export const TOOLS: Record<string, ToolImpl> = {
   read_note: readNote,
-  list_files: listFiles,
-  search_vault: searchVault,
-  grep_vault: grepVault,
-  search_by_tag: searchByTag,
   get_active_file: getActiveFile,
   get_selection: getSelection,
   query_metadata: queryMetadata,
@@ -102,7 +91,6 @@ export const TOOLS: Record<string, ToolImpl> = {
   todo_write: todoWrite,
   attempt_completion: attemptCompletion,
 
-  semantic_search: semanticSearch,
   view_image: viewImage,
   read_pdf: readPdf,
   web_research: webResearch,
@@ -124,7 +112,6 @@ export const TOOLS: Record<string, ToolImpl> = {
   resolve_wikilink: resolveWikilink,
   get_backlinks: getBacklinks,
   get_outgoing_links: getOutgoingLinks,
-  list_tags: listTags,
   get_periodic_note: getPeriodicNote,
   read_canvas: readCanvas,
   patch_canvas: patchCanvas,
@@ -142,7 +129,6 @@ export const TOOLS: Record<string, ToolImpl> = {
   dataview_query: dataviewQuery,
   templater_render: templaterRender,
   tasks_query: tasksQuery,
-  bases_query: basesQuery,
 };
 
 const MODEL_HIDDEN_TOOL_NAMES = new Set(['attempt_completion']);

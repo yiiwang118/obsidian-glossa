@@ -7,11 +7,8 @@ import { BUILTIN_SLASH_COMMANDS, applySlashTemplate } from './commands/slash';
 import { getCurrentSelection } from './context/sources';
 import { askPassphrase } from './ui/passphrase_modal';
 import { deriveKey, encryptString, decryptString, decryptStringStrict, isEncrypted, makeVerifier, type SubtleKeyHandle } from './utils/crypto';
-import { EmbeddingIndex } from './agent/embeddings';
 import { CheckpointManager } from './agent/checkpoint';
-import { McpHub } from './agent/mcp';
 import { setLanguage, bi } from './utils/i18n';
-import { loadShellEnv } from './utils/env';
 import { GLOSSA_RIBBON_SVG } from './ui/icons';
 import type { UpdateInfo } from './features/update_check';
 import { OBSIDIAN_PLUGIN_URI, UPDATE_CHECK_INTERVAL_MS, fetchLatestUpdate } from './features/update_check';
@@ -25,22 +22,17 @@ export default class GlossaPlugin extends Plugin {
   private cryptoHandle: SubtleKeyHandle | null = null;
   private unlocked = true;     // true when keys are readable (encryption disabled or unlocked)
 
-  embeddingIndex: EmbeddingIndex;
+  embeddingIndex: {
+    size: () => number;
+    modelInfo: () => { model: string; endpointId: string };
+    search: (query: string, topK?: number) => Promise<{ path: string; chunk: number; text: string; score: number }[]>;
+  };
   checkpoint: CheckpointManager;
-  mcp: McpHub;
-  fileIndex: import('./agent/file_index').FileIndex;
+  mcp: any;
   updateInfo: UpdateInfo | null = null;
   private updateCheckInFlight: Promise<UpdateInfo | null> | null = null;
 
   async onload() {
-    // Snapshot the user's login-shell env asynchronously at startup so spawned
-    // CLIs (codex, claude) inherit HTTPS_PROXY / OPENAI_API_KEY / etc that live
-    // in ~/.zshrc. macOS GUI apps don't load shell rc files, so without this
-    // every subprocess we spawn would attempt direct internet egress and hang
-    // behind the user's proxy. Fire-and-forget: makeChildEnv() reads from the
-    // sync `shellEnvSnapshot()` cache populated by this Promise.
-    loadShellEnv().catch(() => {});
-
     const raw = (await this.loadData()) ?? {};
     const { __chats: legacy, ...settingsRaw } = raw;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, settingsRaw);
@@ -96,16 +88,22 @@ export default class GlossaPlugin extends Plugin {
     this.store = new ChatStore(this);
     await this.store.load(legacy);
 
-    this.embeddingIndex = new EmbeddingIndex(this);
-    await this.embeddingIndex.load();
+    this.embeddingIndex = {
+      size: () => 0,
+      modelInfo: () => ({ model: '', endpointId: '' }),
+      search: async () => [],
+    };
     this.checkpoint = new CheckpointManager(this);
-    this.mcp = new McpHub();
-    const { FileIndex } = await import('./agent/file_index');
-    this.fileIndex = new FileIndex(this.app);
-    // Pass `this` so vault listeners go through plugin.registerEvent and
-    // get auto-cleaned on hot reload — otherwise a reload would leave the
-    // old listener set bound to a dead FileIndex, double-firing upserts.
-    this.fileIndex.startListening(this);
+    this.mcp = {
+      clients: [],
+      start: async () => {},
+      stop: async () => {},
+      restart: async () => {},
+      allTools: () => [],
+      asToolSpecs: () => [],
+      findClient: () => null,
+      onChange: () => () => {},
+    };
 
     if (this.settings.encryptionEnabled) {
       this.unlocked = false;
@@ -179,13 +177,6 @@ export default class GlossaPlugin extends Plugin {
     });
 
     this.addSettingTab(new GlossaSettingTab(this.app, this));
-
-    // Start MCP servers in background
-    this.app.workspace.onLayoutReady(() => {
-      if (this.settings.mcpServers.some(s => s.enabled)) {
-        this.mcp.start(this.settings.mcpServers).catch(e => console.warn('[mcp] start failed', e));
-      }
-    });
 
     // Initialize bundled skills (one-time, idempotent across reloads thanks to
     // clearBundledSkills() at module init). Also load the persisted nested
@@ -488,44 +479,10 @@ export default class GlossaPlugin extends Plugin {
      Embedding index
      ============================================================ */
   async rebuildEmbeddings() {
-    if (!this.settings.embeddingEndpointId) { new Notice(bi('Pick an embedding endpoint in settings first.', '请先在设置中选择嵌入端点。')); return; }
-    // First-build consent gate: building an embedding index uploads every
-    // markdown file's content to the configured endpoint. We show a one-time
-    // modal that names the endpoint + counts files + estimates payload size
-    // so the user can decide. Once granted, never asked again unless
-    // settings flag is manually reset.
-    if (!this.settings.embeddingConsentGranted) {
-      const ep = this.settings.endpoints.find(e => e.id === this.settings.embeddingEndpointId);
-      const epLabel = ep?.label ?? '(unknown)';
-      const epUrl = ep?.baseUrl ?? '(unknown URL)';
-      const files = this.app.vault.getMarkdownFiles();
-      const totalBytes = files.reduce((s, f) => s + (f.stat.size ?? 0), 0);
-      const sizeMb = (totalBytes / 1024 / 1024).toFixed(1);
-      const { confirmModal } = await import('./ui/confirm_modal');
-      const ok = await confirmModal(this.app, {
-        title: 'Build embedding index?',
-        body:
-          `This will UPLOAD the content of every markdown file in your vault to:\n\n` +
-          `  endpoint: ${epLabel}\n` +
-          `  URL:      ${epUrl}\n\n` +
-          `Scope: ${files.length} files, ~${sizeMb} MB total. The upload happens in batches of 32 chunks; ` +
-          `only the embedded vectors are stored on disk, but the raw text leaves your machine.`,
-        confirmText: 'Upload & build',
-        danger: false,
-      });
-      if (!ok) return;
-      this.settings.embeddingConsentGranted = true;
-      try { await this.saveData(this.settings); } catch (e) { console.warn('[Glossa] consent persist failed', e); }
-    }
-    new Notice(bi('Building embedding index…', '正在构建嵌入索引…'));
-    try {
-      // EmbeddingIndex.build internally calls getDecryptedEndpoint — no mutation of
-      // the persisted endpoint object happens. Safe.
-      const { added, removed } = await this.embeddingIndex.build({
-        onProgress: (done, total) => { if (done % 20 === 0) new Notice(`Embedding: ${done}/${total}`); },
-      });
-      new Notice(`Index ready: +${added} chunks · -${removed} stale.`);
-    } catch (e: any) { new Notice(`Index build failed: ${e.message}`); }
+    new Notice(bi(
+      'Semantic indexing is disabled in the community review build.',
+      '社区审核版本已关闭语义索引。',
+    ));
   }
 
   /* ============================================================

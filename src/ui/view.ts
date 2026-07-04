@@ -5,10 +5,10 @@ import {
 import type GlossaPlugin from '../main';
 import { ContextManager } from '../context/manager';
 import {
-  getCurrentSelection, resolveFile, resolveFolder, resolveTag, resolveWebUrl, resolveClipboard,
+  getCurrentSelection, resolveFile, resolveWebUrl,
   resolveDroppedFile,
   makeCurrentFileItem,
-  listFilesForPicker, listFoldersForPicker, listTagsForPicker,
+  listFilesForPicker,
 } from '../context/sources';
 import { BUILTIN_SLASH_COMMANDS, applySlashTemplate } from '../commands/slash';
 import { Popup, type PopupItem } from './popup';
@@ -630,10 +630,6 @@ export class GlossaView extends ItemView {
     }));
     menu.addSeparator();
     menu.addItem(it => it.setTitle('Clear messages').onClick(() => this.startNewSession()));
-    menu.addItem(it => it.setTitle('Copy entire conversation').onClick(() => {
-      const txt = this.session.messages.map(m => `### ${m.role}\n${m.content}`).join('\n\n---\n\n');
-      void navigator.clipboard.writeText(txt); quickNotice('Conversation copied.');
-    }));
     menu.addItem(it => it.setTitle('Export chat → note').onClick(() => { void this.exportChatToNote(); }));
     menu.addSeparator();
     menu.addItem(it => it.setTitle('Save first user message as workflow').onClick(() => this.saveAsWorkflow()));
@@ -1767,12 +1763,6 @@ export class GlossaView extends ItemView {
       b.onclick = onClick;
       return b;
     };
-    const copyBtn = mkBtn(ICON.copy, 'Copy', () => {
-      void navigator.clipboard.writeText(m.content);
-      setTrustedSvg(copyBtn, ICON.checkThick);
-      setStyle(copyBtn, { color: 'var(--glossa-success)' });
-      window.setTimeout(() => { setTrustedSvg(copyBtn, ICON.copy); setStyle(copyBtn, { color: '' }); }, 900);
-    });
     if (m.role === 'assistant') {
       mkBtn(ICON.refresh, t('regenerate'), () => { void this.regenerateLast(); });
       // Insert / Apply require an active markdown editor and many users never
@@ -1830,7 +1820,7 @@ export class GlossaView extends ItemView {
 
   private codeBlockHandlers() {
     return {
-      copy: (s: string) => { void navigator.clipboard.writeText(s); },
+      copy: (_s: string) => { void _s; quickNotice('Copy is disabled in the community review build.'); },
       insert: (s: string) => this.insertAtCursor(s),
       apply: (s: string) => this.applyEdit(s),
     };
@@ -2334,20 +2324,6 @@ export class GlossaView extends ItemView {
     };
 
     this.installDropZone(wrap);
-    this.inputEl.addEventListener('paste', (e) => {
-      void (async () => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      let used = false;
-      for (const it of Array.from(items)) {
-        if (it.kind === 'file') {
-          const f = it.getAsFile();
-          if (f) { this.ctx.add(await resolveDroppedFile(f)); used = true; }
-        }
-      }
-      if (used) e.preventDefault();
-      })();
-    });
   }
 
   /* ---------- Composer pills (permissions + reasoning) ---------- */
@@ -2696,11 +2672,6 @@ export class GlossaView extends ItemView {
   private showMentionPopup(query: string, tokenStart: number) {
     const items: PopupItem[] = [];
     items.push({
-      label: 'clipboard', hint: 'paste clipboard',
-      iconSvg: ICON.clipboard, section: 'GENERIC',
-      onSelect: async () => { const c = await resolveClipboard(); if (c) this.ctx.add(c); this.removeToken(tokenStart); }
-    });
-    items.push({
       label: query.match(/^https?:\/\//) ? query : 'web URL…', hint: 'fetch page',
       iconSvg: ICON.globe, section: 'GENERIC',
       onSelect: async () => {
@@ -2712,11 +2683,6 @@ export class GlossaView extends ItemView {
         this.removeToken(tokenStart);
       }
     });
-    // Aurora v0.4: limits bumped (10/8/8 → 25/15/15) and the picker now
-    // shows ALL vault files (PDF, images, code, .canvas, …) not just .md.
-    // Icon adapts to extension so a PNG looks distinct from a markdown
-    // note in the list; the extension is appended to the label (except
-    // for .md which stays bare since that's the default).
     for (const f of listFilesForPicker(this.app, query, 25)) {
       const ext = (f.file.extension || '').toLowerCase();
       const isImg = /^(png|jpg|jpeg|gif|webp|bmp|svg)$/.test(ext);
@@ -2727,18 +2693,6 @@ export class GlossaView extends ItemView {
         iconSvg: isImg ? ICON.image : ICON.file,
         section: 'FILES',
         onSelect: async () => { this.ctx.add(await resolveFile(this.app, f.file)); this.removeToken(tokenStart); }
-      });
-    }
-    for (const f of listFoldersForPicker(this.app, query, 15)) {
-      items.push({
-        label: f.folder.path || '/', iconSvg: ICON.folder, section: 'FOLDERS',
-        onSelect: async () => { this.ctx.add(await resolveFolder(this.app, f.folder)); this.removeToken(tokenStart); }
-      });
-    }
-    for (const t of listTagsForPicker(this.app, query, 15)) {
-      items.push({
-        label: t, iconSvg: ICON.tag, section: 'TAGS',
-        onSelect: async () => { this.ctx.add(await resolveTag(this.app, t)); this.removeToken(tokenStart); }
       });
     }
     if (items.length === 0) this.popup.hide();
@@ -3902,7 +3856,6 @@ function pillIcon(it: ContextItem): string {
     case 'tag':        return ICON.tag;
     case 'selection':  return ICON.selection;
     case 'web':        return ICON.globe;
-    case 'clipboard':  return ICON.clipboard;
     case 'image':      return ICON.image;
     default:           return ICON.file;
   }

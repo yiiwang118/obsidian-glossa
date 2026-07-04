@@ -3,22 +3,17 @@ import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
 import type GlossaPlugin from './main';
 import type { Endpoint, CustomPrompt, SlashCommand } from './types';
 import { reasoningOptionsForEndpoint } from './types';
-import { resolveBinary } from './utils/env';
 import { uid, setStyle } from './utils/dom';
 import { CustomApiProvider } from './providers/custom_api';
 import { buildProvider } from './providers/registry';
-import { MCP_CATALOG, MCP_CATEGORIES, fetchCatalog, type McpEntry } from './agent/mcp_marketplace';
 import { TOOLS } from './agent/tools';
 import { metaFor } from './agent/tool_meta';
 import { t, bi } from './utils/i18n';
 
 const HTTP_PROXY_PLACEHOLDER = ['http', '://127.0.0.1:7890'].join('');
 const HTTPS_API_PLACEHOLDER = ['https', '://api.example.com/v1'].join('');
-const HTTPS_URL_PLACEHOLDER = ['https', '://...'].join('');
 const API_KEY_PLACEHOLDER = 'sk-' + '...';
-const MCP_LABEL = 'M' + 'CP';
 const DETECT_BUTTON_LABEL = '↻ ' + 'Detect';
-const IMPORT_URL_BUTTON_LABEL = '+ ' + 'Import URL';
 
 function normalizeModelList(models: string[]): string[] {
   return [...new Set(models.map(m => String(m).trim()).filter(Boolean))]
@@ -81,8 +76,6 @@ const PRESETS: Preset[] = [
 
 const KIND_CARDS = [
   { kind: 'custom-api' as const,      title: 'Custom API',     badge: 'HTTP',  desc: 'Any OpenAI / Anthropic-compatible endpoint. DeepSeek, Qwen, GLM, MiniMax, Ollama, etc.' },
-  { kind: 'codex-cli' as const,       title: 'Codex CLI',      badge: 'LOCAL', desc: 'Reuses your local codex binary + ~/.codex/auth.json' },
-  { kind: 'claude-code-cli' as const, title: 'Claude Code',    badge: 'LOCAL', desc: 'Reuses local claude (--bare --max-turns 1)' },
 ];
 
 function renderWarningHint(parent: HTMLElement, text: string) {
@@ -747,75 +740,20 @@ export class GlossaSettingTab extends PluginSettingTab {
 
     /* ----- MCP servers ----- */
     this.renderHeading(containerEl, bi('MCP servers', 'MCP 服务'), 'mcp');
-    new Setting(containerEl).addButton(b => b.setButtonText(bi('+ Add', '+ 新增')).onClick(async () => {
-      this.plugin.settings.mcpServers.push({ id: uid(), name: 'server-' + (this.plugin.settings.mcpServers.length + 1), command: '', args: [], enabled: true });
-      await this.plugin.saveSettings(); this.display();
-    }))
-    .addButton(b => b.setButtonText(bi('Marketplace', '市场')).setCta().onClick(() => {
-      new McpMarketplaceModal(this.plugin, () => this.display()).open();
-    }))
-    .addButton(b => b.setButtonText(bi('Reconnect all', '全部重连')).onClick(async () => {
-      b.setDisabled(true).setButtonText(bi('Reconnecting…', '重连中…'));
-      try {
-        await this.plugin.mcp.start(this.plugin.settings.mcpServers);
-        new Notice(bi(`${this.plugin.mcp.clients.length} server(s), ${this.plugin.mcp.allTools().length} tools.`,
-                      `${this.plugin.mcp.clients.length} 个服务，${this.plugin.mcp.allTools().length} 个工具。`));
-      } finally {
-        b.setDisabled(false).setButtonText(bi('Reconnect all', '全部重连'));
-      }
-    }));
+    new Setting(containerEl)
+      .setName(bi('Unavailable in community build', '社区审核版不可用'))
+      .setDesc(bi('External tool servers are disabled in this release package.', '此发布包已禁用外部工具服务。'));
     for (const s of this.plugin.settings.mcpServers) {
-      const client = this.plugin.mcp.clients.find(c => c.cfg.id === s.id);
-      const statusBadge = client?.status === 'connected' ? '🟢 connected'
-                       : client?.status === 'connecting' ? '🟡 connecting'
-                       : client?.status === 'failed' ? `🔴 failed${client.lastError ? ' — ' + client.lastError.slice(0, 60) : ''}`
-                       : '⚪ idle';
       const card = containerEl.createEl('div', { cls: 'nc-endpoint-card' });
       const hdr = card.createEl('div', { cls: 'nc-endpoint-card-header' });
       hdr.createEl('span', { text: s.name });
-      hdr.createEl('span', { cls: 'nc-endpoint-kind-badge', text: statusBadge });
+      hdr.createEl('span', { cls: 'nc-endpoint-kind-badge', text: 'disabled' });
       const del = hdr.createEl('button', { text: bi('Delete', '删除'), cls: 'mod-warning' });
       del.onclick = async () => {
         this.plugin.settings.mcpServers = this.plugin.settings.mcpServers.filter(x => x.id !== s.id);
         await this.plugin.saveSettings(); this.display();
       };
-      new Setting(card).setName(bi('Name', '名称')).addText(t => t.setValue(s.name).onChange(async v => { s.name = v; await this.plugin.saveSettings(); }));
-      new Setting(card).setName(bi('Command', '命令')).setDesc(bi('⚠ Spawns a local process.', '⚠ 会启动本地进程。'))
-        .addText(t => t.setValue(s.command).onChange(async v => { s.command = v; await this.plugin.saveSettings(); }));
-      new Setting(card).setName(bi('Args', '参数'))
-        .setDesc(bi('Shell-quoted.', 'Shell 风格转义。'))
-        .addText(t => t.setValue((s.args ?? []).map(a => /\s|"/.test(a) ? `'${a.replace(/'/g, "\\'")}'` : a).join(' '))
-          .onChange(async v => {
-            const { shellSplit } = await import('./utils/shell_split');
-            s.args = shellSplit(v);
-            await this.plugin.saveSettings();
-          }));
-      new Setting(card).setName(bi('Enabled', '启用')).addToggle(tg => tg.setValue(s.enabled).onChange(async v => { s.enabled = v; await this.plugin.saveSettings(); }));
-      if (client) {
-        new Setting(card).setName(bi('Tools', '工具')).setDesc(client.listTools().map(t => t.originalName).join(', ') || bi('(none yet)', '（暂无）'));
-        const res = client.listResources();
-        if (res.length > 0) {
-          new Setting(card).setName(bi('Resources', '资源')).setDesc(res.map(r => r.name ?? r.uri).join(', '));
-        }
-        new Setting(card).setName(bi('Restart', '重启'))
-          .setDesc(client.status === 'failed' && client.lastError ? `Error: ${client.lastError.slice(0, 100)}` : '')
-          .addButton(b => b.setButtonText(bi('↻ Restart', '↻ 重启')).onClick(async () => {
-            b.setDisabled(true).setButtonText(bi('Restarting…', '重启中…'));
-            try {
-              await this.plugin.mcp.restart(s.id);
-              new Notice(bi(`Restarted ${s.name}: ${client.status}`, `已重启 ${s.name}：${client.status}`));
-              this.display();
-            } finally {
-              b.setDisabled(false).setButtonText(bi('↻ Restart', '↻ 重启'));
-            }
-          }));
-        if (client.recentStderr()) {
-          const pre = card.createEl('details');
-          pre.createEl('summary', { text: bi('Recent stderr', '最近 stderr') });
-          const stderrEl = pre.createEl('pre', { text: client.recentStderr() });
-          setStyle(stderrEl, { maxHeight: '160px', overflow: 'auto', fontSize: '11px' });
-        }
-      }
+      new Setting(card).setName(bi('Name', '名称')).setDesc(s.name);
     }
 
     /* ----- Endpoints ----- */
@@ -989,6 +927,12 @@ export class GlossaSettingTab extends PluginSettingTab {
 
     new Setting(basic).setName(bi('Label', '名称')).addText(t => t.setValue(ep.label).onChange(async v => { ep.label = v; await this.plugin.saveSettings(); }));
 
+    if (ep.kind !== 'custom-api') {
+      new Setting(basic)
+        .setName(bi('Unavailable in community build', '社区审核版不可用'))
+        .setDesc(bi('Local CLI providers are disabled in this release package. Create a Custom API endpoint instead.', '此发布包已禁用本地 CLI provider。请改用 Custom API endpoint。'));
+    }
+
     if (ep.kind === 'custom-api') {
       new Setting(basic).setName(bi('API style', 'API 风格'))
         .addDropdown(d => d.addOption('openai', 'OpenAI').addOption('anthropic', 'Anthropic')
@@ -1060,10 +1004,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       new Setting(basic).setName(t('cli_binary_path')).setDesc(t('cli_binary_path_desc'))
         .addText(tx => tx.setValue(ep.binaryPath ?? '').onChange(async v => { ep.binaryPath = v; await this.plugin.saveSettings(); }))
         .addButton(b => b.setButtonText('Auto').onClick(async () => {
-          const name = ep.kind === 'codex-cli' ? 'codex' : 'claude';
-          const p = resolveBinary(name);
-          if (p) { ep.binaryPath = p; await this.plugin.saveSettings(); this.display(); new Notice(`Found ${p}`); }
-          else new Notice(`Not found. Install ${name} first.`);
+          new Notice(bi('Local CLI providers are disabled in the community review build.', '社区审核版已禁用本地 CLI provider。'));
         }));
       new Setting(basic).setName(t('cli_default_model'))
         .setDesc(t('cli_default_model_desc'))
@@ -1466,9 +1407,7 @@ class AddEndpointModal extends Modal {
         const btn = wrap.createEl('button', { text: 'Auto' });
         btn.type = 'button';
         btn.onclick = () => {
-          const r = resolveBinary(binName);
-          if (r) { inp.value = r; (this.draft as any).binaryPath = r; new Notice(`Found ${r}`); }
-          else new Notice(`Not found. Install ${binName}.`);
+          new Notice('Local CLI providers are disabled in the community review build.');
         };
       });
       row('Default model', (p) => {
@@ -1578,270 +1517,6 @@ class AddEndpointModal extends Modal {
 }
 
 /* ============================================================
-   MCP marketplace modal — one-click install of curated servers
-   ============================================================ */
-interface McpExternalEntry extends McpEntry { __source: string; }
-
-class McpMarketplaceModal extends Modal {
-  private filter: McpEntry['category'] | 'all' = 'all';
-  private query = '';
-  private listEl!: HTMLElement;
-  private statusEl!: HTMLElement;
-  private external: McpExternalEntry[] = [];   // entries fetched from user catalog URLs (this session)
-
-  constructor(private plugin: GlossaPlugin, private onChange: () => void) {
-    super(plugin.app);
-  }
-
-  async onOpen() {
-    const { contentEl, modalEl } = this;
-    modalEl.addClass('nc-mcp-marketplace-modal');
-    contentEl.empty();
-    contentEl.createEl('h2', { text: `${MCP_LABEL} marketplace` });
-    contentEl.createEl('p', {
-      cls: 'setting-item-description',
-      text: `Curated ${MCP_LABEL} servers. Clicking install adds the entry to your config (disabled by default — fill in any required arg / env, then enable).`,
-    });
-
-    /* Filter chips + search + URL controls */
-    const bar = contentEl.createEl('div', { cls: 'nc-mcp-bar' });
-    const chip = (label: string, value: McpEntry['category'] | 'all') => {
-      const b = bar.createEl('button', { text: label, cls: 'nc-mcp-chip' + (this.filter === value ? ' active' : '') });
-      b.onclick = () => { this.filter = value; this.rerenderChips(); this.render(); };
-      return b;
-    };
-    chip('All', 'all');
-    for (const c of MCP_CATEGORIES) chip(c.label, c.id);
-    const search = bar.createEl('input', { attr: { placeholder: 'Search…', type: 'text' }, cls: 'nc-mcp-search' });
-    search.oninput = () => { this.query = (search.value || '').toLowerCase(); this.render(); };
-    const importBtn = bar.createEl('button', { text: IMPORT_URL_BUTTON_LABEL, cls: 'nc-mcp-import-btn' });
-    importBtn.onclick = () => this.promptImport();
-
-    /* Saved URLs row */
-    const urlsBar = contentEl.createEl('div', { cls: 'nc-mcp-urls' });
-    this.renderUrlsBar(urlsBar);
-
-    this.statusEl = contentEl.createEl('div', { cls: 'nc-mcp-status' });
-    this.listEl = contentEl.createEl('div', { cls: 'nc-mcp-list' });
-    this.render();
-
-    // Auto-load any saved catalog URLs in the background
-    void this.loadSavedUrls();
-  }
-
-  private rerenderChips() {
-    // Cheap: rebuild header rather than tracking individual chip elements
-    const { contentEl } = this;
-    const oldBar = contentEl.querySelector('.nc-mcp-bar');
-    const oldUrls = contentEl.querySelector('.nc-mcp-urls');
-    if (oldBar) oldBar.remove();
-    if (oldUrls) oldUrls.remove();
-    const h2 = contentEl.querySelector('h2');
-    const p  = contentEl.querySelector('p.setting-item-description');
-    const after = (p ?? h2)?.nextSibling ?? null;
-    // Build a fresh bar and insert it after the header text
-    const bar = contentEl.createEl('div', { cls: 'nc-mcp-bar' });
-    contentEl.insertBefore(bar, after);
-    const chip = (label: string, value: McpEntry['category'] | 'all') => {
-      const b = bar.createEl('button', { text: label, cls: 'nc-mcp-chip' + (this.filter === value ? ' active' : '') });
-      b.onclick = () => { this.filter = value; this.rerenderChips(); this.render(); };
-    };
-    chip('All', 'all');
-    for (const c of MCP_CATEGORIES) chip(c.label, c.id);
-    const search = bar.createEl('input', { attr: { placeholder: 'Search…', type: 'text', value: this.query }, cls: 'nc-mcp-search' });
-    search.oninput = () => { this.query = (search.value || '').toLowerCase(); this.render(); };
-    const importBtn = bar.createEl('button', { text: IMPORT_URL_BUTTON_LABEL, cls: 'nc-mcp-import-btn' });
-    importBtn.onclick = () => this.promptImport();
-
-    const urlsBar = contentEl.createEl('div', { cls: 'nc-mcp-urls' });
-    contentEl.insertBefore(urlsBar, this.statusEl);
-    this.renderUrlsBar(urlsBar);
-  }
-
-  private renderUrlsBar(host: HTMLElement) {
-    host.empty();
-    const urls = this.plugin.settings.mcpCatalogUrls ?? [];
-    if (urls.length === 0) return;
-    host.createEl('span', { text: 'Catalogs:', cls: 'nc-mcp-urls-label' });
-    for (const u of urls) {
-      const chip = host.createEl('span', { cls: 'nc-mcp-url-chip' });
-      const short = u.length > 50 ? u.slice(0, 24) + '…' + u.slice(-20) : u;
-      chip.createEl('span', { text: short, title: u });
-      const remove = chip.createEl('button', { text: '✕', title: 'Remove' });
-      remove.onclick = async () => {
-        this.plugin.settings.mcpCatalogUrls = this.plugin.settings.mcpCatalogUrls.filter(x => x !== u);
-        this.external = this.external.filter(e => e.__source !== u);
-        await this.plugin.saveSettings();
-        this.rerenderChips();
-        this.render();
-      };
-    }
-  }
-
-  private async loadSavedUrls() {
-    const urls = this.plugin.settings.mcpCatalogUrls ?? [];
-    if (urls.length === 0) return;
-    this.statusEl.setText(`Loading ${urls.length} catalog${urls.length === 1 ? '' : 's'}…`);
-    const merged: McpExternalEntry[] = [];
-    const errors: string[] = [];
-    for (const u of urls) {
-      try {
-        const entries = await fetchCatalog(u);
-        for (const e of entries) merged.push({ ...e, __source: u });
-      } catch (e: any) {
-        errors.push(`${u}: ${e.message}`);
-      }
-    }
-    this.external = merged;
-    this.statusEl.setText(errors.length
-      ? `Loaded ${merged.length} external entries · ${errors.length} failed`
-      : `Loaded ${merged.length} external entries`);
-    if (errors.length) this.statusEl.title = errors.join('\n');
-    this.render();
-  }
-
-  private async promptImport() {
-    const url = await this.askUrl();
-    if (!url) return;
-    this.statusEl.setText('Fetching…');
-    try {
-      const entries = await fetchCatalog(url);
-      // Persist URL (dedupe)
-      const urls = new Set(this.plugin.settings.mcpCatalogUrls ?? []);
-      urls.add(url);
-      this.plugin.settings.mcpCatalogUrls = [...urls];
-      await this.plugin.saveSettings();
-      // Merge into session catalog
-      this.external = this.external.filter(e => e.__source !== url);
-      for (const e of entries) this.external.push({ ...e, __source: url });
-      this.statusEl.setText(`Imported ${entries.length} entries from ${url}`);
-      this.rerenderChips();
-      this.render();
-    } catch (e: any) {
-      this.statusEl.setText(`Import failed: ${e.message}`);
-    }
-  }
-
-  private askUrl(): Promise<string | null> {
-    return new Promise(resolve => {
-      const modal = new (class extends Modal {
-        url = '';
-        constructor(app: App) { super(app); }
-        onOpen() {
-          this.contentEl.createEl('h3', { text: `Import ${MCP_LABEL} catalog` });
-          this.contentEl.createEl('p', { cls: 'setting-item-description',
-            text: `Paste a URL that returns a JSON array of ${MCP_LABEL} entries. Common locations: raw.githubusercontent.com or a public gist.` });
-          const input = this.contentEl.createEl('input', { attr: { placeholder: HTTPS_URL_PLACEHOLDER, type: 'url' } });
-          setStyle(input, { width: '100%' });
-          setStyle(input, { padding: '6px 10px' });
-          setStyle(input, { marginTop: '8px' });
-          input.oninput = () => { this.url = input.value.trim(); };
-          const actions = this.contentEl.createEl('div', { cls: 'modal-button-container' });
-          setStyle(actions, { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' });
-          const cancel = actions.createEl('button', { text: 'Cancel' });
-          cancel.onclick = () => { resolve(null); this.close(); };
-          const ok = actions.createEl('button', { text: 'Import', cls: 'mod-cta' });
-          ok.onclick = () => { resolve(this.url || null); this.close(); };
-          input.focus();
-          input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { resolve(this.url || null); this.close(); }
-            else if (e.key === 'Escape') { resolve(null); this.close(); }
-          });
-        }
-      })(this.plugin.app);
-      modal.open();
-    });
-  }
-
-  private render() {
-    if (!this.listEl) return;
-    this.listEl.empty();
-    const installedIds = new Set(this.plugin.settings.mcpServers.map(s => s.name));
-    type Row = McpEntry & { __source?: string };
-    const combined: Row[] = [
-      ...MCP_CATALOG.map(e => ({ ...e })),
-      ...this.external.map(e => ({ ...e })),
-    ];
-    const filtered = combined.filter(e =>
-      (this.filter === 'all' || e.category === this.filter) &&
-      (!this.query || e.name.toLowerCase().includes(this.query) || e.description.toLowerCase().includes(this.query))
-    );
-    if (filtered.length === 0) {
-      this.listEl.createEl('div', { cls: 'nc-mcp-empty', text: 'No matches.' });
-      return;
-    }
-    for (const entry of filtered) {
-      const row = this.listEl.createEl('div', { cls: 'nc-mcp-row' });
-      const left = row.createEl('div', { cls: 'nc-mcp-left' });
-      const top = left.createEl('div', { cls: 'nc-mcp-row-top' });
-      top.createEl('span', { cls: 'nc-mcp-name', text: entry.name });
-      top.createEl('span', { cls: 'nc-mcp-cat', text: entry.category });
-      if ((entry).__source) top.createEl('span', { cls: 'nc-mcp-cat nc-mcp-cat-ext', text: 'Custom' });
-      left.createEl('div', { cls: 'nc-mcp-desc', text: entry.description });
-      const cmd = `${entry.install.command} ${entry.install.args.join(' ')}`;
-      left.createEl('code', { cls: 'nc-mcp-cmd', text: cmd });
-      const hints: string[] = [];
-      if (entry.envHints?.length) hints.push('env: ' + entry.envHints.map(h => h.name).join(', '));
-      if (entry.argHints?.length) hints.push('args: ' + entry.argHints.map(h => h.placeholder).join(', '));
-      if (hints.length) left.createEl('div', { cls: 'nc-mcp-hints', text: hints.join(' · ') });
-
-      const right = row.createEl('div', { cls: 'nc-mcp-right' });
-      const isInstalled = installedIds.has(entry.id);
-      const installBtn = right.createEl('button', { text: isInstalled ? 'Installed' : 'Install', cls: 'mod-cta' });
-      if (isInstalled) installBtn.disabled = true;
-      installBtn.onclick = async () => {
-        // Catalog entries are JSON authored by THIRD PARTIES. The command
-        // and args they ship become real shell spawn arguments. Without a
-        // confirmation gate, importing a malicious catalog → one-click
-        // install = spawn('rm', ['-rf', '$HOME']).
-        //
-        // Defense: surface the exact command + args + cwd to the user
-        // before we persist anything. The entry is still saved as DISABLED
-        // by default (a second click is needed to actually run it), but
-        // showing the command at install time means a malicious entry
-        // can't hide behind a friendly name.
-        const cmdLine = `${entry.install.command} ${entry.install.args.join(' ')}`.trim();
-        const { confirmModal } = await import('./ui/confirm_modal');
-        const ok = await confirmModal(this.plugin.app, {
-          title: `Install MCP server "${entry.name}"?`,
-          body:
-            `This will save the following spawn definition to your settings (disabled by default — you must enable it manually before it runs):\n\n` +
-            `  command: ${entry.install.command}\n` +
-            `  args:    ${JSON.stringify(entry.install.args)}\n` +
-            (entry.envHints?.length ? `  env:     ${entry.envHints.map(h => h.name).join(', ')}\n` : '') +
-            `\nFull command line: ${cmdLine.slice(0, 300)}\n\n` +
-            `Only install entries from catalogs you trust.`,
-          confirmText: 'Install (disabled)',
-          danger: true,
-        });
-        if (!ok) return;
-
-        const env: Record<string, string> = {};
-        for (const h of entry.envHints ?? []) env[h.name] = '';
-        this.plugin.settings.mcpServers.push({
-          id: uid(),
-          name: entry.id,
-          command: entry.install.command,
-          args: entry.install.args.slice(),
-          enabled: false,
-          env: Object.keys(env).length ? env : undefined,
-        });
-        await this.plugin.saveSettings();
-        installBtn.textContent = 'Installed';
-        installBtn.disabled = true;
-        new Notice(`Added "${entry.name}" — disabled by default. Edit args/env, then enable.`);
-        this.onChange();
-      };
-      if (entry.homepage) {
-        const docs = right.createEl('a', { text: 'Docs', href: entry.homepage });
-        docs.setAttr('target', '_blank');
-        docs.setAttr('rel', 'noopener');
-      }
-    }
-  }
-}
-
-/* ============================================================
    Codex diagnostic modal — full transcript of the test run
    ============================================================ */
 class CodexDiagnosticModal extends Modal {
@@ -1917,42 +1592,6 @@ class CodexDiagnosticModal extends Modal {
 
     const footer = contentEl.createEl('div', { cls: 'modal-button-container' });
     setStyle(footer, { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' });
-    footer.createEl('button', { text: 'Copy all', cls: 'mod-cta' }).onclick = () => {
-      const mIdx = r.args.indexOf('-m');
-      const modelArg = mIdx >= 0 ? r.args[mIdx + 1] : '(none — uses ~/.codex/config.toml)';
-      const all = [
-        `# Codex CLI diagnostic`,
-        `Verdict: ${r.diagnosis}`,
-        `Version: ${r.version.message}`,
-        `cwd: ${r.cwd}`,
-        `exit: ${r.exitCode}`,
-        `duration: ${r.durationMs}ms`,
-        `Model arg: ${modelArg}`,
-        `PATH: ${r.env.PATH}`,
-        `OPENAI_API_KEY: ${r.env.OPENAI_API_KEY ?? '(not set)'}`,
-        `Proxy source: ${r.env.proxySource ?? 'none'}`,
-        `Shell-captured HTTPS_PROXY: ${r.env.shellProxyHTTPS ?? '(not captured)'}`,
-        `Shell-captured HTTP_PROXY: ${r.env.shellProxyHTTP ?? '(not captured)'}`,
-        `Effective HTTPS_PROXY: ${r.env.HTTPS_PROXY ?? '(not set)'}`,
-        `Effective HTTP_PROXY: ${r.env.HTTP_PROXY ?? '(not set)'}`,
-        `Effective ALL_PROXY: ${r.env.ALL_PROXY ?? '(not set)'}`,
-        `Effective NO_PROXY: ${r.env.NO_PROXY ?? '(not set)'}`,
-        ``,
-        `## Command`,
-        `codex ${r.args.join(' ')}`,
-        ``,
-        `## Parsed reply`,
-        r.parsedText || '(none)',
-        ``,
-        `## stdout`,
-        r.stdout,
-        ``,
-        `## stderr`,
-        r.stderr,
-      ].join('\n');
-      void navigator.clipboard.writeText(all);
-      new Notice('Diagnostic copied to clipboard.');
-    };
     // Quick-fix button when no proxy was detected.
     const haveProxy = !!(r.env.HTTPS_PROXY || r.env.HTTP_PROXY || r.env.ALL_PROXY);
     if (!haveProxy && /Reconnect|timeout|network|connection|tls|dns/i.test(r.diagnosis)) {

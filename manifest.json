@@ -3,7 +3,7 @@
   "name": "Glossa",
   "version": "0.6.3",
   "minAppVersion": "1.12.3",
-  "description": "Local-first AI sidebar with context chat, vault search, and approved agent tools.",
+  "description": "Local-first AI sidebar with context chat, note editing, web research, and approval-gated tools.",
   "author": "yiiwang",
   "authorUrl": "https://github.com/yiiwang118",
   "isDesktopOnly": true

@@ -4,7 +4,7 @@
 
 **Local-first AI assistant for your vault.**
 
-Chat with notes, attach selections and files, search your vault, and run approved agent tools without leaving your workspace.
+Chat with notes, attach selected context, fetch web sources, and run approval-gated note tools without leaving your workspace.
 
 [![Obsidian plugin](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md/plugins?id=glossa)
 [![Release](https://img.shields.io/github/v/release/yiiwang118/obsidian-glossa?display_name=tag&sort=semver)](https://github.com/yiiwang118/obsidian-glossa/releases)
@@ -21,11 +21,11 @@ Chat with notes, attach selections and files, search your vault, and run approve
 
 Most AI note tools are either too small to be useful or too closed to trust. Glossa is built for people who work in long-lived knowledge bases: researchers, engineers, writers, and anyone who needs an assistant that can read context, explain files, edit notes, and stay accountable.
 
-Glossa is not a cloud service. It runs locally as a desktop plugin. Your data goes only to the model providers, embedding endpoints, websites, MCP servers, or local CLI tools you explicitly configure or approve.
+Glossa is not a cloud service. It runs locally as a desktop plugin. Your data goes only to the model providers and websites you explicitly configure or approve.
 
 ## What's New
 
-- **2026-07-04 — 0.6.3 update notice polish.** The update prompt now prioritizes the in-app plugin page, with GitHub kept as a fallback.
+- **2026-07-04 — 0.6.3 community review build.** Removed advanced local integrations and vault-wide shortcuts from the marketplace package to match community review behavior requirements. The update prompt still prioritizes the in-app plugin page, with GitHub kept as a fallback.
 - **2026-07-04 — 0.6.2 release-readiness polish.** Tightened marketplace metadata, refreshed the README and changelog, removed review-scan noise from CSS/network/lint checks, and added stricter release checks.
 - **2026-07-03 — ⚡ Faster selection translation.** Select text and press Enter twice to translate; mixed-language Markdown now detects the natural-language source more carefully.
 - **2026-07-03 — 🧹 Cleaner selection card.** The selection preview stays compact, with the quick-translate hint moved into the composer placeholder.
@@ -41,7 +41,7 @@ Glossa is not a cloud service. It runs locally as a desktop plugin. Your data go
 - **2026-06-26 — 0.5.0 UI refresh.** AI Studio-inspired sidebar polish, cleaner activity rows, better PDF context handling, fixed duplicate Thinking indicators, and improved history/session behavior.
 - **2026-06-25 — 0.4.3 release polish.** Better PDF and image workflow guidance, `xhigh` reasoning-effort support, safer selection capture, and custom API tool-call fixes.
 - **2026-06-23 — 0.4.2 submission follow-up.** Obsidian release-readiness cleanup, trusted SVG rendering without unsafe `innerHTML`, and GitHub Actions artifact provenance.
-- **2026-06-23 — 0.4.1 initial community submission pass.** Added `read_pdf`, release checks, local CLI warning banners, conservative default permissions, and safer large-diff previews.
+- **2026-06-23 — 0.4.1 initial community submission pass.** Added `read_pdf`, release checks, conservative default permissions, and safer large-diff previews.
 
 </details>
 
@@ -49,12 +49,12 @@ Glossa is not a cloud service. It runs locally as a desktop plugin. Your data go
 
 | | |
 |---|---|
-| 🧠 **Context-aware chat** | Attach the current file, selected text, PDFs, images, folders, tags, clipboard text, web pages, or `@`-mentioned notes. |
-| 🛠 **Agent tools** | Read, search, edit, patch, create, rename, inspect PDFs, query metadata, manage tags/frontmatter, run skills, and more. |
+| 🧠 **Context-aware chat** | Attach the current file, selected text, PDFs, images, explicitly chosen files, or web pages. |
+| 🛠 **Agent tools** | Read, edit, patch, create, rename, inspect PDFs, query metadata, manage tags/frontmatter, run skills, and more. |
 | 🔐 **Permission-first workflow** | Start in Plan/read-only mode, then approve write actions per tool, path, folder, or session. |
-| 🔎 **RAG / semantic search** | Build a vault index with the embedding endpoint you choose, with a clear consent gate before upload. |
-| ⚡ **Provider flexibility** | Use OpenAI-style APIs, Anthropic-style APIs, compatible gateways, Codex CLI, Codex App-Server, or Claude Code CLI. |
-| 🧩 **Skills + MCP** | Turn Markdown playbooks into callable skills and connect external MCP servers under the same approval model. |
+| 🌐 **Web research** | Search and fetch bounded web sources with explicit network controls. |
+| ⚡ **Provider flexibility** | Use OpenAI-style APIs, Anthropic-style APIs, compatible gateways, or local HTTP endpoints such as Ollama. |
+| 🧩 **Skills** | Turn Markdown playbooks into callable workflows under the same approval model. |
 | 🧯 **Checkpoints** | Destructive edits create snapshots first, so agent changes can be reviewed and rolled back. |
 
 ## Install
@@ -89,7 +89,7 @@ Then reload Obsidian and enable **Glossa** under Community plugins.
 2. Add a provider endpoint.
 3. Ask a question, use `/commands`, or attach context with `@`.
 4. Stay in **Plan** for read-only reasoning, switch to **Act** when you want file operations.
-5. Review approvals before any sensitive write or shell action.
+5. Review approvals before any sensitive write action.
 
 ## What You Can Attach
 
@@ -98,7 +98,6 @@ Then reload Obsidian and enable **Glossa** under Community plugins.
 | 📄 Current note | Explain, rewrite, summarize, continue writing. |
 | 🧾 PDF | Extract titles, summaries, methods, tables, citations, or page-specific details. |
 | 🖼 Image | Ask about screenshots, diagrams, UI bugs, or visual evidence. |
-| 🗂 Folder / tag | Give the model a scoped view of a project area. |
 | ✂ Selection | Transform exactly the selected passage without pasting it manually. |
 | 🌐 Web page / search | Fetch a known page, search current sources, or download public assets with explicit approval. |
 
@@ -107,9 +106,7 @@ Glossa treats user-attached files as the primary target for phrases like “this
 ## Privacy & Security
 
 - Chats and attached context are sent to the provider you configure.
-- Semantic indexing sends note chunks to the embedding endpoint you choose.
 - API keys can be encrypted at rest with a passphrase.
-- Local CLI providers and MCP servers run on your machine and follow Glossa permission controls.
 - Tool calls, approvals, and destructive edits are designed to be visible before they matter.
 
 Read more:
@@ -138,7 +135,7 @@ GLOSSA_PLUGIN_DIR="/path/to/vault/.obsidian/plugins/glossa" npm run dev
 
 ## Project Notes
 
-- Desktop-only for now, because full agent mode uses Node/Electron capabilities.
+- Desktop-only for now while the sidebar UI and release checks target the desktop app.
 - New installs start conservatively: Plan mode + read-only permissions.
 - Release assets are built from source by GitHub Actions and attached to GitHub Releases.
 - `npm run lint:review` mirrors the TypeScript rules that commonly surface in community review scans.

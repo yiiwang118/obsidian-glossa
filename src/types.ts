@@ -77,7 +77,7 @@ export interface ChatMessage {
 
 export interface ContextItem {
   id: string;
-  kind: 'file' | 'folder' | 'tag' | 'selection' | 'web' | 'clipboard' | 'recent' | 'dataview' | 'image';
+  kind: 'file' | 'folder' | 'tag' | 'selection' | 'web' | 'recent' | 'dataview' | 'image';
   label: string;
   detail?: string;
   source?: 'markdown' | 'pdf' | 'html' | 'glossa' | 'unknown';
