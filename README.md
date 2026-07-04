@@ -25,6 +25,7 @@ Glossa is not a cloud service. It runs locally as a desktop plugin. Your data go
 
 ## What's New
 
+- **2026-07-04 — 0.6.3 update notice polish.** The update prompt now prioritizes the in-app plugin page, with GitHub kept as a fallback.
 - **2026-07-04 — 0.6.2 release-readiness polish.** Tightened marketplace metadata, refreshed the README and changelog, removed review-scan noise from CSS/network/lint checks, and added stricter release checks.
 - **2026-07-03 — ⚡ Faster selection translation.** Select text and press Enter twice to translate; mixed-language Markdown now detects the natural-language source more carefully.
 - **2026-07-03 — 🧹 Cleaner selection card.** The selection preview stays compact, with the quick-translate hint moved into the composer placeholder.

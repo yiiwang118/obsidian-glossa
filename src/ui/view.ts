@@ -474,17 +474,17 @@ export class GlossaView extends ItemView {
     } else {
       el('p', {
         text: bi(
-          'A new GitHub release is available. It may take a little while to appear in Obsidian updates.',
-          'GitHub 已发布新版本，Obsidian 插件市场同步可能稍有延迟。',
+          'Open the in-app plugin page to update. If it has not synced yet, GitHub is available as a fallback.',
+          '打开 Obsidian 客户端内的插件页面更新。如果还没同步，再用 GitHub 兜底。',
         ),
         parent: body,
       });
     }
     const actions = el('div', { className: 'nc-update-popover-actions', parent: pop });
-    const release = el('button', { className: 'nc-update-action primary', text: 'GitHub Release', parent: actions, type: 'button' });
+    const market = el('button', { className: 'nc-update-action primary', text: bi('Update in Obsidian', '在 Obsidian 中更新'), parent: actions, type: 'button' });
+    market.onclick = () => { this.openObsidianPluginPage(info.obsidianUrl); };
+    const release = el('button', { className: 'nc-update-action', text: 'GitHub Release', parent: actions, type: 'button' });
     release.onclick = () => { window.open(info.releaseUrl); };
-    const market = el('button', { className: 'nc-update-action', text: 'Obsidian', parent: actions, type: 'button' });
-    market.onclick = () => { window.open(info.obsidianUrl); };
     const dismiss = el('button', { className: 'nc-update-action subtle', text: bi('Dismiss this version', '忽略此版本'), parent: actions, type: 'button' });
     dismiss.onclick = () => { this.plugin.dismissUpdate(info.latestVersion).catch(() => {}); };
 
@@ -506,6 +506,21 @@ export class GlossaView extends ItemView {
   private hideUpdatePopover() {
     this.updatePopoverEl?.remove();
     this.updatePopoverEl = null;
+  }
+
+  private openObsidianPluginPage(url: string) {
+    try {
+      window.open(url);
+      return;
+    } catch {
+      // Fall through to the internal settings pane below.
+    }
+    try {
+      (this.app as any).setting?.open?.();
+      (this.app as any).setting?.openTabById?.('community-plugins');
+    } catch {
+      quickNotice(bi('Open Settings → Community plugins and search Glossa.', '打开设置 → 第三方插件，搜索 Glossa。'), 5000);
+    }
   }
 
   private updateModeToggle() {

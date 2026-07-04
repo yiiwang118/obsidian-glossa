@@ -1,7 +1,7 @@
 {
   "id": "glossa",
   "name": "Glossa",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "minAppVersion": "1.12.3",
   "description": "Local-first AI sidebar with context chat, vault search, and approved agent tools.",
   "author": "yiiwang",

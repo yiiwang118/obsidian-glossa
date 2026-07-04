@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] — 2026-07-04
+
+Update notice polish.
+
+### Changed
+- Made the update popover's primary action open the Glossa page inside the Obsidian app via `obsidian://show-plugin?id=glossa`.
+- Kept GitHub Release as the secondary fallback for users whose in-app catalog has not synced yet.
+
 ## [0.6.2] — 2026-07-04
 
 Release-readiness polish for community directory review.

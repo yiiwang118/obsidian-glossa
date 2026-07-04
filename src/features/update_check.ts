@@ -2,7 +2,7 @@ import { requestUrl } from 'obsidian';
 import { compareSemver, normalizeVersion } from '../utils/version';
 
 const LATEST_RELEASE_URL = 'https://api.github.com/repos/yiiwang118/obsidian-glossa/releases/latest';
-const OBSIDIAN_PLUGIN_URL = 'https://obsidian.md/plugins?id=glossa';
+const OBSIDIAN_PLUGIN_URI = 'obsidian://show-plugin?id=glossa';
 export const GLOSSA_RELEASES_URL = 'https://github.com/yiiwang118/obsidian-glossa/releases';
 export const UPDATE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
@@ -47,7 +47,7 @@ export async function fetchLatestUpdate(currentVersion: string): Promise<UpdateI
     currentVersion: normalizeVersion(currentVersion),
     latestVersion,
     releaseUrl: release.html_url || `${GLOSSA_RELEASES_URL}/tag/${release.tag_name}`,
-    obsidianUrl: OBSIDIAN_PLUGIN_URL,
+    obsidianUrl: OBSIDIAN_PLUGIN_URI,
     releaseName: release.name || release.tag_name,
     body: release.body || '',
     notes: extractReleaseNotes(release.body || ''),
