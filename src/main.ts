@@ -14,7 +14,7 @@ import { setLanguage, bi } from './utils/i18n';
 import { loadShellEnv } from './utils/env';
 import { GLOSSA_RIBBON_SVG } from './ui/icons';
 import type { UpdateInfo } from './features/update_check';
-import { UPDATE_CHECK_INTERVAL_MS, fetchLatestUpdate } from './features/update_check';
+import { OBSIDIAN_PLUGIN_URI, UPDATE_CHECK_INTERVAL_MS, fetchLatestUpdate } from './features/update_check';
 import { compareSemver, normalizeVersion } from './utils/version';
 
 export default class GlossaPlugin extends Plugin {
@@ -320,7 +320,7 @@ export default class GlossaPlugin extends Plugin {
       currentVersion: normalizeVersion(this.manifest.version),
       latestVersion: latest,
       releaseUrl: this.settings.updateLatestReleaseUrl || `https://github.com/yiiwang118/obsidian-glossa/releases/tag/${latest}`,
-      obsidianUrl: 'https://obsidian.md/plugins?id=glossa',
+      obsidianUrl: OBSIDIAN_PLUGIN_URI,
       releaseName: latest,
       body: '',
       notes: [],

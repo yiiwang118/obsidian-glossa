@@ -2,7 +2,7 @@ import { requestUrl } from 'obsidian';
 import { compareSemver, normalizeVersion } from '../utils/version';
 
 const LATEST_RELEASE_URL = 'https://api.github.com/repos/yiiwang118/obsidian-glossa/releases/latest';
-const OBSIDIAN_PLUGIN_URI = 'obsidian://show-plugin?id=glossa';
+export const OBSIDIAN_PLUGIN_URI = 'obsidian://show-plugin?id=glossa';
 export const GLOSSA_RELEASES_URL = 'https://github.com/yiiwang118/obsidian-glossa/releases';
 export const UPDATE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
