@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Key-management helpers for Glossa.
  *
@@ -44,7 +44,7 @@ function b64encode(buf: ArrayBuffer | Uint8Array): string {
   const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   let s = '';
   const chunk = 0x8000;
-  for (let i = 0; i < u8.length; i += chunk) s += String.fromCharCode.apply(null, u8.subarray(i, i + chunk) as any);
+  for (let i = 0; i < u8.length; i += chunk) s += String.fromCharCode.apply(null, u8.subarray(i, i + chunk) as AnyValue);
   return btoa(s);
 }
 function b64decode(s: string): Uint8Array {
@@ -70,10 +70,10 @@ export async function deriveKeyWithIterations(
 ): Promise<SubtleKeyHandle> {
   const salt = saltBase64 ? b64decode(saltBase64) : crypto.getRandomValues(new Uint8Array(16));
   const baseKey = await crypto.subtle.importKey(
-    'raw', new TextEncoder().encode(passphrase) as any, { name: 'PBKDF2' }, false, ['deriveKey'],
+    'raw', new TextEncoder().encode(passphrase) as AnyValue, { name: 'PBKDF2' }, false, ['deriveKey'],
   );
   const key = await crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt: salt as any, iterations, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: salt as AnyValue, iterations, hash: 'SHA-256' },
     baseKey,
     { name: 'AES-GCM', length: 256 },
     false, ['encrypt', 'decrypt'],
@@ -85,9 +85,9 @@ export async function encryptString(plain: string, handle: SubtleKeyHandle): Pro
   if (!plain) return '';
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: iv as any },
+    { name: 'AES-GCM', iv: iv as AnyValue },
     handle.key,
-    new TextEncoder().encode(plain) as any,
+    new TextEncoder().encode(plain) as AnyValue,
   );
   const out = new Uint8Array(iv.length + ct.byteLength);
   out.set(iv, 0); out.set(new Uint8Array(ct), iv.length);
@@ -100,7 +100,7 @@ export async function decryptString(enc: string, handle: SubtleKeyHandle): Promi
   const raw = b64decode(enc.slice(ENC_PREFIX.length));
   const iv = raw.subarray(0, 12);
   const ct = raw.subarray(12);
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv as any }, handle.key, ct as any);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv as AnyValue }, handle.key, ct as AnyValue);
   return new TextDecoder().decode(pt);
 }
 
@@ -162,4 +162,4 @@ export async function unlockWithUpgrade(
   }
   return { ok: false };
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

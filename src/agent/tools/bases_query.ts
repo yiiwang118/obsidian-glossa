@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * bases_query — bridge to Obsidian Bases (1.9+ built-in).
  *
@@ -25,10 +25,10 @@ import { TFile, getAllTags, parseYaml } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
 interface BaseDef {
-  filters?: any;
-  properties?: any[];
-  views?: any[];
-  formulas?: any[];
+  filters?: AnyValue;
+  properties?: AnyValue[];
+  views?: AnyValue[];
+  formulas?: AnyValue[];
 }
 
 interface FilterAtom {
@@ -97,7 +97,7 @@ function parseExpr(line: string): FilterExpr {
   return { type: 'atom', atom: { kind: 'true' } };
 }
 
-function evalExpr(expr: FilterExpr, file: TFile, cache: any): boolean {
+function evalExpr(expr: FilterExpr, file: TFile, cache: AnyValue): boolean {
   if (expr.type === 'and') return (expr.children ?? []).every(c => evalExpr(c, file, cache));
   if (expr.type === 'or') return (expr.children ?? []).some(c => evalExpr(c, file, cache));
   const atom = expr.atom;
@@ -112,7 +112,7 @@ function evalExpr(expr: FilterExpr, file: TFile, cache: any): boolean {
   // eq/neq dispatch — file.* accessors vs frontmatter keys.
   if (atom.kind === 'eq' || atom.kind === 'neq') {
     const key = atom.key;
-    let actual: any;
+    let actual: AnyValue;
     if (key === 'file.name')    actual = file.basename;
     else if (key === 'file.path') actual = file.path;
     else if (key === 'file.folder') actual = file.parent?.path ?? '';
@@ -129,15 +129,15 @@ function evalExpr(expr: FilterExpr, file: TFile, cache: any): boolean {
  *       - file.hasTag("project")
  *       - status != "done"
  *  (or `or:`, or a single string). */
-function buildFilter(yamlFilters: any): FilterExpr {
+function buildFilter(yamlFilters: AnyValue): FilterExpr {
   if (!yamlFilters) return { type: 'atom', atom: { kind: 'true' } };
   if (typeof yamlFilters === 'string') return parseExpr(yamlFilters);
   if (Array.isArray(yamlFilters)) {
     return { type: 'and', children: yamlFilters.map(buildFilter) };
   }
   if (typeof yamlFilters === 'object') {
-    if (yamlFilters.and) return { type: 'and', children: (yamlFilters.and as any[]).map(buildFilter) };
-    if (yamlFilters.or)  return { type: 'or',  children: (yamlFilters.or  as any[]).map(buildFilter) };
+    if (yamlFilters.and) return { type: 'and', children: (yamlFilters.and as AnyValue[]).map(buildFilter) };
+    if (yamlFilters.or)  return { type: 'or',  children: (yamlFilters.or  as AnyValue[]).map(buildFilter) };
   }
   return { type: 'atom', atom: { kind: 'true' } };
 }
@@ -178,14 +178,14 @@ export const basesQuery: ToolImpl = buildTool({
     if (ctx?.signal?.aborted) return 'Error: cancelled before start.';
     let path: string;
     try { path = assertVaultPath(args.base_path, 'base_path'); }
-    catch (e: any) { return `Error: ${e.message}`; }
+    catch (e) { return `Error: ${e.message}`; }
     if (!path.endsWith('.base')) return `Error: ${path} is not a .base file.`;
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;
     const raw = await app.vault.read(f);
     let def: BaseDef;
     try { def = parseYaml(raw) as BaseDef; }
-    catch (e: any) { return `Error: invalid YAML in ${path}: ${e?.message ?? e}`; }
+    catch (e) { return `Error: invalid YAML in ${path}: ${e?.message ?? e}`; }
 
     const filterExpr = buildFilter(def.filters);
     const max = Math.max(1, Math.min(5000, Number(args.max_results) || 100));
@@ -193,11 +193,11 @@ export const basesQuery: ToolImpl = buildTool({
     // Pick view if specified.
     let propKeys: string[] = [];
     if (Array.isArray(def.properties)) {
-      propKeys = def.properties.map((p: any) => typeof p === 'string' ? p : (p?.name ?? p?.key ?? '')).filter(Boolean);
+      propKeys = def.properties.map((p: AnyValue) => typeof p === 'string' ? p : (p?.name ?? p?.key ?? '')).filter(Boolean);
     }
     if (args.view && Array.isArray(def.views)) {
-      const v = def.views.find((vv: any) => vv?.name === args.view);
-      if (v?.properties) propKeys = (v.properties as any[]).map((p: any) => typeof p === 'string' ? p : (p?.name ?? '')).filter(Boolean);
+      const v = def.views.find((vv: AnyValue) => vv?.name === args.view);
+      if (v?.properties) propKeys = (v.properties as AnyValue[]).map((p: AnyValue) => typeof p === 'string' ? p : (p?.name ?? '')).filter(Boolean);
     }
     if (propKeys.length === 0) propKeys = ['file.name'];
 
@@ -229,4 +229,4 @@ export const basesQuery: ToolImpl = buildTool({
     return `Base: ${path}${args.view ? `  (view: ${args.view})` : ''}\n${shown.length} row${shown.length === 1 ? '' : 's'}:\n\n${lines.join('\n')}`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

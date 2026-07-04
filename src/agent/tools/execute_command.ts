@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * execute_command — dispatch any Obsidian command palette ID.
  *
@@ -76,16 +76,16 @@ export const executeCommand: ToolImpl = buildTool({
     if (!id) return 'Error: command_id is required.';
     const hardDeny = hardDenyReason(id);
     if (hardDeny) return `Error: ${hardDeny}`;
-    const cmd = (app as any).commands?.commands?.[id];
+    const cmd = (app as AnyValue).commands?.commands?.[id];
     if (!cmd) return `Error: command not found: ${id}. Use list_commands to discover valid IDs.`;
     try {
-      const ok = await (app as any).commands.executeCommandById(id);
+      const ok = await (app as AnyValue).commands.executeCommandById(id);
       // Some commands intentionally no-op (e.g. wrong context). Report what happened.
       if (ok === false) return `Command "${id}" was registered but its checkCallback declined (likely wrong context).`;
       return `Dispatched: ${id}${cmd.name ? `  (${cmd.name})` : ''}`;
-    } catch (e: any) {
+    } catch (e) {
       return `Error dispatching ${id}: ${e?.message ?? e}`;
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

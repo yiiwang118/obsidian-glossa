@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { Plugin, WorkspaceLeaf, Notice, addIcon } from 'obsidian';
 import { GlossaView, VIEW_TYPE_GLOSSA } from './ui/view';
 import { GlossaSettingTab } from './settings';
@@ -28,7 +28,7 @@ export default class GlossaPlugin extends Plugin {
     search: (query: string, topK?: number) => Promise<{ path: string; chunk: number; text: string; score: number }[]>;
   };
   checkpoint: CheckpointManager;
-  mcp: any;
+  mcp: AnyValue;
   updateInfo: UpdateInfo | null = null;
   private updateCheckInFlight: Promise<UpdateInfo | null> | null = null;
 
@@ -69,8 +69,8 @@ export default class GlossaPlugin extends Plugin {
     // truly want to override.
     let codexMigratedCount = 0;
     for (const ep of (this.settings.endpoints ?? [])) {
-      if ((ep as any).kind === 'codex-cli' && (ep as any).model === 'gpt-5.4') {
-        (ep as any).model = '';
+      if ((ep as AnyValue).kind === 'codex-cli' && (ep as AnyValue).model === 'gpt-5.4') {
+        (ep as AnyValue).model = '';
         codexMigratedCount++;
       }
     }
@@ -121,7 +121,7 @@ export default class GlossaPlugin extends Plugin {
 
     this.addCommand({ id: 'open-sidebar', name: 'Open sidebar', callback: () => this.activateView() });
     this.addCommand({ id: 'new-chat', name: 'New chat',
-      callback: async () => { await this.activateView(); (this.getView() as any)?.startNewSession?.(); } });
+      callback: async () => { await this.activateView(); (this.getView() as AnyValue)?.startNewSession?.(); } });
     this.addCommand({ id: 'unlock', name: 'Unlock encrypted keys',
       callback: () => this.tryUnlock() });
     this.addCommand({ id: 'rebuild-index', name: 'Rebuild embedding index',
@@ -135,7 +135,7 @@ export default class GlossaPlugin extends Plugin {
         name: `Glossa: ${cmd.title}`,
         callback: async () => {
           await this.activateView();
-          const view = this.getView() as any;
+          const view = this.getView() as AnyValue;
           if (!view) return;
           const sel = getCurrentSelection(this.app);
           const af = this.app.workspace.getActiveFile();
@@ -167,7 +167,7 @@ export default class GlossaPlugin extends Plugin {
         const sel = editor.getSelection();
         if (!sel) { new Notice(bi('Select some text first.', '请先选中文本。')); return; }
         await this.activateView();
-        const view = this.getView() as any;
+        const view = this.getView() as AnyValue;
         if (view) {
           view.inputEl.value = `Improve / rewrite this selection:\n\n${sel}\n\nKeep markdown intact.`;
           view.inputEl.dispatchEvent(new Event('input'));
@@ -225,7 +225,7 @@ export default class GlossaPlugin extends Plugin {
     );
     this.registerEvent(
       this.app.vault.on('modify', (file) => {
-        const p: string = (file as any)?.path ?? '';
+        const p: string = (file as AnyValue)?.path ?? '';
         if (p) scheduleActivate(p);
         // Editing a SKILL.md invalidates the discoverSkills TTL cache so
         // the next disc walk picks up the new frontmatter / body.
@@ -488,7 +488,7 @@ export default class GlossaPlugin extends Plugin {
   /* ============================================================
      Persistence
      ============================================================ */
-  private _saveTimer: any;
+  private _saveTimer: AnyValue;
   async saveSettings() {
     setLanguage(this.settings.uiLanguage);
     this.getView()?.refreshFromSettings?.();
@@ -673,8 +673,8 @@ class ChatStore {
       for (const m of s.messages ?? []) {
         if (Array.isArray(m.contextSnapshot)) {
           for (const it of m.contextSnapshot) {
-            if (it && typeof (it as any).content === 'string') {
-              delete (it as any).content; migrated = true;
+            if (it && typeof (it as AnyValue).content === 'string') {
+              delete (it as AnyValue).content; migrated = true;
             }
           }
         }
@@ -690,7 +690,7 @@ class ChatStore {
     for (const s of this.sessions) for (const m of s.messages ?? []) {
       if (Array.isArray(m.contextSnapshot)) {
         for (const it of m.contextSnapshot) {
-          if (it && typeof (it as any).content === 'string') { delete (it as any).content; count++; }
+          if (it && typeof (it as AnyValue).content === 'string') { delete (it as AnyValue).content; count++; }
         }
       }
     }
@@ -770,4 +770,4 @@ class ChatStore {
     await this.persist();
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

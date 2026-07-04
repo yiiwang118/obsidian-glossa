@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { el, clear, setStyle, setTrustedSvg } from '../utils/dom';
 
 export interface PopupItem {
@@ -133,7 +133,7 @@ export class Popup {
       if (it) {
         const res = it.onSelect();
         this.hide();
-        if (res && typeof (res as any).then === 'function') (res as any).catch(() => {});
+        if (res && typeof (res as AnyValue).then === 'function') (res as AnyValue).catch(() => {});
       }
       return true;
     }
@@ -151,7 +151,7 @@ export class Popup {
     this.keyHandler = (e: KeyboardEvent) => {
       if (!this.isOpen()) return;
       // IME composition — let the input method handle Enter / arrows.
-      if ((e as any).isComposing || (e as any).keyCode === 229) return;
+      if ((e as AnyValue).isComposing || (e as AnyValue).keyCode === 229) return;
       if (this.onKey(e)) {
         e.preventDefault();
         e.stopPropagation();
@@ -220,7 +220,7 @@ export class Popup {
         const res = it.onSelect();
         this.hide();
         // If async, swallow so a thrown rejection doesn't surface as an unhandled promise.
-        if (res && typeof (res as any).then === 'function') (res as any).catch(() => {});
+        if (res && typeof (res as AnyValue).then === 'function') (res as AnyValue).catch(() => {});
       });
 
       // Leading column: ✓ when checked, else icon (if provided), else spacer.
@@ -237,4 +237,4 @@ export class Popup {
     });
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

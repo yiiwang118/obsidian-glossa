@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * `codex app-server --listen stdio://` integration.
  *
@@ -44,7 +44,7 @@ import type { ChatRequest, ChatChunk } from './types';
 
 /** A pending JSON-RPC request awaiting its response. */
 interface Pending {
-  resolve: (result: any) => void;
+  resolve: (result: AnyValue) => void;
   reject: (err: Error) => void;
 }
 
@@ -54,7 +54,7 @@ type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 interface AppServerOptions {
   binaryPath: string;
   cwd: string;
-  env: NodeJS.ProcessEnv;
+  env: ProcessEnvMap;
   configOverrides: string[];     // `key=value` pairs passed as repeated `-c`
   debug: boolean;
   autoApproveServerApprovals: boolean;
@@ -73,7 +73,7 @@ class AppServerClient {
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private buf = '';
-  private notifyHandler: ((method: string, params: any) => void) | null = null;
+  private notifyHandler: ((method: string, params: AnyValue) => void) | null = null;
   private errorHandler: ((err: Error) => void) | null = null;
   private stderrTail = '';
   private debug: boolean;
@@ -118,7 +118,7 @@ class AppServerClient {
       const line = this.buf.slice(0, i).trim();
       this.buf = this.buf.slice(i + 1);
       if (!line) continue;
-      let msg: any;
+      let msg: AnyValue;
       try { msg = JSON.parse(line); }
       catch (e) {
         if (this.debug) console.warn('[Glossa] non-JSON app-server line:', line.slice(0, 200));
@@ -152,7 +152,7 @@ class AppServerClient {
   }
 
   /** Provide a reasonable default response for server-initiated approval requests. */
-  private autoAck(method: string): any {
+  private autoAck(method: string): AnyValue {
     if (/approval|approveGuardian/i.test(method)) {
       return this.autoApproveServerApprovals
         ? { decision: 'approve' }
@@ -161,11 +161,11 @@ class AppServerClient {
     return null;
   }
 
-  setNotifyHandler(fn: (method: string, params: any) => void) { this.notifyHandler = fn; }
+  setNotifyHandler(fn: (method: string, params: AnyValue) => void) { this.notifyHandler = fn; }
   setErrorHandler(fn: (err: Error) => void) { this.errorHandler = fn; }
 
   /** Send a request, await response. */
-  request<T = any>(method: string, params: any, timeoutMs = 120_000): Promise<T> {
+  request<T = AnyValue>(method: string, params: AnyValue, timeoutMs = 120_000): Promise<T> {
     if (this.closed) return Promise.reject(new Error('app-server closed'));
     return new Promise<T>((resolve, reject) => {
       const id = this.nextId++;
@@ -183,20 +183,20 @@ class AppServerClient {
         reject: (e) => { window.clearTimeout(timer); orig.reject(e); },
       });
       try { this.send({ jsonrpc: '2.0', id, method, params }); }
-      catch (e: any) {
+      catch (e) {
         window.clearTimeout(timer);
         this.pending.delete(id);
-        reject(e);
+        reject(e instanceof Error ? e : new Error(String(e)));
       }
     });
   }
 
   /** Send a notification (no id, no response). */
-  notify(method: string, params: any) {
+  notify(method: string, params: AnyValue) {
     this.send({ jsonrpc: '2.0', method, params });
   }
 
-  private send(obj: any) {
+  private send(obj: AnyValue) {
     const line = JSON.stringify(obj) + '\n';
     if (!this.proc.stdin.writable) throw new Error('app-server stdin not writable');
     this.proc.stdin.write(line);
@@ -272,7 +272,7 @@ export async function* streamViaAppServer(
 
   // Attached images: write to tmp, build separate UserInput items
   const tempImageFiles: string[] = [];
-  const imageInputs: any[] = [];
+  const imageInputs: AnyValue[] = [];
   for (const img of (req.attachedImages ?? [])) {
     try {
       const m = img.dataUri.match(/^data:([^;]+);base64,(.+)$/);
@@ -484,7 +484,7 @@ export async function* streamViaAppServer(
     }
     yield { type: 'final', text: '', usage: capturedUsage ?? undefined };
 
-  } catch (e: any) {
+  } catch (e) {
     if (!state.aborted) yield { type: 'error', error: `codex app-server: ${e.message ?? e}` };
     else yield { type: 'final', text: '' };
   } finally {
@@ -498,7 +498,7 @@ export async function* streamViaAppServer(
  *  normalize to Glossa's TokenUsage fields. Used by both the stream-json
  *  CLI path (codex_cli.ts) and the app-server protocol (this file) so they
  *  stay in lockstep when codex renames a field. */
-function extractCodexUsage(u: any): { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | null {
+function extractCodexUsage(u: AnyValue): { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | null {
   if (!u || typeof u !== 'object') return null;
   return {
     input: typeof u.input_tokens === 'number' ? u.input_tokens
@@ -516,7 +516,7 @@ function extractCodexUsage(u: any): { input?: number; output?: number; cacheRead
 }
 
 /** Translate an app-server `item.*` event into a Glossa tool_event chunk. */
-function mapItemToEvent(id: string, item: any, status: 'running' | 'success' | 'error'): ChatChunk | null {
+function mapItemToEvent(id: string, item: AnyValue, status: 'running' | 'success' | 'error'): ChatChunk | null {
   const itemType: string = item.type ?? 'unknown';
   if (itemType === 'command_execution') {
     return {
@@ -556,4 +556,4 @@ function mapItemToEvent(id: string, item: any, status: 'running' | 'success' | '
   }
   return null;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, vaultFolderOf, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects, parseHttpUrl } from '../../utils/safe_web';
@@ -85,7 +85,7 @@ export const downloadFile: ToolImpl = buildTool({
   run: async (app, args, ctx) => {
     const rawUrl = typeof args.url === 'string' ? args.url.trim() : '';
     try { parseHttpUrl(rawUrl); }
-    catch (e: any) { return `Error: ${e.message}`; }
+    catch (e) { return `Error: ${e.message}`; }
     const settings = readWebSettings(app) as GlossaSettings;
     if (!settings.webAllowAutoDownload && args.confirm_intent !== true) {
       return 'Error: downloads require explicit user intent. Ask the user or call download_file with confirm_intent=true only when the user asked to download/save.';
@@ -150,7 +150,7 @@ export const downloadFile: ToolImpl = buildTool({
         inspection,
         nextInspectionHint(target, ext),
       ].filter(Boolean).join('\n');
-    } catch (e: any) {
+    } catch (e) {
       if (e?.name === 'AbortError') {
         if (ctx?.signal?.aborted) return 'Error: cancelled by user.';
         return 'Error: timeout after 60s';
@@ -187,7 +187,7 @@ async function inspectPdfDownload(buffer: ArrayBuffer, signal?: AbortSignal): Pr
       formatPdfDiagnosticMarkdown(res),
       firstLines ? `\nFirst-page text:\n${firstLines}` : '',
     ].filter(Boolean).join('\n');
-  } catch (e: any) {
+  } catch (e) {
     return `PDF inspection: failed (${e?.message ?? e})`;
   }
 }
@@ -238,4 +238,4 @@ function parseResultFields(result: string): Record<string, string> {
   }
   return out;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

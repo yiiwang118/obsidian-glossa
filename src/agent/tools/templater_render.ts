@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * templater_render — bridge to the Templater plugin.
  *
@@ -17,7 +17,7 @@
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
-function getTemplater(app: any): any | null {
+function getTemplater(app: AnyValue): AnyValue | null {
   return app?.plugins?.plugins?.['templater-obsidian']?.templater ?? null;
 }
 
@@ -57,14 +57,14 @@ export const templaterRender: ToolImpl = buildTool({
     const mode = args.mode as 'to_file' | 'to_string';
     let templatePath: string;
     try { templatePath = assertVaultPath(args.template_path, 'template_path'); }
-    catch (e: any) { return `Error: ${e.message}`; }
+    catch (e) { return `Error: ${e.message}`; }
     const tplFile = app.vault.getAbstractFileByPath(templatePath);
     if (!(tplFile instanceof TFile)) return `Error: template not found: ${templatePath}`;
 
     if (mode === 'to_file') {
       let targetPath: string;
       try { targetPath = assertVaultPath(args.target_path ?? '', 'target_path'); }
-      catch (e: any) { return `Error: ${e.message}`; }
+      catch (e) { return `Error: ${e.message}`; }
       if (app.vault.getAbstractFileByPath(targetPath)) return `Error: target already exists: ${targetPath}`;
       try {
         // Use Templater\'s "create new note from template" path so all tp.* accessors
@@ -84,7 +84,7 @@ export const templaterRender: ToolImpl = buildTool({
         if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
         await app.vault.create(targetPath, rendered);
         return `Rendered ${templatePath} → ${targetPath} (fallback path).`;
-      } catch (e: any) {
+      } catch (e) {
         return `Templater error: ${e?.message ?? e}`;
       }
     }
@@ -96,9 +96,9 @@ export const templaterRender: ToolImpl = buildTool({
       const parser = t.parser ?? t;
       const rendered = await (parser.parseTemplate?.(raw, tplFile) ?? raw);
       return rendered;
-    } catch (e: any) {
+    } catch (e) {
       return `Templater error: ${e?.message ?? e}`;
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

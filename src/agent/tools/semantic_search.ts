@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { buildTool, type ToolImpl } from './_shared';
 
 export const semanticSearch: ToolImpl = buildTool({
@@ -23,17 +23,17 @@ export const semanticSearch: ToolImpl = buildTool({
     if (ctx?.signal?.aborted) return 'Error: cancelled before start.';
     // Look up by current id first, fall back to legacy id so the tool still
      // works during the rename transition (or if the user has both installed).
-    const plugin = (app as any).plugins?.plugins?.['glossa']
-               ?? (app as any).plugins?.plugins?.['note-codex']
-               ?? (app as any).plugins?.getPlugin?.('glossa')
-               ?? (app as any).plugins?.getPlugin?.('note-codex');
+    const plugin = (app as AnyValue).plugins?.plugins?.['glossa']
+               ?? (app as AnyValue).plugins?.plugins?.['note-codex']
+               ?? (app as AnyValue).plugins?.getPlugin?.('glossa')
+               ?? (app as AnyValue).plugins?.getPlugin?.('note-codex');
     if (!plugin?.embeddingIndex) return 'Error: embedding index not initialized.';
     if (plugin.embeddingIndex.size() === 0) return 'Error: embedding index empty. Run "Rebuild embedding index" from settings first.';
     try {
       const hits = await plugin.embeddingIndex.search(query, top_k);
       if (hits.length === 0) return 'No relevant chunks found.';
-      return hits.map((h: any) => `[score=${h.score.toFixed(3)}] ${h.path}#chunk${h.chunk}\n${h.text.slice(0, 400)}`).join('\n\n---\n\n');
-    } catch (e: any) { return `Error: ${e.message}`; }
+      return hits.map((h: AnyValue) => `[score=${h.score.toFixed(3)}] ${h.path}#chunk${h.chunk}\n${h.text.slice(0, 400)}`).join('\n\n---\n\n');
+    } catch (e) { return `Error: ${e.message}`; }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

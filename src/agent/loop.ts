@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App } from 'obsidian';
 import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, isReadOnlyTool, normalizeToolResult, type ToolImpl, type ToolRunResult } from './tools';
 import { askApproval, type ApprovalResult } from './approval';
@@ -31,7 +31,7 @@ function toolsForPermission(level: PermissionLevel): ToolSpec[] {
  *  objects with the same content but different key order produce the same
  *  string. Used for repetition-detection signatures so the model can't bypass
  *  the 3-strike refusal by shuffling keys. */
-function stableStringify(v: any): string {
+function stableStringify(v: AnyValue): string {
   if (v === null || typeof v !== 'object') return JSON.stringify(v);
   if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
   const keys = Object.keys(v).sort();
@@ -77,7 +77,7 @@ export interface AgentLoopOptions {
   mcp?: McpHub;
   /** Approval handler. If not provided, falls back to the floating Modal. The view
    *  passes one that renders an inline ✓/✗ card next to the current assistant message. */
-  approver?: (tool: ToolImpl, args: any) => Promise<ApprovalResult>;
+  approver?: (tool: ToolImpl, args: AnyValue) => Promise<ApprovalResult>;
 
   /** Server reported a context overflow (HTTP 413 / context_length_exceeded). The
    *  caller is expected to compact the conversation and return a fresh message array
@@ -277,7 +277,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     let assistantText = '';
     let assistantReasoning = '';
     let contextOverflowSeen = false;
-    const toolCalls: { id: string; name: string; args: any }[] = [];
+    const toolCalls: { id: string; name: string; args: AnyValue }[] = [];
     const passthroughCardsById = new Map<string, ToolEvent>();
 
     let aborted = false;
@@ -335,7 +335,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           return;
         }
       }
-    } catch (e: any) {
+    } catch (e) {
       if (e.name === 'AbortError') { aborted = true; }
       else { opts.onError(e.message ?? String(e)); opts.onFinal(totalUsage); return; }
     }
@@ -413,11 +413,11 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
            Approvals can't run in parallel (they're modal). Approval order matches
            the order the model issued the calls so the user sees a predictable flow. */
     interface Prepared {
-      call: { id: string; name: string; args: any };
+      call: { id: string; name: string; args: AnyValue };
       ev: ToolEvent;
       tool?: ToolImpl;
-      mcpEntry?: { client: any; originalName: string } | null;
-      effectiveArgs: any;
+      mcpEntry?: { client: AnyValue; originalName: string } | null;
+      effectiveArgs: AnyValue;
       rewriteToWriteNote: boolean;
       /** If set, the call is already resolved (denied, unknown tool, etc.) — skip execution. */
       resolved?: { status: 'error' | 'denied'; result: string };
@@ -435,7 +435,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       // `backfillObservableInput` pattern: e.g. `expandPath()` on file_path
       // so a deny-rule of `path:Notes/foo.md` can't be bypassed by passing
       // `~/Notes/foo.md` or `./Notes/foo.md`.
-      let observableArgs: any = call.args;
+      let observableArgs: AnyValue = call.args;
       if (tool?.backfillObservableInput && call.args && typeof call.args === 'object') {
         try {
           observableArgs = { ...call.args };
@@ -526,7 +526,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           }
           forceApproval = perm.behavior === 'ask';
           toolPermissionAllows = perm.behavior === 'allow';
-        } catch (e: any) {
+        } catch (e) {
           prepared.push({ call, ev, tool, mcpEntry, effectiveArgs, rewriteToWriteNote: false,
             resolved: { status: 'error', result: `Permission check failed for ${call.name}: ${e?.message ?? e}` } });
           continue;
@@ -590,7 +590,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           spec: { name: call.name, description: 'MCP tool', parameters: {} },
           run: async () => '',
         } as ToolImpl);
-        const askFn = opts.approver ?? ((t: ToolImpl, a: any) => askApproval(opts.app, t, a));
+        const askFn = opts.approver ?? ((t: ToolImpl, a: AnyValue) => askApproval(opts.app, t, a));
         const res = await askFn(previewTool, call.args);
         if (!res.ok) {
           opts.onPermissionDecision?.({
@@ -775,16 +775,16 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         }
         ev.status = 'success';
         ev.result = norm.text;                        // UI gets the full text
-        (ev as any)._modelBoundResult = modelBoundText; // model gets preview
+        (ev as AnyValue)._modelBoundResult = modelBoundText; // model gets preview
         ev.contentBlocks = norm.contentBlocks;
-      } catch (e: any) {
+      } catch (e) {
         ev.status = 'error'; ev.result = e.message ?? String(e);
       }
       ev.endedAt = Date.now();
       opts.onToolEnd(ev);
       // Prefer the redacted (size-capped) text for the model when present;
       // fall back to the full result otherwise.
-      const modelBound = (ev as any)._modelBoundResult ?? String(ev.result ?? '');
+      const modelBound = (ev as AnyValue)._modelBoundResult ?? String(ev.result ?? '');
       messages.push({
         role: 'tool',
         toolCallId: call.id,
@@ -811,4 +811,4 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
   opts.onError(`Max steps (${opts.maxSteps}) reached without final answer.`);
   opts.onFinal(totalUsage);
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

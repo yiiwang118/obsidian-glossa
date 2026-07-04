@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { FileView, TFile } from 'obsidian';
 import type GlossaPlugin from '../main';
 import { el, clear, setStyle } from '../utils/dom';
@@ -169,7 +169,7 @@ export class CitationHoverController {
 
   private pdfContextForTarget(target: HTMLElement): { file: TFile; root: HTMLElement } | null {
     const directRoot = target.closest(PDF_ROOT_SELECTOR);
-    const leaves: any[] = [];
+    const leaves: AnyValue[] = [];
     this.plugin.app.workspace.iterateAllLeaves(leaf => leaves.push(leaf));
     for (const leaf of leaves) {
       const view = leaf?.view;
@@ -358,7 +358,7 @@ function cleanInlineText(text: string): string {
 }
 
 function textAroundPoint(x: number, y: number): string {
-  const doc: any = activeDocument;
+  const doc: AnyValue = activeDocument;
   let node: Node | null = null;
   let offset = 0;
   const range = typeof doc.caretRangeFromPoint === 'function' ? doc.caretRangeFromPoint(x, y) : null;
@@ -548,4 +548,4 @@ function isHTMLElement(value: unknown): value is HTMLElement {
   const el = value as Partial<HTMLElement> | null;
   return !!el && typeof el.closest === 'function' && typeof el.getBoundingClientRect === 'function';
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

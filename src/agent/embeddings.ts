@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile, Notice, requestUrl } from 'obsidian';
 import type GlossaPlugin from '../main';
 import type { Endpoint } from '../types';
@@ -210,7 +210,7 @@ export class EmbeddingIndex {
         const slice = pieces.slice(b, b + batchSize);
         let vecs: number[][];
         try { vecs = await embedBatch(ep, embeddingModel, slice, this.plugin.settings.globalProxy); }
-        catch (e: any) {
+        catch (e) {
           new Notice(`Embedding failed: ${e.message}. Pausing index build.`);
           await this.persist();
           throw e;
@@ -364,7 +364,7 @@ async function embedBatch(ep: Endpoint, model: string, inputs: string[], _proxy?
     throw new Error('Embedding endpoint must be OpenAI-style. Anthropic has no public embeddings API; pick a different endpoint in Settings → Semantic search.');
   }
   const url = `${ep.baseUrl.replace(/\/$/, '')}/embeddings`;
-  const headers: any = {
+  const headers: AnyValue = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${ep.apiKey}`,
     ...(ep.headers ?? {}),
@@ -374,6 +374,6 @@ async function embedBatch(ep: Endpoint, model: string, inputs: string[], _proxy?
   if (r.status >= 400) throw new Error(`Embedding HTTP ${r.status}: ${r.text.slice(0, 200)}`);
   const data = r.json?.data;
   if (!Array.isArray(data)) throw new Error(`Embedding response malformed: missing data[]`);
-  return data.map((d: any) => d.embedding);
+  return data.map((d: AnyValue) => d.embedding);
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

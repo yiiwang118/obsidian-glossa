@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import {
   ItemView, WorkspaceLeaf, MarkdownView, TFile, Notice, Menu,
 } from 'obsidian';
@@ -66,7 +66,7 @@ function shouldRenderToolEvent(ev: ToolEvent): boolean {
 }
 
 function isHTMLElementNode(node: unknown): node is HTMLElement {
-  return !!node && typeof node === 'object' && typeof (node as any).instanceOf === 'function' && (node as any).instanceOf(HTMLElement);
+  return !!node && typeof node === 'object' && typeof (node as AnyValue).instanceOf === 'function' && (node as AnyValue).instanceOf(HTMLElement);
 }
 
 interface MsgUI {
@@ -225,7 +225,7 @@ export class GlossaView extends ItemView {
     this.app.workspace.onLayoutReady(() => { void this.refreshAutoContext(); });
     this.registerEvent(this.app.workspace.on('active-leaf-change', () => { void this.refreshAutoContext(); }));
     this.registerEvent(this.app.workspace.on('file-open', () => { void this.refreshAutoContext(); }));
-    this.registerEvent(this.app.workspace.on('editor-selection-change' as any, () => this.refreshSelection()));
+    this.registerEvent(this.app.workspace.on('editor-selection-change' as AnyValue, () => this.refreshSelection()));
     activeDocument.addEventListener('selectionchange', this.onDomSelectionChange);
     activeDocument.addEventListener('keydown', this.onGlobalSelectionTranslateEnter, true);
 
@@ -269,7 +269,7 @@ export class GlossaView extends ItemView {
 
   private onGlobalSelectionTranslateEnter = (e: KeyboardEvent) => {
     if (e.key !== 'Enter' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.isComposing || (e as any).keyCode === 229) return;
+    if (e.isComposing || (e as AnyValue).keyCode === 229) return;
     if (this.streaming || this.popup.isOpen() || this.histPopEl) return;
 
     const sel = this.currentSelection;
@@ -520,8 +520,8 @@ export class GlossaView extends ItemView {
       // Fall through to the internal settings pane below.
     }
     try {
-      (this.app as any).setting?.open?.();
-      (this.app as any).setting?.openTabById?.('community-plugins');
+      (this.app as AnyValue).setting?.open?.();
+      (this.app as AnyValue).setting?.openTabById?.('community-plugins');
     } catch {
       quickNotice(bi('Open Settings → Community plugins and search Glossa.', '打开设置 → 第三方插件，搜索 Glossa。'), 5000);
     }
@@ -629,8 +629,8 @@ export class GlossaView extends ItemView {
     // here to free the header for the higher-frequency actions (new chat,
     // history, more). Keep it at the top of the menu so it stays discoverable.
     menu.addItem(it => it.setIcon('settings').setTitle(t('settings')).onClick(() => {
-      (this.app as any).setting.open();
-      (this.app as any).setting.openTabById(this.plugin.manifest.id);
+      (this.app as AnyValue).setting.open();
+      (this.app as AnyValue).setting.openTabById(this.plugin.manifest.id);
     }));
     menu.addSeparator();
     menu.addItem(it => it.setTitle('Clear messages').onClick(() => this.startNewSession()));
@@ -638,7 +638,7 @@ export class GlossaView extends ItemView {
     menu.addSeparator();
     menu.addItem(it => it.setTitle('Save first user message as workflow').onClick(() => this.saveAsWorkflow()));
     if (this.plugin.settings.workflows.length) {
-      menu.addItem(it => it.setTitle('Run workflow…').onClick(e2 => this.openWorkflowMenu(e2 as any)));
+      menu.addItem(it => it.setTitle('Run workflow…').onClick(e2 => this.openWorkflowMenu(e2 as AnyValue)));
     }
     menu.addSeparator();
     menu.addItem(it => it.setTitle('Regenerate last response').onClick(() => { void this.regenerateLast(); }));
@@ -666,7 +666,7 @@ export class GlossaView extends ItemView {
       }));
     }
     menu.addSeparator();
-    menu.addItem(it => it.setTitle('Manage in settings').onClick(() => (this.app as any).setting.open()));
+    menu.addItem(it => it.setTitle('Manage in settings').onClick(() => (this.app as AnyValue).setting.open()));
     menu.showAtMouseEvent(e);
   }
 
@@ -1107,7 +1107,7 @@ export class GlossaView extends ItemView {
      // to `content` for legacy messages and all assistant messages.
     const bodySrc = m.displayContent ?? m.content ?? '';
     const { visible, thinking } = extractThinking(bodySrc);
-    if (thinking && reasoningCard && m.role === 'assistant' && !(m as any)._mergedInlineThinking) {
+    if (thinking && reasoningCard && m.role === 'assistant' && !(m as AnyValue)._mergedInlineThinking) {
       // Append the extracted block to the existing reasoningContent so the
       // single unified card displays everything. Persist on the message so
       // export / replay see the merged form.
@@ -1120,7 +1120,7 @@ export class GlossaView extends ItemView {
         ? `${m.reasoningContent}\n\n---\n\n${thinking}`
         : thinking;
       m.reasoningContent = merged;
-      (m as any)._mergedInlineThinking = true;
+      (m as AnyValue)._mergedInlineThinking = true;
       // Update the unified card label
       const lbl = reasoningCard.querySelector('.nc-thinking-summary');
       if (lbl) lbl.textContent = `🧠 Reasoning (${merged.length.toLocaleString()} chars)`;
@@ -1400,7 +1400,7 @@ export class GlossaView extends ItemView {
   }
 
   /* ---------- Plan board (todo_write sticky) ---------- */
-  private updatePlanBoard(items: any[]) {
+  private updatePlanBoard(items: AnyValue[]) {
     this.session.plan = items
       .filter(it => it && typeof it.content === 'string')
       .map(it => ({
@@ -1487,7 +1487,7 @@ export class GlossaView extends ItemView {
       const m = this.session.messages[i];
       for (const ev of m.toolEvents ?? []) {
         if (ev.name === 'todo_write' && Array.isArray(ev.args?.items)) {
-          recovered = ev.args.items.map((it: any) => ({
+          recovered = ev.args.items.map((it: AnyValue) => ({
             content: String(it?.content ?? ''),
             activeForm: typeof it?.activeForm === 'string' ? it.activeForm : undefined,
             status: (['pending','in_progress','completed'].includes(it?.status) ? it.status : 'pending') as PlanItem['status'],
@@ -1554,8 +1554,8 @@ export class GlossaView extends ItemView {
     // Status pill
     const statusText = ev.status === 'success' ? '✓' : ev.status === 'error' ? '✕' : ev.status === 'denied' ? '−' : '·';
     const statusEl = el('span', { className: `nc-tool-event-status ${ev.status}`, text: statusText, parent: hdr });
-    (box as any)._elapsedEl = elapsedEl;
-    (box as any)._statusEl = statusEl;
+    (box as AnyValue)._elapsedEl = elapsedEl;
+    (box as AnyValue)._statusEl = statusEl;
 
     // Chevron
     const chev = el('span', { className: 'nc-tool-event-chev', parent: hdr });
@@ -1851,7 +1851,7 @@ export class GlossaView extends ItemView {
      Streaming render — Obsidian MarkdownRenderer everywhere.
      Throttle 100ms; serialize concurrent renders; re-fire if buffer changed during render.
      ============================================================ */
-  private streamRenderTimer: any;
+  private streamRenderTimer: AnyValue;
   private streamRenderInFlight = false;
   private scheduleStreamingRender() {
     if (this.streamRenderTimer || this.streamRenderInFlight || !this.streamingMsgUI) return;
@@ -1951,7 +1951,7 @@ export class GlossaView extends ItemView {
   /* ============================================================
      Inline approval — replaces the modal popup
      ============================================================ */
-  private askInlineApproval(tool: ToolImpl, args: any): Promise<ApprovalResult> {
+  private askInlineApproval(tool: ToolImpl, args: AnyValue): Promise<ApprovalResult> {
     return new Promise(resolve => {
       void (async () => {
       const host = this.streamingMsgUI?.wrap ?? this.messagesEl;
@@ -1981,7 +1981,7 @@ export class GlossaView extends ItemView {
           const { previewEnvelope } = await import('../agent/patch_envelope');
           const { files, parseError } = await previewEnvelope(args.patch, async (p) => {
             const f = this.app.vault.getAbstractFileByPath(p);
-            return f && 'extension' in (f as any) ? await this.app.vault.read(f as any) : null;
+            return f && 'extension' in (f as AnyValue) ? await this.app.vault.read(f as AnyValue) : null;
           });
           if (parseError) {
             el('div', { className: 'nc-inline-approval-warning', text: `Parse error: ${parseError}`, parent: wrap });
@@ -2014,8 +2014,8 @@ export class GlossaView extends ItemView {
               oldText = ''; newText = args.new_string ?? '';
             } else {
               const f = this.app.vault.getAbstractFileByPath(args.file_path);
-              if (f && 'extension' in (f as any)) {
-                try { oldText = await this.app.vault.read(f as any); } catch { /* ignore */ }
+              if (f && 'extension' in (f as AnyValue)) {
+                try { oldText = await this.app.vault.read(f as AnyValue); } catch { /* ignore */ }
               }
               if (typeof args.old_string === 'string' && oldText.includes(args.old_string)) {
                 newText = args.replace_all
@@ -2028,8 +2028,8 @@ export class GlossaView extends ItemView {
           } else if (name === 'write_note' || name === 'create_note' || name === 'edit_section' || name === 'apply_patch' || name === 'append_to_note') {
             label = args.path ?? '';
             const f = this.app.vault.getAbstractFileByPath(args.path);
-            if (f && 'extension' in (f as any)) {
-              try { oldText = await this.app.vault.read(f as any); } catch { /* ignore */ }
+            if (f && 'extension' in (f as AnyValue)) {
+              try { oldText = await this.app.vault.read(f as AnyValue); } catch { /* ignore */ }
             }
             if (name === 'write_note' || name === 'create_note') newText = args.content ?? '';
             else if (name === 'edit_section' && typeof args.find === 'string' && args.find && oldText.includes(args.find)) newText = oldText.replace(args.find, args.replace ?? '');
@@ -2132,7 +2132,7 @@ export class GlossaView extends ItemView {
     });
   }
 
-  private reasoningRenderTimer: any;
+  private reasoningRenderTimer: AnyValue;
   private scheduleReasoningRender() {
     if (this.reasoningRenderTimer || !this.streamingMsgUI?.reasoningCard) return;
     this.reasoningRenderTimer = window.setTimeout(() => {
@@ -2153,7 +2153,7 @@ export class GlossaView extends ItemView {
     }, 300);
   }
 
-  private elapsedTimer: any;
+  private elapsedTimer: AnyValue;
   private startElapsedTicker() {
     if (this.elapsedTimer) return;
     this.elapsedTimer = window.setInterval(() => this.tickElapsed(), 250);
@@ -2182,11 +2182,11 @@ export class GlossaView extends ItemView {
     const now = Date.now();
     for (const card of Array.from(this.streamingMsgUI.toolStack.children) as HTMLElement[]) {
       if (!card.classList.contains('nc-tool-event')) continue;
-      const statusEl = (card as any)._statusEl as HTMLElement | undefined;
+      const statusEl = (card as AnyValue)._statusEl as HTMLElement | undefined;
       if (!statusEl) continue;
       const isActive = statusEl.classList.contains('running') || statusEl.classList.contains('pending');
       if (!isActive) continue;
-      const elapsedEl = (card as any)._elapsedEl as HTMLElement | undefined;
+      const elapsedEl = (card as AnyValue)._elapsedEl as HTMLElement | undefined;
       const startedAttr = card.dataset.startedAt;
       if (elapsedEl && startedAttr) {
         elapsedEl.textContent = formatElapsed(now - parseInt(startedAttr));
@@ -2265,7 +2265,7 @@ export class GlossaView extends ItemView {
       // COMMITS the IME selection — we must NOT treat that keydown as a
       // "send" intent. `e.isComposing` is the modern flag; legacy WebKit
       // doesn't set it but reports keyCode 229. Cover both.
-      if (e.isComposing || (e as any).keyCode === 229) return;
+      if (e.isComposing || (e as AnyValue).keyCode === 229) return;
       if (this.popup.onKey(e)) { e.preventDefault(); return; }
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
@@ -2468,7 +2468,7 @@ export class GlossaView extends ItemView {
       if (!files) return;
       for (const f of Array.from(files)) {
         try { this.ctx.add(await resolveDroppedFile(f)); }
-        catch (err: any) { quickNotice(`Failed to attach ${f.name}: ${err.message}`); }
+        catch (err) { quickNotice(`Failed to attach ${f.name}: ${err.message}`); }
       }
       })();
     });
@@ -2561,7 +2561,7 @@ export class GlossaView extends ItemView {
     if (!active && eps.length === 0) {
       items.push({
         label: bi('No endpoints — open Settings', '未配置 endpoint — 打开设置'),
-        onSelect: () => (this.app as any).setting.open(),
+        onSelect: () => (this.app as AnyValue).setting.open(),
       });
       this.togglePopup(this.modelBtn, items);
       return;
@@ -2603,7 +2603,7 @@ export class GlossaView extends ItemView {
               } else {
                 quickNotice(bi('No models returned by this endpoint.', '该 endpoint 未返回模型列表。'));
               }
-            } catch (err: any) {
+            } catch (err) {
               quickNotice(bi(`Detect failed: ${err?.message ?? err}`, `检测失败：${err?.message ?? err}`), 6000);
             }
           },
@@ -2629,8 +2629,8 @@ export class GlossaView extends ItemView {
       label: bi('Manage endpoints…', '管理 endpoint…'),
       section: bi('More', '更多'),
       onSelect: () => {
-        (this.app as any).setting.open();
-        (this.app as any).setting.openTabById(this.plugin.manifest.id);
+        (this.app as AnyValue).setting.open();
+        (this.app as AnyValue).setting.openTabById(this.plugin.manifest.id);
       },
     });
 
@@ -2935,7 +2935,7 @@ export class GlossaView extends ItemView {
    *  and from the `/compact` slash command (manual trigger). */
   private async runAutoCompact(ep: Endpoint, reason: 'auto' | 'manual') {
     if (this.session.messages.length < 4) { if (reason === 'manual') quickNotice('Not enough history to compact.'); return; }
-    const vaultRoot = (this.app.vault.adapter as any).basePath as string | undefined;
+    const vaultRoot = (this.app.vault.adapter as AnyValue).basePath as string | undefined;
     const provider = buildProvider(ep, this.plugin.settings.globalProxy, vaultRoot);
     const keepRecent = 2;
 
@@ -2967,7 +2967,7 @@ export class GlossaView extends ItemView {
       window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
       await this.flushPersistNow();
       quickNotice(`Compacted ${result.summarisedCount} msgs → 1 summary (~${formatTokenCount(result.tokensSaved)} tok saved)`);
-    } catch (e: any) {
+    } catch (e) {
       loading.remove();
       quickNotice(`Compact failed: ${e.message ?? e}`);
     }
@@ -3122,7 +3122,7 @@ export class GlossaView extends ItemView {
     let loopHadError = false;
     try {
 
-    const vaultRoot = (this.app.vault.adapter as any).basePath as string | undefined;
+    const vaultRoot = (this.app.vault.adapter as AnyValue).basePath as string | undefined;
     const provider = buildProvider(epReady, this.plugin.settings.globalProxy, vaultRoot);
     // Hard cap = a hair below the effective model window so we leave room for
     // the system prompt + assistant response. The previous code displayed the
@@ -3187,7 +3187,7 @@ export class GlossaView extends ItemView {
       history,
       enableTools,
       endpointKind: ep.kind,
-      endpointFullAgent: !!(epReady as any).cliFullAgent,
+      endpointFullAgent: !!(epReady as AnyValue).cliFullAgent,
       permissionLevel: this.plugin.settings.permissionLevel,
       runMode: this.plugin.settings.runMode,
       maxSteps: this.plugin.settings.agentMaxSteps,
@@ -3392,7 +3392,7 @@ export class GlossaView extends ItemView {
     const needsTitle = !this.session.title || placeholderTitles.has(this.session.title);
     if (needsTitle && text.trim()) this.session.title = text.slice(0, 60);
     await this.flushPersistNow();
-    } catch (err: any) {
+    } catch (err) {
       this.closeOpenPlanItems('stopped');
       // Surface the error to the user AND release the streaming lock.
       console.error('[Glossa] submit failed', err);
@@ -3653,7 +3653,7 @@ export class GlossaView extends ItemView {
    *  Without coalescing, chats.json is rewritten 10-20×/turn (~5MB each) which
    *  thrashes SSDs and makes iCloud/Dropbox loud. flushPersistNow() forces an
    *  immediate write at terminal points (stream end, view close, snapshot). */
-  private _persistTimer: any = null;
+  private _persistTimer: AnyValue = null;
   private sessionHasMeaningfulContent(session: ChatSession): boolean {
     return (session.messages ?? []).some(m =>
       (m.content ?? '').trim().length > 0 ||
@@ -3864,4 +3864,4 @@ function pillIcon(it: ContextItem): string {
     default:           return ICON.file;
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

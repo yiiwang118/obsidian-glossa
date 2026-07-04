@@ -25,7 +25,8 @@ Glossa is not a cloud service. It runs locally as a desktop plugin. Your data go
 
 ## What's New
 
-- **2026-07-04 — 0.6.4 source review cleanup.** Paired all ESLint disable directives with matching enable directives, covered dynamic-boundary TypeScript warnings, and removed remaining source-scan compatibility issues.
+- **2026-07-04 — 0.6.5 source review compliance.** Removed forbidden `no-explicit-any` disables, replaced explicit dynamic TypeScript boundaries with internal aliases, described all ESLint restore directives, and expanded release checks so source review regressions fail locally.
+- **2026-07-04 — 0.6.4 superseded source cleanup.** Added source review guardrails, then replaced by 0.6.5 after stricter review rejected the remaining directive shape.
 - **2026-07-04 — 0.6.3 community review build.** Removed advanced local integrations and vault-wide shortcuts from the marketplace package to match community review behavior requirements. The update prompt still prioritizes the in-app plugin page, with GitHub kept as a fallback.
 - **2026-07-04 — 0.6.2 release-readiness polish.** Tightened marketplace metadata, refreshed the README and changelog, removed review-scan noise from CSS/network/lint checks, and added stricter release checks.
 - **2026-07-03 — ⚡ Faster selection translation.** Select text and press Enter twice to translate; mixed-language Markdown now detects the natural-language source more carefully.

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * patch_note — section / block / frontmatter-anchored append-prepend-replace.
  *
@@ -132,7 +132,7 @@ export const patchNote: ToolImpl = buildTool({
       required: ['path', 'op', 'target', 'content'],
     },
   },
-  preview: async (app, a: any) => {
+  preview: async (app, a: AnyValue) => {
     const t = (a.target ?? {}) as PatchTarget;
     const where = t.heading ? `heading "${t.heading}"`
                 : t.block_ref ? `block ^${t.block_ref}`
@@ -171,7 +171,7 @@ export const patchNote: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e: any) { return `Error: ${e.message}`; }
+    catch (e) { return `Error: ${e.message}`; }
     const op = args.op as Op;
     if (op !== 'append' && op !== 'prepend' && op !== 'replace') {
       return `Error: op must be append / prepend / replace, got "${args.op}"`;
@@ -184,7 +184,7 @@ export const patchNote: ToolImpl = buildTool({
     // ── Frontmatter mode: use Obsidian's atomic API so other keys / formatting stay intact.
     if (target.frontmatter_key) {
       try {
-        await app.fileManager.processFrontMatter(f, (fm: Record<string, any>) => {
+        await app.fileManager.processFrontMatter(f, (fm: Record<string,AnyValue>) => {
           const cur = fm[target.frontmatter_key];
           if (op === 'replace') {
             // Try to parse content as JSON for arrays/objects/booleans/numbers;
@@ -203,7 +203,7 @@ export const patchNote: ToolImpl = buildTool({
           }
         });
         return `Patched ${path}.frontmatter.${target.frontmatter_key} (${op}).`;
-      } catch (e: any) {
+      } catch (e) {
         return `Error processing frontmatter: ${e.message}`;
       }
     }
@@ -240,4 +240,4 @@ export const patchNote: ToolImpl = buildTool({
     return `Patched ${path} @ ${targetDesc} (${op}, ${insert.length} line${insert.length === 1 ? '' : 's'}).`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

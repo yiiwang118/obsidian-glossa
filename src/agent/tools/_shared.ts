@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Shared types and helpers for the per-tool modules in this directory.
  * Mirrors the upstream Claude Code tool architecture: each tool lives in its own file
@@ -10,7 +10,7 @@ import type { ToolSpec, ToolContentBlock } from '../../providers/types';
 /** Permission decision returned by Tool.checkPermissions — mirrors upstream Claude Code's
  *  PermissionResult union. Most tools don't need to override checkPermissions; the agent
  *  loop applies a default policy of `allow` for read-only + `ask` for destructive. */
-export type PermissionResult<Input = any> =
+export type PermissionResult<Input = AnyValue> =
   | { behavior: 'allow';  updatedInput?: Input; decisionReason?: string }
   | { behavior: 'ask';    updatedInput?: Input; message?: string }
   | { behavior: 'deny';   message: string; decisionReason?: string };
@@ -32,16 +32,16 @@ export interface ToolImpl {
    *  been migrated to the more specific isReadOnly/isDestructive flags. */
   dangerous: boolean;
   /** Pure read of vault state — no mutations. */
-  isReadOnly?: (args: any) => boolean;
+  isReadOnly?: (args: AnyValue) => boolean;
   /** Tool result is independent of side-effects from other concurrent tools. */
-  isConcurrencySafe?: (args: any) => boolean;
+  isConcurrencySafe?: (args: AnyValue) => boolean;
   /** Destructive (file mutation / network). */
-  isDestructive?: (args: any) => boolean;
-  describe: (args: any) => string;
+  isDestructive?: (args: AnyValue) => boolean;
+  describe: (args: AnyValue) => string;
   /** Preview shown in approval modal. May accept (args) or (app, args). */
-  preview?: ((args: any) => Promise<string>) | ((app: App, args: any) => Promise<string>);
+  preview?: ((args: AnyValue) => Promise<string>) | ((app: App, args: AnyValue) => Promise<string>);
   /** Optional permission hook — return ask/deny to override the default policy. */
-  checkPermissions?: (app: App, args: any) => Promise<PermissionResult>;
+  checkPermissions?: (app: App, args: AnyValue) => Promise<PermissionResult>;
   /** Tool runner. May return a plain string or a ToolRunResult with content
    *  blocks. The optional 3rd arg supplies an AbortSignal threaded from the
    *  agent loop's opts.signal so long-running tools (network fetches, plugin
@@ -50,7 +50,7 @@ export interface ToolImpl {
    *  UI has moved on. The arg is OPTIONAL: tools that don't honor it are
    *  fine (the existing AbortController on opts.signal still cancels the
    *  STREAM from the provider; this just lets tools cooperate). */
-  run: (app: App, args: any, ctx?: { signal?: AbortSignal }) => Promise<string | ToolRunResult>;
+  run: (app: App, args: AnyValue, ctx?: { signal?: AbortSignal }) => Promise<string | ToolRunResult>;
 
   // ── Extended fields (introduced for buildTool factory) ────────────────────
   /** Backward-compat: alternate names this tool answers to (e.g. after a rename). */
@@ -75,27 +75,27 @@ export interface ToolImpl {
   backfillObservableInput?: (input: Record<string, unknown>) => void;
   /** Present-continuous spinner activity, e.g. "Reading Foo.md". Falls back
    *  to TOOL_META.verb when undefined. */
-  getActivityDescription?: (args: any) => string | null;
+  getActivityDescription?: (args: AnyValue) => string | null;
   /** Compact, single-line summary used in collapsed transcript views.
    *  Falls back to TOOL_META.summarize when undefined. */
-  getToolUseSummary?: (args: any) => string | null;
+  getToolUseSummary?: (args: AnyValue) => string | null;
 
   // ── Per-tool render hooks (P3-15) ─────────────────────────────────────────
   /** Custom HTML/text renderer for the tool's input message (shown above the
    *  tool card while it's running). Receives the args; returns either a DOM
    *  Node or a plain string. When unset, tool_meta.ts falls back to the
    *  default "<verb> <summary>" line. */
-  renderToolUseMessage?: (args: any) => HTMLElement | string | null;
+  renderToolUseMessage?: (args: AnyValue) => HTMLElement | string | null;
   /** Custom renderer for the tool's result block (shown after success).
    *  When unset, the default Markdown rendering applies. Returning null
    *  delegates to the default. */
-  renderToolResultMessage?: (result: string, args: any) => HTMLElement | string | null;
+  renderToolResultMessage?: (result: string, args: AnyValue) => HTMLElement | string | null;
   /** Custom renderer for the rejected/denied case (e.g. show a "denied" pill
    *  with no diff). When unset, falls back to "Tool denied" text. */
-  renderToolUseRejectedMessage?: (args: any) => HTMLElement | string | null;
+  renderToolUseRejectedMessage?: (args: AnyValue) => HTMLElement | string | null;
   /** Custom renderer for the error case (e.g. show stack/code separately).
    *  When unset, falls back to plain error text. */
-  renderToolUseErrorMessage?: (error: string, args: any) => HTMLElement | string | null;
+  renderToolUseErrorMessage?: (error: string, args: AnyValue) => HTMLElement | string | null;
 }
 
 // ── buildTool factory ──────────────────────────────────────────────────────
@@ -103,9 +103,9 @@ export interface ToolImpl {
  *  TOOL_DEFAULTS fills them in fail-closed. */
 export type ToolDef = Omit<ToolImpl, 'dangerous' | 'isReadOnly' | 'isConcurrencySafe' | 'isDestructive'> & {
   dangerous?: boolean;
-  isReadOnly?: (args: any) => boolean;
-  isConcurrencySafe?: (args: any) => boolean;
-  isDestructive?: (args: any) => boolean;
+  isReadOnly?: (args: AnyValue) => boolean;
+  isConcurrencySafe?: (args: AnyValue) => boolean;
+  isDestructive?: (args: AnyValue) => boolean;
 };
 
 /** Fail-closed defaults: when in doubt, assume the tool MUTATES and is NOT
@@ -134,7 +134,7 @@ export function buildTool(def: ToolDef): ToolImpl {
     dangerous,
     isReadOnly: def.isReadOnly ?? TOOL_DEFAULTS.isReadOnly,
     isConcurrencySafe: def.isConcurrencySafe ?? def.isReadOnly ?? TOOL_DEFAULTS.isConcurrencySafe,
-    isDestructive: def.isDestructive ?? (def.isReadOnly ? (a: any) => !def.isReadOnly(a) : TOOL_DEFAULTS.isDestructive),
+    isDestructive: def.isDestructive ?? (def.isReadOnly ? (a: AnyValue) => !def.isReadOnly(a) : TOOL_DEFAULTS.isDestructive),
     maxResultSizeChars: def.maxResultSizeChars ?? TOOL_DEFAULTS.maxResultSizeChars,
   };
 }
@@ -169,14 +169,14 @@ export function findWithQuoteNormalization(haystack: string, needle: string): st
 }
 
 /** Default classification helpers used by the agent loop. */
-export function isReadOnlyTool(t: ToolImpl, args: any = {}): boolean {
+export function isReadOnlyTool(t: ToolImpl, args: AnyValue = {}): boolean {
   return t.isReadOnly ? t.isReadOnly(args) : !t.dangerous;
 }
-export function isConcurrencySafeTool(t: ToolImpl, args: any = {}): boolean {
+export function isConcurrencySafeTool(t: ToolImpl, args: AnyValue = {}): boolean {
   if (t.isConcurrencySafe) return t.isConcurrencySafe(args);
   return isReadOnlyTool(t, args);
 }
-export function isDestructiveTool(t: ToolImpl, args: any = {}): boolean {
+export function isDestructiveTool(t: ToolImpl, args: AnyValue = {}): boolean {
   return t.isDestructive ? t.isDestructive(args) : t.dangerous;
 }
 
@@ -255,7 +255,7 @@ export function canonicalizeVaultPath(v: unknown): unknown {
 export function normalizePathFields(fields: readonly string[]): (input: Record<string, unknown>) => void {
   return (input) => {
     for (const f of fields) {
-      if (f in input) (input as any)[f] = canonicalizeVaultPath((input as any)[f]);
+      if (f in input) (input as AnyValue)[f] = canonicalizeVaultPath((input as AnyValue)[f]);
     }
   };
 }
@@ -283,4 +283,4 @@ export function globToRegExp(glob: string): RegExp {
   rx += '$';
   return new RegExp(rx);
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

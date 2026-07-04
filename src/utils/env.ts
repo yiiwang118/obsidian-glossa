@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { execSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
@@ -39,14 +39,14 @@ const SHELL_ENV_WHITELIST = new Set([
   'CODEX_HOME', 'XDG_CONFIG_HOME',
 ]);
 
-let _shellEnvCache: NodeJS.ProcessEnv | null = null;
-let _shellEnvPromise: Promise<NodeJS.ProcessEnv> | null = null;
+let _shellEnvCache: ProcessEnvMap | null = null;
+let _shellEnvPromise: Promise<ProcessEnvMap> | null = null;
 
 /** Async capture of the user's login-shell env. Whitelist-filtered, cached.
  *  Returns immediately if already loaded; first caller kicks off the actual
  *  subprocess. macOS GUI apps don't load .zshrc, so this is how we recover
  *  HTTPS_PROXY etc. for spawned CLIs. */
-export function loadShellEnv(): Promise<NodeJS.ProcessEnv> {
+export function loadShellEnv(): Promise<ProcessEnvMap> {
   if (_shellEnvCache) return Promise.resolve(_shellEnvCache);
   if (_shellEnvPromise !== null) return _shellEnvPromise;
   _shellEnvPromise = (async () => {
@@ -59,7 +59,7 @@ export function loadShellEnv(): Promise<NodeJS.ProcessEnv> {
         maxBuffer: 256 * 1024,
         encoding: 'utf-8',
       });
-      const out: NodeJS.ProcessEnv = {};
+      const out: ProcessEnvMap = {};
       for (const line of stdout.split('\n')) {
         const eq = line.indexOf('=');
         if (eq <= 0) continue;
@@ -80,7 +80,7 @@ export function loadShellEnv(): Promise<NodeJS.ProcessEnv> {
 /** Snapshot of what loadShellEnv found, for debugging surfaces.
  *  Returns the cached shell env (possibly empty if loadShellEnv hasn't
  *  resolved yet). makeChildEnv uses this synchronously so spawn paths stay sync. */
-export function shellEnvSnapshot(): NodeJS.ProcessEnv { return _shellEnvCache ?? {}; }
+export function shellEnvSnapshot(): ProcessEnvMap { return _shellEnvCache ?? {}; }
 
 /**
  * Augmented PATH for subprocesses launched from Electron's renderer.
@@ -92,7 +92,7 @@ export function shellEnvSnapshot(): NodeJS.ProcessEnv { return _shellEnvCache ??
  *
  * Always augments PATH with common bin dirs and forces HOME to os.homedir().
  */
-export function makeChildEnv(proxy?: string): NodeJS.ProcessEnv {
+export function makeChildEnv(proxy?: string): ProcessEnvMap {
   const cur = process.env.PATH ?? '';
   const augmented = [...new Set([...EXTRA_PATHS, ...cur.split(':')])].filter(Boolean).join(':');
   // Synchronous: use whatever the shell-env loader has cached so far. If
@@ -100,7 +100,7 @@ export function makeChildEnv(proxy?: string): NodeJS.ProcessEnv {
   // not the end of the world (user can fall back to manual globalProxy). The
   // plugin onload kicks off the load, so by the time the user sends a real
   // message, the cache is warm.
-  const env: NodeJS.ProcessEnv = {
+  const env: ProcessEnvMap = {
     ...process.env,
     ...shellEnvSnapshot(),
     PATH: augmented,
@@ -160,11 +160,11 @@ const MCP_ENV_ALLOWLIST = new Set([
  *  the parent and never reach the child. Per-server `cfg.env` is applied
  *  by the caller AFTER this — so a user who trusts a specific MCP server
  *  can still explicitly forward a secret to it. */
-export function makeChildEnvForMcp(proxy?: string): NodeJS.ProcessEnv {
+export function makeChildEnvForMcp(proxy?: string): ProcessEnvMap {
   // Start from the full augmented env (so PATH/proxy logic is unified) then
   // filter aggressively.
   const full = makeChildEnv(proxy);
-  const filtered: NodeJS.ProcessEnv = {};
+  const filtered: ProcessEnvMap = {};
   for (const [k, v] of Object.entries(full)) {
     if (MCP_ENV_ALLOWLIST.has(k)) filtered[k] = v;
   }
@@ -185,4 +185,4 @@ export function resolveBinary(name: string): string | null {
   } catch { /* ignore */ }
   return null;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

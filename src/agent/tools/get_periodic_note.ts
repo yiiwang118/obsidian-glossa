@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * get_periodic_note — resolve a daily / weekly / monthly note by type + offset.
  *
@@ -49,7 +49,7 @@ function applyOffset(d: Date, granularity: Granularity, offset: number): Date {
 
 /** Read Daily-Notes core plugin config: format defaults to YYYY-MM-DD, folder
  *  empty (vault root). Returns null if the core plugin is disabled. */
-function readBuiltinDaily(app: any): PeriodicConfig | null {
+function readBuiltinDaily(app: AnyValue): PeriodicConfig | null {
   // Daily Notes core plugin has been renamed across versions; check both.
   const cfg = app.internalPlugins?.plugins?.['daily-notes']?.instance?.options;
   if (!cfg) return null;
@@ -61,7 +61,7 @@ function readBuiltinDaily(app: any): PeriodicConfig | null {
 }
 
 /** Periodic-Notes (community) per-granularity settings. */
-function readPeriodicPlugin(app: any, granularity: Granularity): PeriodicConfig | null {
+function readPeriodicPlugin(app: AnyValue, granularity: Granularity): PeriodicConfig | null {
   const plugin = app.plugins?.plugins?.['periodic-notes'];
   if (!plugin) return null;
   const s = plugin.settings?.[granularity];
@@ -73,7 +73,7 @@ function readPeriodicPlugin(app: any, granularity: Granularity): PeriodicConfig 
   };
 }
 
-function resolveConfig(app: any, granularity: Granularity): PeriodicConfig | null {
+function resolveConfig(app: AnyValue, granularity: Granularity): PeriodicConfig | null {
   // Prefer the dedicated periodic-notes plugin (it supports all 5 granularities).
   const pp = readPeriodicPlugin(app, granularity);
   if (pp) return pp;
@@ -107,7 +107,7 @@ export const getPeriodicNote: ToolImpl = buildTool({
       return `Error: type must be one of daily/weekly/monthly/quarterly/yearly, got "${args.type}".`;
     }
     const offset = Number.isFinite(args.offset) ? Number(args.offset) : 0;
-    const cfg = resolveConfig(app as any, granularity);
+    const cfg = resolveConfig(app as AnyValue, granularity);
     if (!cfg) return `Error: no ${granularity}-notes config found. Enable the Daily Notes core plugin or install Periodic Notes.`;
     const target = applyOffset(new Date(), granularity, offset);
     const basename = formatDate(cfg.format, target);
@@ -130,9 +130,9 @@ export const getPeriodicNote: ToolImpl = buildTool({
       if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
       await app.vault.create(path, body);
       return `Created ${path}.\nGranularity: ${granularity}\nOffset: ${offset}`;
-    } catch (e: any) {
+    } catch (e) {
       return `Error creating ${path}: ${e.message}`;
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Curated MCP server marketplace.
  * A small bundled catalog of well-known MCP servers so users can install with one click.
@@ -134,19 +134,19 @@ export function parseCatalogJson(raw: unknown): McpEntry[] {
   const validCats = new Set(MCP_CATEGORIES.map(c => c.id));
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
-    const e = item as Record<string, any>;
+    const e = item as Record<string,AnyValue>;
     if (typeof e.id !== 'string' || typeof e.name !== 'string') continue;
     if (typeof e.description !== 'string') continue;
     if (!e.install || typeof e.install.command !== 'string' || !Array.isArray(e.install.args)) continue;
-    const args = e.install.args.filter((a: any) => typeof a === 'string');
+    const args = e.install.args.filter((a: AnyValue) => typeof a === 'string');
     out.push({
       id: e.id,
       name: e.name,
       category: validCats.has(e.category) ? e.category : 'tooling',
       description: e.description,
       install: { command: e.install.command, args },
-      envHints: Array.isArray(e.envHints) ? e.envHints.filter((h: any) => h && typeof h.name === 'string') : undefined,
-      argHints: Array.isArray(e.argHints) ? e.argHints.filter((h: any) => h && typeof h.index === 'number') : undefined,
+      envHints: Array.isArray(e.envHints) ? e.envHints.filter((h: AnyValue) => h && typeof h.name === 'string') : undefined,
+      argHints: Array.isArray(e.argHints) ? e.argHints.filter((h: AnyValue) => h && typeof h.index === 'number') : undefined,
       homepage: typeof e.homepage === 'string' ? e.homepage : '',
     });
   }
@@ -176,14 +176,14 @@ export async function fetchCatalog(url: string): Promise<McpEntry[]> {
     const r = await withTimeout(obs.requestUrl({ url, method: 'GET', throw: false }), 8000);
     if (r.status >= 400) throw new Error(`HTTP ${r.status}`);
     text = r.text;
-  } catch (e: any) {
+  } catch (e) {
     throw new Error(e?.message ?? String(e));
   }
   let json: unknown;
   try { json = JSON.parse(text); }
-  catch (e: any) { throw new Error(`Invalid JSON: ${e.message}`); }
+  catch (e) { throw new Error(`Invalid JSON: ${e.message}`); }
   const parsed = parseCatalogJson(json);
   if (parsed.length === 0) throw new Error('Catalog has no valid entries (expected array of McpEntry).');
   return parsed;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * patch_canvas — surgical node/edge edits to a .canvas file.
  *
@@ -18,8 +18,8 @@ import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from '
 type Op = 'add_node' | 'remove_node' | 'update_node' | 'add_edge' | 'remove_edge';
 
 interface CanvasDoc {
-  nodes?: any[];
-  edges?: any[];
+  nodes?: AnyValue[];
+  edges?: AnyValue[];
 }
 
 export const patchCanvas: ToolImpl = buildTool({
@@ -46,7 +46,7 @@ export const patchCanvas: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e: any) { return `Error: ${e.message}`; }
+    catch (e) { return `Error: ${e.message}`; }
     if (!path.endsWith('.canvas')) return `Error: ${path} is not a .canvas file.`;
     const op = args.op as Op;
     const payload = args.payload ?? {};
@@ -54,7 +54,7 @@ export const patchCanvas: ToolImpl = buildTool({
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;
     let doc: CanvasDoc;
     try { doc = JSON.parse(await app.vault.read(f)); }
-    catch (e: any) { return `Error: invalid JSON in ${path}: ${e.message}`; }
+    catch (e) { return `Error: invalid JSON in ${path}: ${e.message}`; }
     if (!Array.isArray(doc.nodes)) doc.nodes = [];
     if (!Array.isArray(doc.edges)) doc.edges = [];
 
@@ -105,4 +105,4 @@ export const patchCanvas: ToolImpl = buildTool({
     return `${summary}\n\nCanvas now: ${doc.nodes.length} nodes, ${doc.edges.length} edges.`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

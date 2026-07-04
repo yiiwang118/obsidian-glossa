@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * dataview_query — bridge to the Dataview plugin's DQL engine.
  *
@@ -11,7 +11,7 @@
  */
 import { buildTool, type ToolImpl } from './_shared';
 
-function getDvApi(app: any): any | null {
+function getDvApi(app: AnyValue): AnyValue | null {
   return app?.plugins?.plugins?.['dataview']?.api ?? null;
 }
 
@@ -78,16 +78,16 @@ export const dataviewQuery: ToolImpl = buildTool({
       const arr = pages.array ? pages.array() : Array.from(pages);
       const cap = arr.slice(0, limit);
       if (cap.length === 0) return `No pages match source: ${source || '(empty)'}.`;
-      const lines = cap.map((p: any) => {
+      const lines = cap.map((p: AnyValue) => {
         const path = p.file?.path ?? p.path ?? '(no path)';
         const tags = (p.file?.tags ?? []).slice(0, 5).join(' ');
         return `- ${path}${tags ? `  ${tags}` : ''}`;
       });
       const tail = arr.length > cap.length ? `\n[+${arr.length - cap.length} more, truncated at limit ${limit}]` : '';
       return `${cap.length} of ${arr.length} pages:\n${lines.join('\n')}${tail}`;
-    } catch (e: any) {
+    } catch (e) {
       return `Dataview error: ${e?.message ?? e}`;
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

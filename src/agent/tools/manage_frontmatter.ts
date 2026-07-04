@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * manage_frontmatter — atomic CRUD over a single note's YAML properties.
  *
@@ -52,14 +52,14 @@ export const manageFrontmatter: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e: any) { return `Error: ${e.message}`; }
+    catch (e) { return `Error: ${e.message}`; }
     const op = args.op as 'get' | 'set' | 'delete' | 'list';
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;
 
     let result = '';
     try {
-      await app.fileManager.processFrontMatter(f, (fm: Record<string, any>) => {
+      await app.fileManager.processFrontMatter(f, (fm: Record<string,AnyValue>) => {
         if (op === 'list') {
           const keys = Object.keys(fm);
           result = keys.length === 0 ? '(no frontmatter)' : keys.join('\n');
@@ -82,10 +82,10 @@ export const manageFrontmatter: ToolImpl = buildTool({
           result = `Set ${key} = ${JSON.stringify(parsed)}.`;
         }
       });
-    } catch (e: any) {
+    } catch (e) {
       return `Error: ${e.message}`;
     }
     return result;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

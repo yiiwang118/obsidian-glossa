@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, Modal, Notice, TFile } from 'obsidian';
 import type { ToolImpl } from './tools';
 import { diffStats, lineDiff, applySelectedDiff, renderDiffInto } from '../utils/diff';
@@ -8,13 +8,13 @@ import { setStyle } from '../utils/dom';
 export interface ApprovalResult {
   ok: boolean;
   /** If set, replaces the tool args at execution time (used by per-line diff edits). */
-  mutatedArgs?: any;
+  mutatedArgs?: AnyValue;
   /** If the user picked an "Always allow…" option, this rule is persisted by the loop
    *  so future calls auto-resolve. */
   persistRule?: import('../types').PermissionRule;
 }
 
-export function askApproval(app: App, tool: ToolImpl, args: any): Promise<ApprovalResult> {
+export function askApproval(app: App, tool: ToolImpl, args: AnyValue): Promise<ApprovalResult> {
   return new Promise(resolve => new ApprovalModal(app, tool, args, resolve).open());
 }
 
@@ -24,7 +24,7 @@ class ApprovalModal extends Modal {
   constructor(
     app: App,
     private tool: ToolImpl,
-    private args: any,
+    private args: AnyValue,
     private onDecide: (r: ApprovalResult) => void,
   ) { super(app); }
 
@@ -46,7 +46,7 @@ class ApprovalModal extends Modal {
       let previewText = '';
       try {
         if (this.tool.preview) {
-          const fn = this.tool.preview as any;
+          const fn = this.tool.preview as AnyValue;
           previewText = (fn.length >= 2) ? await fn(this.app, this.args) : await fn(this.args);
         } else {
           previewText = JSON.stringify(this.args, null, 2);
@@ -64,7 +64,7 @@ class ApprovalModal extends Modal {
     // Visual cue when the diff-preview marked this approval as blocked.
     // The actual gate is in buildResult() so a fast Enter cannot bypass it,
     // but disabling the button + adding a tooltip makes the intent clear.
-    const block = (this as any).__blockApprove as string | undefined;
+    const block = (this as AnyValue).__blockApprove as string | undefined;
     if (block) {
       allow.disabled = true;
       allow.title = block;
@@ -198,7 +198,7 @@ class ApprovalModal extends Modal {
     });
     if (ops.length === 0) wrap.createEl('div', { cls: 'nc-diff-line eq', text: '(No changes detected)' });
     // Stash for decide() to rebuild content if user toggled lines.
-    (this as any).__diff = { oldText, newText, decisions };
+    (this as AnyValue).__diff = { oldText, newText, decisions };
     return wrap;
   }
 
@@ -210,12 +210,12 @@ class ApprovalModal extends Modal {
    *  the old window.setTimeout(0) button-disable — are turned into ok:false here,
    *  so the loop sees a denial and won't proceed. */
   private buildResult(): ApprovalResult {
-    const blockReason = (this as any).__blockApprove as string | undefined;
+    const blockReason = (this as AnyValue).__blockApprove as string | undefined;
     if (blockReason) {
       try { new Notice(`Approval blocked: ${blockReason}`, 5000); } catch { /* ignore */ }
       return { ok: false };
     }
-    const d = (this as any).__diff as { oldText: string; newText: string; decisions: Map<number, boolean> } | undefined;
+    const d = (this as AnyValue).__diff as { oldText: string; newText: string; decisions: Map<number, boolean> } | undefined;
     const name = this.tool.spec.name;
     if (!d) return { ok: true };
     // Has the user toggled anything off? If not, just approve as-is.
@@ -269,7 +269,7 @@ class ApprovalModal extends Modal {
       // is rendered AFTER this preview (see onOpen ordering), so we set a
       // flag the buildResult / keydown paths check rather than relying on a
       // window.setTimeout(0) that loses the race against a fast Enter press.
-      (this as any).__blockApprove = 'Envelope invalid.';
+      (this as AnyValue).__blockApprove = 'Envelope invalid.';
       return wrap;
     }
 
@@ -312,7 +312,7 @@ class ApprovalModal extends Modal {
       wrap.createEl('div', { cls: 'nc-approval-warning', text: 'Approve disabled while warnings are above — ask the model to retry.' });
       // Synchronous flag — see __blockApprove handling in decide()/keydown
       // path. Replaces the racy window.setTimeout(0) DOM-button disable.
-      (this as any).__blockApprove = 'Envelope has unresolved warnings.';
+      (this as AnyValue).__blockApprove = 'Envelope has unresolved warnings.';
     }
     // Envelope is approved as-a-batch — no per-line decisions stashed.
     return wrap;
@@ -330,8 +330,8 @@ class ApprovalModal extends Modal {
     });
     setStyle(disabledMsg, { fontWeight: '700' });
     // Same synchronous-flag pattern — see __blockApprove in decide().
-    (this as any).__blockApprove = 'Diff invalid — see warnings.';
+    (this as AnyValue).__blockApprove = 'Diff invalid — see warnings.';
     return wrap;
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

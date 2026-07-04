@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * manage_tags — add/remove/list tags on a note.
  *
@@ -103,14 +103,14 @@ export const manageTags: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e: any) { return `Error: ${e.message}`; }
+    catch (e) { return `Error: ${e.message}`; }
     const op = args.op as 'add' | 'remove' | 'list';
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;
 
     if (op === 'list') {
       const cache = app.metadataCache.getFileCache(f);
-      const all = getAllTags(cache ?? ({} as any)) ?? [];
+      const all = getAllTags(cache ?? ({} as AnyValue)) ?? [];
       const uniq = [...new Set(all.map(normalizeTag))].sort();
       return uniq.length === 0 ? '(no tags)' : uniq.join('\n');
     }
@@ -121,7 +121,7 @@ export const manageTags: ToolImpl = buildTool({
     if (op === 'add') {
       let added: string[] = [];
       try {
-        await app.fileManager.processFrontMatter(f, (fm: Record<string, any>) => {
+        await app.fileManager.processFrontMatter(f, (fm: Record<string,AnyValue>) => {
           // Reconcile: frontmatter accepts `tags:` (array) or `tag:` (string).
           // We normalise to `tags:` array.
           const existing = Array.isArray(fm.tags) ? fm.tags.map(String)
@@ -137,14 +137,14 @@ export const manageTags: ToolImpl = buildTool({
           // Drop legacy `tag:` field if we just wrote `tags:`.
           if ('tag' in fm) delete fm.tag;
         });
-      } catch (e: any) { return `Error: ${e.message}`; }
+      } catch (e) { return `Error: ${e.message}`; }
       return added.length === 0 ? '(all tags already present)' : `Added: ${added.join(', ')}`;
     }
 
     // remove — both frontmatter AND inline.
     let removed = new Set<string>();
     try {
-      await app.fileManager.processFrontMatter(f, (fm: Record<string, any>) => {
+      await app.fileManager.processFrontMatter(f, (fm: Record<string,AnyValue>) => {
         const before = Array.isArray(fm.tags) ? fm.tags.map(String) : typeof fm.tags === 'string' ? [fm.tags] : [];
         const targetSet = new Set(inputTags);
         const kept = before.filter(t => !targetSet.has(normalizeTag(t)));
@@ -159,7 +159,7 @@ export const manageTags: ToolImpl = buildTool({
           delete fm.tag;
         }
       });
-    } catch (e: any) { return `Error: ${e.message}`; }
+    } catch (e) { return `Error: ${e.message}`; }
 
     // Strip inline #tag occurrences.
     const text = await app.vault.read(f);
@@ -176,4 +176,4 @@ export const manageTags: ToolImpl = buildTool({
     return removed.size === 0 ? '(no matching tags found)' : `Removed: ${[...removed].sort().join(', ')}`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

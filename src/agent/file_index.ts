@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Lightweight in-memory vault index inspired by upstream Claude Code's
  * native-ts/file-index. We keep:
@@ -52,20 +52,20 @@ export class FileIndex {
 
     // Helper that prefers plugin.registerEvent (proper cleanup on unload)
     // but falls back to plain .on() when no plugin is supplied.
-    const bind = (handler: any) => {
+    const bind = (handler: AnyValue) => {
       if (plugin && typeof plugin.registerEvent === 'function') {
         plugin.registerEvent(handler);
       }
       // If no plugin: nothing to do — the handler is already wired by .on().
     };
 
-    bind((v as any).on?.('create', (f: TFile) => { void this.upsert(f); }));
-    bind((v as any).on?.('delete', (f: TFile) => this.entries.delete(f.path)));
-    bind((v as any).on?.('rename', (f: TFile, oldPath: string) => {
+    bind((v as AnyValue).on?.('create', (f: TFile) => { void this.upsert(f); }));
+    bind((v as AnyValue).on?.('delete', (f: TFile) => this.entries.delete(f.path)));
+    bind((v as AnyValue).on?.('rename', (f: TFile, oldPath: string) => {
       this.entries.delete(oldPath);
       void this.upsert(f);
     }));
-    bind((v as any).on?.('modify', (f: TFile) => { void this.upsert(f, /* invalidatePreview */ true); }));
+    bind((v as AnyValue).on?.('modify', (f: TFile) => { void this.upsert(f, /* invalidatePreview */ true); }));
   }
 
   private async upsert(f: TFile, invalidatePreview = false) {
@@ -141,4 +141,4 @@ export class FileIndex {
     return entry.preview;
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

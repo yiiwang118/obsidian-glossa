@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, TFile, TFolder, MarkdownView, FileView } from 'obsidian';
 import { estimateTokens } from '../utils/tokens';
 import { uid } from '../utils/dom';
@@ -69,10 +69,10 @@ function selectionFileContext(app: App, el: HTMLElement): Pick<SelectionInfo, 's
 
   for (const leaf of leaves) {
     const view = leaf?.view;
-    const container = (view as any)?.containerEl as HTMLElement | undefined;
+    const container = (view as AnyValue)?.containerEl as HTMLElement | undefined;
     if (!view || !container || !container.contains(el) || !container.contains(contentEl)) continue;
 
-    const file = view instanceof FileView ? view.file : (view as any).file;
+    const file = view instanceof FileView ? view.file : (view as AnyValue).file;
     if (!file) continue;
     return { source: sourceForFileView(view.getViewType?.(), file), file };
   }
@@ -162,7 +162,7 @@ export async function resolveFile(app: App, file: TFile): Promise<ContextItem> {
         tokens: Math.ceil(buf.byteLength / 1024),
         pinned: false,
       };
-    } catch (e: any) {
+    } catch (e) {
       return {
         id: uid(), kind: 'file', label: file.basename + '.' + ext,
         detail: file.path,
@@ -214,7 +214,7 @@ export async function resolveFile(app: App, file: TFile): Promise<ContextItem> {
         tokens: estimateTokens(content),
         pinned: false,
       };
-    } catch (e: any) {
+    } catch (e) {
       return {
         id: uid(), kind: 'file', label: file.basename + '.pdf',
         detail: file.path,
@@ -279,7 +279,7 @@ const WEB_FETCH_TIMEOUT_MS = 15_000;
 export async function resolveWebUrl(url: string): Promise<ContextItem> {
   let validated: URL;
   try { validated = parseHttpUrl(url); }
-  catch (e: any) {
+  catch (e) {
     return {
       id: uid(), kind: 'web', label: 'rejected', detail: url,
       content: `(refused: ${e.message})`, tokens: 0, pinned: false,
@@ -302,7 +302,7 @@ export async function resolveWebUrl(url: string): Promise<ContextItem> {
       tokens: estimateTokens(text),
       pinned: false,
     };
-  } catch (e: any) {
+  } catch (e) {
     return {
       id: uid(), kind: 'web', label: 'fetch failed', detail: validated.href,
       content: `(failed to fetch ${validated.href}: ${e.message})`, tokens: 0, pinned: false,
@@ -357,7 +357,7 @@ export async function resolveDroppedFile(f: File): Promise<ContextItem> {
         tokens: estimateTokens(content),
         pinned: false,
       };
-    } catch (e: any) {
+    } catch (e) {
       return {
         id: uid(), kind: 'file', label: f.name,
         detail: `${humanSize(f.size)} · PDF`,
@@ -483,4 +483,4 @@ export function listTagsForPicker(_app: App, _query: string, _limit = 20): strin
   void _limit;
   return [];
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

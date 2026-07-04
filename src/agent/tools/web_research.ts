@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { buildTool, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects } from '../../utils/safe_web';
 import { decodeUtf8, extractWebMarkdown, fetchBytesWithCap, summarizeMarkdown } from '../../utils/web_content';
@@ -80,7 +80,7 @@ export const webResearch: ToolImpl = buildTool({
         fetched.length ? '\n## Extracted source notes\n' + fetched.join('\n\n') : '',
         downloadHints.length ? '\n## Download candidates\n' + downloadHints.join('\n') + '\n\nUse download_file with the selected direct URL if the user wants it saved.' : '',
       ].filter(Boolean).join('\n');
-    } catch (e: any) {
+    } catch (e) {
       if (e?.name === 'AbortError') {
         if (ctx?.signal?.aborted) return 'Error: cancelled by user.';
         return 'Error: timeout during web research.';
@@ -108,7 +108,7 @@ async function fetchSourceExcerpt(result: SearchResult, goal: string, signal?: A
       parsed.description ? `Description: ${parsed.description}` : '',
       excerpt,
     ].filter(Boolean).join('\n');
-  } catch (e: any) {
+  } catch (e) {
     return `### ${result.title || result.domain}\nURL: ${result.url}\nFetch failed: ${e?.message ?? e}`;
   }
 }
@@ -141,4 +141,4 @@ function inferArxivPdfUrl(raw: string): string | null {
     return null;
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

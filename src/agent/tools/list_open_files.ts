@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * list_open_files — enumerate every currently-open editor tab + its cursor.
  *
@@ -41,14 +41,14 @@ export const listOpenFiles: ToolImpl = buildTool({
     const out: OpenFile[] = [];
     // Iterate ALL leaves; filter to those with a file open. Includes splits + sidebar.
     app.workspace.iterateAllLeaves((leaf: WorkspaceLeaf) => {
-      const view = leaf.view as any;
+      const view = leaf.view as AnyValue;
       const file = view?.file;
       if (!file?.path) return;
       const isMd = leaf.view instanceof MarkdownView;
       let cursor: OpenFile['cursor'] | undefined;
       let selection: OpenFile['selection'] | undefined;
       if (isMd) {
-        const editor = (leaf.view as any).editor;
+        const editor = (leaf.view as AnyValue).editor;
         if (editor) {
           try {
             const c = editor.getCursor();
@@ -65,11 +65,11 @@ export const listOpenFiles: ToolImpl = buildTool({
       }
       out.push({
         path: file.path,
-        leaf_id: (leaf as any).id ?? '(no-id)',
+        leaf_id: (leaf as AnyValue).id ?? '(no-id)',
         is_active: leaf === activeLeaf,
         cursor,
         selection,
-        view_type: (leaf.view as any).getViewType?.() ?? 'unknown',
+        view_type: (leaf.view as AnyValue).getViewType?.() ?? 'unknown',
       });
     });
     if (out.length === 0) return '(no files open)';
@@ -82,4 +82,4 @@ export const listOpenFiles: ToolImpl = buildTool({
     return [`${out.length} tab${out.length === 1 ? '' : 's'} open (★ = focused):`, ...lines].join('\n');
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

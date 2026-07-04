@@ -2,6 +2,7 @@
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const ts = require('typescript');
 
 function fail(message) {
   console.error(`release:check failed: ${message}`);
@@ -61,12 +62,37 @@ function listTsFiles(dir) {
   return out;
 }
 
+function hasExplicitAnyKeyword(file, source) {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let found = false;
+  function visit(node) {
+    if (node.kind === ts.SyntaxKind.AnyKeyword) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sf);
+  return found;
+}
+
 for (const file of listTsFiles('src')) {
   const source = fs.readFileSync(file, 'utf8');
   const disableCount = (source.match(/\/\* eslint-disable /g) || []).length;
   const enableCount = (source.match(/\/\* eslint-enable /g) || []).length;
   if (disableCount !== enableCount) {
     fail(`${file} has ${disableCount} eslint-disable directive(s) but ${enableCount} eslint-enable directive(s).`);
+  }
+  if (/eslint-(?:disable|enable)[\s\S]*?@typescript-eslint\/no-explicit-any/.test(source)) {
+    fail(`${file} disables @typescript-eslint/no-explicit-any, which Obsidian review rejects.`);
+  }
+  for (const directive of source.matchAll(/\/\* eslint-enable ([\s\S]*?) \*\//g)) {
+    if (!/\s--\s/.test(directive[1])) {
+      fail(`${file} has an eslint-enable directive without a description.`);
+    }
+  }
+  if (hasExplicitAnyKeyword(file, source)) {
+    fail(`${file} contains an explicit TypeScript any keyword.`);
   }
   for (const [label, pattern] of [
     ['globalThis', /\bglobalThis\b/],

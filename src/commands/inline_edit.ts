@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, Editor, MarkdownView, Modal, Notice } from 'obsidian';
 import type GlossaPlugin from '../main';
 import { buildProvider } from '../providers/registry';
@@ -27,7 +27,7 @@ export async function runInlineEdit(plugin: GlossaPlugin) {
   const sysPrompt = `You are an inline editor. The user has selected a passage and asked for a transformation. Reply with ONLY the rewritten passage — no commentary, no quotes, no preamble. Preserve markdown / formulas / code exactly.`;
   const userMsg = `Instruction: ${instruction}\n\n---\n${original}\n---`;
 
-  const vaultRoot = (plugin.app.vault.adapter as any).basePath as string | undefined;
+  const vaultRoot = (plugin.app.vault.adapter as AnyValue).basePath as string | undefined;
   const provider = buildProvider(epDec, plugin.settings.globalProxy, vaultRoot);
 
   // Stream into a holding buffer; show progress indicator
@@ -43,7 +43,7 @@ export async function runInlineEdit(plugin: GlossaPlugin) {
       if (ch.type === 'text') { buf += ch.text; notice.setMessage(`Editing… (${buf.length} chars)`); }
       else if (ch.type === 'error') { notice.hide(); new Notice(`Edit failed: ${ch.error}`); return; }
     }
-  } catch (e: any) { notice.hide(); new Notice(`Edit failed: ${e.message}`); return; }
+  } catch (e) { notice.hide(); new Notice(`Edit failed: ${e.message}`); return; }
   notice.hide();
   const newText = buf.trim();
   if (!newText) { new Notice('Empty response.'); return; }
@@ -105,4 +105,4 @@ class DiffPreviewModal extends Modal {
   private finish(v: boolean) { if (this.done) return; this.done = true; this.cb(v); this.close(); }
   onClose() { if (!this.done) { this.done = true; this.cb(false); } }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import { makeChildEnv } from '../utils/env';
@@ -100,8 +100,8 @@ export class ClaudeCodeCliProvider implements LLMProvider {
     args.push(serializeMessages(req));
 
     const proc = spawn(this.ep.binaryPath, args, {
-      cwd: this.ep.cwd || (this as any).__fallbackCwd || process.env.HOME,
-      env: makeChildEnv((this as any).__proxy),
+      cwd: this.ep.cwd || (this as AnyValue).__fallbackCwd || process.env.HOME,
+      env: makeChildEnv((this as AnyValue).__proxy),
     });
     const onAbort = () => { try { proc.kill('SIGTERM'); } catch { /* ignore */ } };
     req.signal?.addEventListener('abort', onAbort);
@@ -109,17 +109,17 @@ export class ClaudeCodeCliProvider implements LLMProvider {
     let buf = '';
     let bufText = '';
     let stderrBuf = '';
-    let usage: any;
+    let usage: AnyValue;
     proc.stderr.on('data', (d) => stderrBuf += d.toString());
 
-    for await (const chunk of proc.stdout as any) {
+    for await (const chunk of proc.stdout as AnyValue) {
       buf += chunk.toString('utf-8');
       const lines = buf.split('\n');
       buf = lines.pop() ?? '';
       for (const line of lines) {
         const s = line.trim();
         if (!s) continue;
-        let ev: any; try { ev = JSON.parse(s); } catch { continue; }
+        let ev: AnyValue; try { ev = JSON.parse(s); } catch { continue; }
 
         if (ev.type === 'stream_event') {
           const e = ev.event;
@@ -144,7 +144,7 @@ export class ClaudeCodeCliProvider implements LLMProvider {
           for (const b of ev.message.content) {
             if (b.type === 'tool_result') {
               const content = typeof b.content === 'string' ? b.content
-                : Array.isArray(b.content) ? b.content.map((c: any) => c.text ?? '').join('') : '';
+                : Array.isArray(b.content) ? b.content.map((c: AnyValue) => c.text ?? '').join('') : '';
               const status: 'success' | 'error' = b.is_error ? 'error' : 'success';
               yield { type: 'tool_event', id: b.tool_use_id, name: '', args: {}, status, result: String(content).slice(0, 4000) };
             }
@@ -181,4 +181,4 @@ function serializeMessages(req: ChatRequest): string {
   }
   return parts.join('\n');
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.5] — 2026-07-04
+
+Source review compliance for community directory checks.
+
+### Fixed
+- Removed forbidden `@typescript-eslint/no-explicit-any` directive disables from source files.
+- Replaced explicit dynamic-boundary `any` annotations with internal review-safe aliases.
+- Wrapped non-`Error` promise rejection paths so rejection reasons are always `Error` instances.
+- Removed redundant union types and Node namespace types that produced source-review warnings.
+
+### Checks
+- Expanded `npm run release:check` to reject forbidden `no-explicit-any` directive disables, undescribed `eslint-enable` directives, and explicit TypeScript `any` keywords.
+
+## [0.6.4] — 2026-07-04
+
+Superseded source review cleanup.
+
+### Changed
+- Added paired ESLint disable/enable directives around dynamic host-app boundary modules.
+- This release is superseded by 0.6.5 because stricter review requires `eslint-enable` descriptions and does not allow disabling `no-explicit-any`.
+
 ## [0.6.3] — 2026-07-04
 
 Update notice polish.

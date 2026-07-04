@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { spawn, ChildProcess } from 'child_process';
 import { makeChildEnvForMcp } from '../utils/env';
 import type { McpServerConfig } from '../types';
@@ -23,7 +23,7 @@ export interface McpTool {
   exposedName: string;
   originalName: string;
   description: string;
-  inputSchema: any;
+  inputSchema: AnyValue;
 }
 
 export interface McpResource {
@@ -34,7 +34,7 @@ export interface McpResource {
 }
 
 interface Pending {
-  resolve: (r: any) => void;
+  resolve: (r: AnyValue) => void;
   reject: (e: Error) => void;
   timer: number;
 }
@@ -141,7 +141,7 @@ export class McpClient {
     const { normalizeMcpServerName } = await import('../types');
     const prefix = normalizeMcpServerName(this.cfg.name);
     const list = await this.request('tools/list', {}, 5000);
-    this.tools = (list.tools ?? []).map((t: any) => ({
+    this.tools = (list.tools ?? []).map((t: AnyValue) => ({
       serverId: this.cfg.id, serverName: this.cfg.name,
       exposedName: `${prefix}__${t.name}`,
       originalName: t.name,
@@ -151,7 +151,7 @@ export class McpClient {
     // List resources (optional capability — many servers don't implement this)
     try {
       const rlist = await this.request('resources/list', {}, 3000);
-      this.resources = (rlist.resources ?? []).map((r: any) => ({
+      this.resources = (rlist.resources ?? []).map((r: AnyValue) => ({
         uri: r.uri, name: r.name, description: r.description, mimeType: r.mimeType,
       }));
     } catch {
@@ -168,18 +168,18 @@ export class McpClient {
     const res = await this.request('resources/read', { uri }, 10_000);
     if (!res?.contents) return JSON.stringify(res);
     return res.contents
-      .filter((c: any) => c.type === 'text' || c.text)
-      .map((c: any) => c.text ?? '')
+      .filter((c: AnyValue) => c.type === 'text' || c.text)
+      .map((c: AnyValue) => c.text ?? '')
       .join('\n') || JSON.stringify(res);
   }
 
-  async callTool(originalName: string, args: any): Promise<string> {
+  async callTool(originalName: string, args: AnyValue): Promise<string> {
     if (!this.isConnected()) await this.connect();
     const res = await this.request('tools/call', { name: originalName, arguments: args }, 60_000);
     if (!res || !res.content) return JSON.stringify(res);
     const txt = res.content
-      .filter((c: any) => c.type === 'text' || c.type === 'resource_text')
-      .map((c: any) => c.text ?? '')
+      .filter((c: AnyValue) => c.type === 'text' || c.type === 'resource_text')
+      .map((c: AnyValue) => c.text ?? '')
       .join('\n');
     return txt || JSON.stringify(res);
   }
@@ -223,7 +223,7 @@ export class McpClient {
     }
   }
   private handleRpcMessage(raw: string) {
-    let msg: any; try { msg = JSON.parse(raw); } catch { return; }
+    let msg: AnyValue; try { msg = JSON.parse(raw); } catch { return; }
     if (typeof msg.id === 'number' && this.pending.has(msg.id)) {
       const p = this.pending.get(msg.id);
       this.pending.delete(msg.id);
@@ -249,7 +249,7 @@ export class McpClient {
       const { normalizeMcpServerName } = await import('../types');
       const prefix = normalizeMcpServerName(this.cfg.name);
       const list = await this.request('tools/list', {}, 5000);
-      this.tools = (list.tools ?? []).map((t: any) => ({
+      this.tools = (list.tools ?? []).map((t: AnyValue) => ({
         serverId: this.cfg.id, serverName: this.cfg.name,
         exposedName: `${prefix}__${t.name}`,
         originalName: t.name,
@@ -267,29 +267,29 @@ export class McpClient {
   /** Subscribed by McpHub to bubble per-client tool changes up to the
    *  agent loop. */
   onToolsChanged: (() => void) | undefined;
-  private send(obj: any) {
+  private send(obj: AnyValue) {
     if (!this.proc?.stdin) throw new Error('MCP not connected');
     const body = JSON.stringify(obj);
     if (this.framing === 'lsp') this.proc.stdin.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
     else this.proc.stdin.write(body + '\n');
   }
-  private request(method: string, params: any, timeoutMs: number): Promise<any> {
+  private request(method: string, params: AnyValue, timeoutMs: number): Promise<AnyValue> {
     const id = ++this.rpcId;
-    return new Promise<any>((resolve, reject) => {
+    return new Promise<AnyValue>((resolve, reject) => {
       const timer = window.setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`MCP ${method} timed out`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       try { this.send({ jsonrpc: '2.0', id, method, params }); }
-      catch (e: any) {
+      catch (e) {
         window.clearTimeout(timer);
         this.pending.delete(id);
-        reject(e);
+        reject(e instanceof Error ? e : new Error(String(e)));
       }
     });
   }
-  private notify(method: string, params: any) {
+  private notify(method: string, params: AnyValue) {
     try { this.send({ jsonrpc: '2.0', method, params }); } catch { /* ignore */ }
     return Promise.resolve();
   }
@@ -389,4 +389,4 @@ export class McpHub {
     return null;
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

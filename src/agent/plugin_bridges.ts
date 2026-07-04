@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Plugin bridge registration — detect-then-register.
  *
@@ -37,14 +37,14 @@ export const BRIDGE_DESCRIPTORS: BridgeDescriptor[] = [
     toolName: 'dataview_query',
     pluginId: 'dataview',
     label: 'Dataview',
-    isReady: (app) => !!(app as any).plugins?.plugins?.['dataview']?.api,
+    isReady: (app) => !!(app as AnyValue).plugins?.plugins?.['dataview']?.api,
   },
   {
     toolName: 'templater_render',
     pluginId: 'templater-obsidian',
     label: 'Templater',
     isReady: (app) => {
-      const t = (app as any).plugins?.plugins?.['templater-obsidian'];
+      const t = (app as AnyValue).plugins?.plugins?.['templater-obsidian'];
       return !!t?.templater;
     },
   },
@@ -53,7 +53,7 @@ export const BRIDGE_DESCRIPTORS: BridgeDescriptor[] = [
     pluginId: 'obsidian-tasks-plugin',
     label: 'Tasks',
     isReady: (app) => {
-      const t = (app as any).plugins?.plugins?.['obsidian-tasks-plugin'];
+      const t = (app as AnyValue).plugins?.plugins?.['obsidian-tasks-plugin'];
       // Tasks plugin exposes apiV1 (and earlier apiV0); accept either.
       return !!(t?.apiV1 || t?.api);
     },
@@ -136,7 +136,7 @@ export function __resetForTests(): void {
 export function watchPluginBridges(app: App): () => void {
   probeBridges(app);
   const handlers: Array<() => void> = [];
-  const events = app.workspace as any;
+  const events = app.workspace as AnyValue;
   const subscribe = (name: string) => {
     const h = events.on?.(name, () => probeBridges(app));
     if (h) handlers.push(() => events.offref?.(h));
@@ -147,7 +147,7 @@ export function watchPluginBridges(app: App): () => void {
   try { subscribe('plugins:plugin-disabled'); } catch { /* ignore */ }
   // Re-probe on layout change too (some plugins finish init after layout).
   try {
-    const h = (app as any).workspace.onLayoutReady?.(() => probeBridges(app));
+    const h = (app as AnyValue).workspace.onLayoutReady?.(() => probeBridges(app));
     if (h) handlers.push(() => {});
   } catch { /* ignore */ }
   return () => {
@@ -156,4 +156,4 @@ export function watchPluginBridges(app: App): () => void {
     }
   };
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

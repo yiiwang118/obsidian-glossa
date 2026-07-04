@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import { parseEnvelope, applyUpdate, looksLikeEnvelope, summarizeOps, seekSequence, type FileOp } from '../patch_envelope';
 import { assertVaultPath, buildTool, vaultFolderOf, type ToolImpl } from './_shared';
@@ -15,7 +15,7 @@ export const applyPatch: ToolImpl = buildTool({
         if (ops.length === 1) {
           const op = ops[0];
           const p = op.kind === 'update' && op.movePath ? `${op.path} → ${op.movePath}`
-                  : (op as any).path;
+                  : (op as AnyValue).path;
           return `patch ${p} (${op.kind === 'update' ? `${op.chunks.length}h` : op.kind})`;
         }
         return `patch envelope (${ops.length} files)`;
@@ -23,7 +23,7 @@ export const applyPatch: ToolImpl = buildTool({
     }
     return `patch ${a.path} (${(a.edits ?? []).length} edits)`;
   },
-  preview: async (app, a: any) => {
+  preview: async (app, a: AnyValue) => {
     if (typeof a.patch === 'string' && looksLikeEnvelope(a.patch)) {
       try {
         const ops = parseEnvelope(a.patch);
@@ -42,7 +42,7 @@ export const applyPatch: ToolImpl = buildTool({
           }
         }
         return lines.join('\n');
-      } catch (e: any) {
+      } catch (e) {
         return `Envelope parse error: ${e.message}`;
       }
     }
@@ -105,16 +105,16 @@ export const applyPatch: ToolImpl = buildTool({
     if (typeof args.patch === 'string' && looksLikeEnvelope(args.patch)) {
       let ops: FileOp[];
       try { ops = parseEnvelope(args.patch); }
-      catch (e: any) { return `Error: ${e.message}`; }
+      catch (e) { return `Error: ${e.message}`; }
       // Pre-validate every path in the envelope before applying anything.
       // Bail before the first write so we don't half-apply a patch when one
       // hunk references a hostile path.
       for (const op of ops) {
-        try { assertVaultPath((op as any).path); }
-        catch (e: any) { return `Error: ${op.kind} has invalid path — ${e.message}`; }
+        try { assertVaultPath((op as AnyValue).path); }
+        catch (e) { return `Error: ${op.kind} has invalid path — ${e.message}`; }
         if (op.kind === 'update' && op.movePath) {
           try { assertVaultPath(op.movePath, 'move target'); }
-          catch (e: any) { return `Error: ${op.kind} → move target invalid — ${e.message}`; }
+          catch (e) { return `Error: ${op.kind} → move target invalid — ${e.message}`; }
         }
       }
       const touched: string[] = [];
@@ -142,7 +142,7 @@ export const applyPatch: ToolImpl = buildTool({
             }
             touched.push(`~${op.movePath ?? op.path}`);
           }
-        } catch (e: any) {
+        } catch (e) {
           return `Error in ${op.kind} ${('path' in op) ? op.path : ''}: ${e.message}`;
         }
       }
@@ -151,7 +151,7 @@ export const applyPatch: ToolImpl = buildTool({
 
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e: any) { return `Error: ${e.message}`; }
+    catch (e) { return `Error: ${e.message}`; }
     const { edits } = args;
     if (!Array.isArray(edits) || edits.length === 0) return 'Error: provide either `patch` (envelope) or `edits` array.';
     const f = app.vault.getAbstractFileByPath(path);
@@ -170,4 +170,4 @@ export const applyPatch: ToolImpl = buildTool({
     return `Patched ${path} (${edits.length} edits).`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

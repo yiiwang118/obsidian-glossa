@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { buildTool, type ToolImpl } from './_shared';
 
 export const todoWrite: ToolImpl = buildTool({
@@ -36,9 +36,9 @@ export const todoWrite: ToolImpl = buildTool({
   },
   run: async (_app, { items }) => {
     if (!Array.isArray(items)) return 'Error: items must be an array.';
-    const inProg = items.filter((i: any) => i.status === 'in_progress').length;
+    const inProg = items.filter((i: AnyValue) => i.status === 'in_progress').length;
     if (inProg > 1) return `Error: ${inProg} items marked in_progress — exactly one allowed at a time.`;
-    const lines = items.map((it: any, idx: number) => {
+    const lines = items.map((it: AnyValue, idx: number) => {
       const mark = it.status === 'completed' ? '[x]'
                 : it.status === 'in_progress' ? '[→]'
                 : '[ ]';
@@ -48,4 +48,4 @@ export const todoWrite: ToolImpl = buildTool({
     return lines.join('\n');
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

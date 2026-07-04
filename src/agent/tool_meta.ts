@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { ICON } from '../ui/icons';
 
 export interface ToolMeta {
@@ -7,7 +7,7 @@ export interface ToolMeta {
   verb: string;          // Active form, e.g. "Reading" → shown while running
   color: string;         // Accent color for status pill
   category: 'read' | 'write' | 'search' | 'web' | 'meta' | 'system';
-  summarize?: (args: any) => string;   // pull a key field out of args for the header line
+  summarize?: (args: AnyValue) => string;   // pull a key field out of args for the header line
 }
 
 export const TOOL_META: Record<string, ToolMeta> = {
@@ -298,7 +298,7 @@ import { getTool } from './tools';
 
 /** Header text shown above the tool card while it runs.
  *  Returns null to let the caller use its own default formatting. */
-export function renderToolUseMessage(name: string, args: any): HTMLElement | string | null {
+export function renderToolUseMessage(name: string, args: AnyValue): HTMLElement | string | null {
   const tool = getTool(name);
   if (tool?.renderToolUseMessage) {
     try { return tool.renderToolUseMessage(args); } catch (e) { console.warn('[tool render] use threw', e); }
@@ -310,7 +310,7 @@ export function renderToolUseMessage(name: string, args: any): HTMLElement | str
 }
 
 /** Result block renderer. Returns null to use the default markdown renderer. */
-export function renderToolResultMessage(name: string, result: string, args: any): HTMLElement | string | null {
+export function renderToolResultMessage(name: string, result: string, args: AnyValue): HTMLElement | string | null {
   const tool = getTool(name);
   if (tool?.renderToolResultMessage) {
     try { return tool.renderToolResultMessage(result, args); } catch (e) { console.warn('[tool render] result threw', e); }
@@ -319,7 +319,7 @@ export function renderToolResultMessage(name: string, result: string, args: any)
 }
 
 /** Rejected-call renderer (user denied approval). */
-export function renderToolUseRejectedMessage(name: string, args: any): HTMLElement | string | null {
+export function renderToolUseRejectedMessage(name: string, args: AnyValue): HTMLElement | string | null {
   const tool = getTool(name);
   if (tool?.renderToolUseRejectedMessage) {
     try { return tool.renderToolUseRejectedMessage(args); } catch (e) { console.warn('[tool render] rejected threw', e); }
@@ -328,7 +328,7 @@ export function renderToolUseRejectedMessage(name: string, args: any): HTMLEleme
 }
 
 /** Errored-call renderer. */
-export function renderToolUseErrorMessage(name: string, error: string, args: any): HTMLElement | string | null {
+export function renderToolUseErrorMessage(name: string, error: string, args: AnyValue): HTMLElement | string | null {
   const tool = getTool(name);
   if (tool?.renderToolUseErrorMessage) {
     try { return tool.renderToolUseErrorMessage(error, args); } catch (e) { console.warn('[tool render] error threw', e); }
@@ -338,7 +338,7 @@ export function renderToolUseErrorMessage(name: string, error: string, args: any
 
 /** Activity description for spinner (e.g. "Reading Foo.md…"). Prefers tool's
  *  own hook; falls back to `${verb} ${summary}` from TOOL_META. */
-export function activityDescriptionFor(name: string, args: any): string {
+export function activityDescriptionFor(name: string, args: AnyValue): string {
   const tool = getTool(name);
   if (tool?.getActivityDescription) {
     try {
@@ -350,4 +350,4 @@ export function activityDescriptionFor(name: string, args: any): string {
   const summary = tool?.getToolUseSummary?.(args) ?? meta.summarize?.(args) ?? '';
   return summary ? `${meta.verb} ${summary}` : meta.verb;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

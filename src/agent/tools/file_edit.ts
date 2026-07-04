@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import { findWithQuoteNormalization, assertVaultPath, buildTool, normalizePathFields, vaultFolderOf, type ToolImpl } from './_shared';
 
@@ -14,7 +14,7 @@ export const fileEdit: ToolImpl = buildTool({
   // be bypassed by passing `./X` vs `X`. The actual `run()` path goes
   // through `assertVaultPath()` which does the same normalization.
   backfillObservableInput: normalizePathFields(['file_path']),
-  preview: async (app, a: any) => {
+  preview: async (app, a: AnyValue) => {
     if (!a.file_path) return '(missing file_path)';
     const f = app.vault.getAbstractFileByPath(a.file_path);
     if (a.old_string === '') {
@@ -58,7 +58,7 @@ export const fileEdit: ToolImpl = buildTool({
     const { old_string, new_string, replace_all } = args;
     let file_path: string;
     try { file_path = assertVaultPath(args.file_path, 'file_path'); }
-    catch (e: any) { return `Error: ${e.message}`; }
+    catch (e) { return `Error: ${e.message}`; }
     if (typeof new_string !== 'string') return 'Error: new_string must be a string.';
     if (typeof old_string !== 'string') return 'Error: old_string must be a string.';
     if (old_string === new_string) return 'Error: old_string and new_string are identical.';
@@ -87,4 +87,4 @@ export const fileEdit: ToolImpl = buildTool({
       : `Edited ${file_path}.`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, TFile, loadPdfJs } from 'obsidian';
 import { textItemsToString } from '../utils/pdf';
 
@@ -143,7 +143,7 @@ async function buildPdfReferenceIndex(app: App, file: TFile, signal?: AbortSigna
     isEvalSupported: false,
   });
 
-  let doc: any | null = null;
+  let doc: AnyValue | null = null;
   try {
     doc = await loadingTask.promise;
     throwIfAborted(signal);
@@ -447,7 +447,7 @@ interface TextLine {
   y: number;
 }
 
-function textItemsToReferenceLines(items: any[], pageWidth: number): string[] {
+function textItemsToReferenceLines(items: AnyValue[], pageWidth: number): string[] {
   const runs: TextRun[] = [];
   for (const item of items ?? []) {
     const text = typeof item?.str === 'string' ? item.str.replace(/\s+/g, ' ').trim() : '';
@@ -552,4 +552,4 @@ const STOP_WORDS = new Set([
   'references',
   'bibliography',
 ]);
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

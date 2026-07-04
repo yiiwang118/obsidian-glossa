@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { buildTool, globToRegExp, type ToolImpl } from './_shared';
 
 /** Lightweight ripgrep-style search using Obsidian's vault + the in-memory FileIndex.
@@ -41,7 +41,7 @@ export const grepVault: ToolImpl = buildTool({
     if (!pattern) return 'Error: pattern is required.';
     let re: RegExp;
     try { re = new RegExp(pattern, args.flags ?? 'i'); }
-    catch (e: any) { return `Error: invalid regex: ${e.message}`; }
+    catch (e) { return `Error: invalid regex: ${e.message}`; }
 
     const max = Math.max(1, Math.min(500, args.max_results ?? 80));
     const ctxLines = Math.max(0, Math.min(5, args.context ?? 0));
@@ -57,10 +57,10 @@ export const grepVault: ToolImpl = buildTool({
 
     // Look up by current id first, fall back to legacy id so the tool still
      // works during the rename transition (or if the user has both installed).
-    const plugin = (app as any).plugins?.plugins?.['glossa']
-               ?? (app as any).plugins?.plugins?.['note-codex']
-               ?? (app as any).plugins?.getPlugin?.('glossa')
-               ?? (app as any).plugins?.getPlugin?.('note-codex');
+    const plugin = (app as AnyValue).plugins?.plugins?.['glossa']
+               ?? (app as AnyValue).plugins?.plugins?.['note-codex']
+               ?? (app as AnyValue).plugins?.getPlugin?.('glossa')
+               ?? (app as AnyValue).plugins?.getPlugin?.('note-codex');
     const useIndex = !!plugin?.fileIndex && plugin.fileIndex.size() > 0;
 
     const matches: { path: string; line: number; text: string; context?: { line: number; text: string }[] }[] = [];
@@ -68,7 +68,7 @@ export const grepVault: ToolImpl = buildTool({
     const YIELD_EVERY = 32;
 
     const files = useIndex
-      ? plugin.fileIndex.list().map((e: any) => app.vault.getAbstractFileByPath(e.path))
+      ? plugin.fileIndex.list().map((e: AnyValue) => app.vault.getAbstractFileByPath(e.path))
       : app.vault.getMarkdownFiles();
 
     outer: for (const f of files) {
@@ -107,4 +107,4 @@ export const grepVault: ToolImpl = buildTool({
     return out.join('\n');
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 // Mode type kept for backwards-compat with persisted sessions, but the active
 // runtime now uses RunMode ('plan' / 'act') everywhere. MODE_LABELS /
 // MODE_DESCRIPTIONS were dead — referenced nowhere — and have been removed.
@@ -15,7 +15,7 @@ export interface TokenUsage {
 export interface ToolEvent {
   id: string;
   name: string;
-  args: any;
+  args: AnyValue;
   result?: string;
   /** Rich result content (e.g. image blocks from view_image). Sent back to the model
    *  on subsequent turns so it can re-reference the image / resource. */
@@ -252,7 +252,7 @@ const PERMISSION_PATH_KEYS = new Set([
   'to',
 ]);
 
-function permissionRulePaths(args: any): string[] {
+function permissionRulePaths(args: AnyValue): string[] {
   if (!args || typeof args !== 'object') return [];
   const out: string[] = [];
   const add = (v: unknown) => {
@@ -280,7 +280,7 @@ function mcpRuleMatches(rule: PermissionRule, toolName: string): boolean {
 }
 
 /** Check whether a rule matches a (tool, args) pair. */
-export function matchPermissionRule(rule: PermissionRule, toolName: string, args: any, currentSessionId?: string): boolean {
+export function matchPermissionRule(rule: PermissionRule, toolName: string, args: AnyValue, currentSessionId?: string): boolean {
   if (rule.scopedToSessionId && rule.scopedToSessionId !== currentSessionId) return false;
   if (rule.tool.startsWith('mcp:')) {
     if (!mcpRuleMatches(rule, toolName)) return false;
@@ -559,4 +559,4 @@ export function modelContextWindow(model: string | undefined | null): number | n
   if (/llama|mistral|mixtral/.test(m)) return 32_000;
   return null;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

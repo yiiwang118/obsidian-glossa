@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * rename_note — move or rename a note, preserving all wikilinks to it.
  *
@@ -35,7 +35,7 @@ export const renameNote: ToolImpl = buildTool({
     try {
       from = assertVaultPath(args.from, 'from');
       to = assertVaultPath(args.to, 'to');
-    } catch (e: any) { return `Error: ${e.message}`; }
+    } catch (e) { return `Error: ${e.message}`; }
     if (from === to) return 'Error: from and to are identical — nothing to rename.';
     const f = app.vault.getAbstractFileByPath(from);
     if (!(f instanceof TFile)) return `Error: source not found: ${from}`;
@@ -45,9 +45,9 @@ export const renameNote: ToolImpl = buildTool({
       if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
       await app.fileManager.renameFile(f, to);
       return `Renamed ${from} → ${to} (backlinks auto-updated).`;
-    } catch (e: any) {
+    } catch (e) {
       return `Error: ${e.message}`;
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

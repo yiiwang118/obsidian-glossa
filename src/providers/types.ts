@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import type { TokenUsage } from '../types';
 
 export type ChatChunk =
@@ -7,9 +7,9 @@ export type ChatChunk =
    *  must be sent back next turn. */
   | { type: 'reasoning'; text: string }
   /** LLM is requesting that we execute this tool. Plugin's agent loop does it. */
-  | { type: 'tool_call'; id: string; name: string; args: any }
+  | { type: 'tool_call'; id: string; name: string; args: AnyValue }
   /** Tool was executed by the provider itself (e.g. CLI in full-agent mode). For display only. */
-  | { type: 'tool_event'; id: string; name: string; args: any; status: 'running' | 'success' | 'error' | 'denied'; result?: string }
+  | { type: 'tool_event'; id: string; name: string; args: AnyValue; status: 'running' | 'success' | 'error' | 'denied'; result?: string }
   | { type: 'final'; text: string; usage?: TokenUsage; reasoningContent?: string }
   /** Server rejected the prompt because it exceeded the model's context window.
    *  The agent loop should react by compacting the conversation and retrying. */
@@ -38,7 +38,7 @@ export interface MessageInput {
   /** For role='assistant' — preserves the structured tool_use blocks so the
    * provider can re-emit them in the API's required format (OpenAI tool_calls /
    * Anthropic content blocks). Required for multi-step agent loops. */
-  toolCalls?: { id: string; name: string; args: any }[];
+  toolCalls?: { id: string; name: string; args: AnyValue }[];
   /** For role='assistant' — DeepSeek-reasoner / Anthropic-thinking style models
    * require their chain-of-thought blob to be sent back as `reasoning_content`
    * on the next request. Without this the API rejects the call. */
@@ -48,7 +48,7 @@ export interface MessageInput {
 export interface ToolSpec {
   name: string;
   description: string;
-  parameters: any;     // JSON schema
+  parameters: AnyValue;     // JSON schema
 }
 
 export interface ChatRequest {
@@ -70,4 +70,4 @@ export interface LLMProvider {
   defaultModel(): string;
   stream(req: ChatRequest): AsyncGenerator<ChatChunk>;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

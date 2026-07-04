@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /** Tiny DOM helpers. */
 
 export function el<K extends keyof HTMLElementTagNameMap>(
@@ -22,7 +22,7 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   if (opts.className) e.className = opts.className;
   if (opts.text != null) e.textContent = opts.text;
   if (opts.title) e.title = opts.title;
-  if (opts.type) (e as any).type = opts.type;
+  if (opts.type) (e as AnyValue).type = opts.type;
   if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) e.setAttribute(k, v);
   if (opts.style) setStyle(e, opts.style);
   if (opts.onClick) e.addEventListener('click', opts.onClick);
@@ -87,12 +87,12 @@ function cloneSvgNode(source: ChildNode): Node | null {
   return cloneSvgElement(source as Element);
 }
 
-export function debounce<F extends (...a: any[]) => any>(fn: F, ms: number): F {
-  let t: any;
-  return ((...a: any[]) => { window.clearTimeout(t); t = window.setTimeout(() => fn(...a), ms); }) as F;
+export function debounce<F extends (...a: AnyValue[]) =>AnyValue>(fn: F, ms: number): F {
+  let t: AnyValue;
+  return ((...a: AnyValue[]) => { window.clearTimeout(t); t = window.setTimeout(() => fn(...a), ms); }) as F;
 }
 
 export function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

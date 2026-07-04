@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * tasks_query — bridge to the Tasks plugin\'s query DSL.
  *
@@ -17,21 +17,21 @@ interface TasksTaskResult {
   taskLocation?: { tasksFile?: { path?: string }; lineNumber?: number };
   description?: string;
   status?: { symbol?: string };
-  dueDate?: any;
-  scheduledDate?: any;
-  startDate?: any;
-  doneDate?: any;
+  dueDate?: AnyValue;
+  scheduledDate?: AnyValue;
+  startDate?: AnyValue;
+  doneDate?: AnyValue;
   tags?: string[];
   // Different versions expose different shapes; we read defensively below.
   [k: string]: unknown;
 }
 
-function getTasksApi(app: any): any | null {
+function getTasksApi(app: AnyValue): AnyValue | null {
   const plugin = app?.plugins?.plugins?.['obsidian-tasks-plugin'];
   return plugin?.apiV1 ?? plugin?.api ?? null;
 }
 
-function fmtDate(d: any): string {
+function fmtDate(d: AnyValue): string {
   if (!d) return '';
   if (typeof d === 'string') return d;
   // Tasks uses moment objects — call format if available, else toString.
@@ -94,9 +94,9 @@ export const tasksQuery: ToolImpl = buildTool({
       });
       const tail = tasks.length > cap.length ? `\n\n[+${tasks.length - cap.length} more truncated]` : '';
       return `${cap.length} of ${tasks.length} task${tasks.length === 1 ? '' : 's'}:\n\n${lines.join('\n')}${tail}`;
-    } catch (e: any) {
+    } catch (e) {
       return `Tasks plugin error: ${e?.message ?? e}`;
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

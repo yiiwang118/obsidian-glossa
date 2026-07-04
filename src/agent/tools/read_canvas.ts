@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * read_canvas — parse a .canvas file and return its structured contents.
  *
@@ -39,8 +39,8 @@ export const readCanvas: ToolImpl = buildTool({
   isDestructive: () => false,
   searchHint: 'parse json canvas file nodes edges',
   backfillObservableInput(input) {
-    if (typeof (input as any).path === 'string') {
-      (input as any).path = ((input as any).path as string).replace(/^\.\//, '').trim();
+    if (typeof (input as AnyValue).path === 'string') {
+      (input as AnyValue).path = ((input as AnyValue).path as string).replace(/^\.\//, '').trim();
     }
   },
   describe: a => `read canvas ${a.path}`,
@@ -94,14 +94,14 @@ export const readCanvas: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e: any) { return `Error: ${e.message}`; }
+    catch (e) { return `Error: ${e.message}`; }
     if (!path.endsWith('.canvas')) return `Error: ${path} is not a .canvas file.`;
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;
     const raw = await app.vault.read(f);
     let doc: CanvasDoc;
     try { doc = JSON.parse(raw); }
-    catch (e: any) { return `Error: invalid JSON in ${path}: ${e.message}`; }
+    catch (e) { return `Error: invalid JSON in ${path}: ${e.message}`; }
     const nodes = doc.nodes ?? [];
     const edges = doc.edges ?? [];
     const byType = new Map<string, number>();
@@ -119,4 +119,4 @@ export const readCanvas: ToolImpl = buildTool({
     return summary;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

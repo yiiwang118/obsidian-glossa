@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -123,7 +123,7 @@ export class CodexCliProvider implements LLMProvider {
     args.push('-c', 'sandbox_mode="read-only"',
               '-c', 'approval_policy="never"',
               '-c', 'model_reasoning_effort="low"');
-    const explicitProxy = (this as any).__proxy as string | undefined;
+    const explicitProxy = (this as AnyValue).__proxy as string | undefined;
     const childEnv = makeChildEnv(explicitProxy);
     const shellSnap = shellEnvSnapshot();
     const proxySource: 'settings' | 'shell-rc' | 'none' = explicitProxy
@@ -157,7 +157,7 @@ export class CodexCliProvider implements LLMProvider {
       let proc: ReturnType<typeof spawn>;
       try {
         proc = spawn(this.ep.binaryPath, args, { cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'] });
-      } catch (e: any) {
+      } catch (e) {
         spawnErr = `Failed to spawn: ${e.message}`;
         resolve();
         return;
@@ -210,7 +210,7 @@ export class CodexCliProvider implements LLMProvider {
       try {
         proc.stdin?.write('Reply with the single word: pong\n');
         proc.stdin?.end();
-      } catch (e: any) { spawnErr = `stdin write failed: ${e.message}`; }
+      } catch (e) { spawnErr = `stdin write failed: ${e.message}`; }
     });
 
     const durationMs = Date.now() - started;
@@ -337,7 +337,7 @@ export class CodexCliProvider implements LLMProvider {
     // if they hit a regression.
     if (this.ep.codexUseAppServer !== false) {
       const { streamViaAppServer } = await import('./codex_app_server');
-      yield* streamViaAppServer(this.ep, req, (this as any).__proxy, (this as any).__fallbackCwd);
+      yield* streamViaAppServer(this.ep, req, (this as AnyValue).__proxy, (this as AnyValue).__fallbackCwd);
       return;
     }
 
@@ -404,23 +404,23 @@ export class CodexCliProvider implements LLMProvider {
     // Validate cwd — passing a non-existent path to spawn() throws synchronously and
     // the user just sees nothing. Fall back to vault root / $HOME if invalid.
     let cwd: string | undefined = this.ep.cwd && fs.existsSync(this.ep.cwd) ? this.ep.cwd : undefined;
-    if (!cwd) cwd = (this as any).__fallbackCwd;
+    if (!cwd) cwd = (this as AnyValue).__fallbackCwd;
     if (!cwd || !fs.existsSync(cwd)) cwd = process.env.HOME || process.cwd();
 
     let proc: ReturnType<typeof spawn>;
     try {
       proc = spawn(this.ep.binaryPath, args, {
         cwd,
-        env: makeChildEnv((this as any).__proxy),
+        env: makeChildEnv((this as AnyValue).__proxy),
       });
-    } catch (e: any) {
+    } catch (e) {
       yield { type: 'error', error: `Failed to spawn codex: ${e.message ?? e}\nBinary: ${this.ep.binaryPath}\ncwd: ${cwd}` };
       return;
     }
     let earlySpawnError: string | null = null;
-    proc.on('error', (e: any) => { earlySpawnError = `codex spawn error: ${e.message ?? e}`; });
+    proc.on('error', (e: AnyValue) => { earlySpawnError = `codex spawn error: ${e.message ?? e}`; });
 
-    try { proc.stdin.write(prompt); } catch (e: any) {
+    try { proc.stdin.write(prompt); } catch (e) {
       yield { type: 'error', error: `codex stdin write failed: ${e.message ?? e}\nCheck binaryPath + cwd in settings, and try the Test button.` };
       return;
     }
@@ -439,7 +439,7 @@ export class CodexCliProvider implements LLMProvider {
 
     // Per-request debug log gated by a settings flag — quiet by default, helpful
     // when the sidebar shows nothing and we need to see what codex is emitting.
-    const debug = !!(this.ep as any).cliDebug;
+    const debug = !!(this.ep as AnyValue).cliDebug;
     if (debug) {
       console.debug('[Glossa] codex spawn:', { args, cwd, modelArg, promptLen: prompt.length, fullAgent: !!this.ep.cliFullAgent });
     }
@@ -479,14 +479,14 @@ export class CodexCliProvider implements LLMProvider {
     // users couldn't tell how much they'd spent.
     let capturedUsage: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | null = null;
 
-    for await (const chunk of proc.stdout as any) {
+    for await (const chunk of proc.stdout as AnyValue) {
       buf += chunk.toString('utf-8');
       const lines = buf.split('\n');
       buf = lines.pop() ?? '';
       for (const line of lines) {
         const s = line.trim();
         if (!s) continue;
-        let ev: any; try { ev = JSON.parse(s); } catch { continue; }
+        let ev: AnyValue; try { ev = JSON.parse(s); } catch { continue; }
         const evType: string | undefined = ev?.type;
         if (debug) console.debug('[Glossa] codex ev:', evType, ev?.item?.type ?? '', JSON.stringify(ev).slice(0, 200));
 
@@ -694,4 +694,4 @@ function serializeMessages(req: ChatRequest): string {
   }
   return parts.join('\n');
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

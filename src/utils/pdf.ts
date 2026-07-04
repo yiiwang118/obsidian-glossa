@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { loadPdfJs } from 'obsidian';
 
 export interface PdfExtractionOptions {
@@ -130,7 +130,7 @@ export async function extractPdfTextFromArrayBuffer(data: ArrayBuffer | Uint8Arr
   return extractPdfTextWithPdfJs(pdfjs, data, opts);
 }
 
-export async function extractPdfTextWithPdfJs(pdfjs: any, data: ArrayBuffer | Uint8Array, opts: PdfExtractionOptions = {}): Promise<PdfExtractionResult> {
+export async function extractPdfTextWithPdfJs(pdfjs: AnyValue, data: ArrayBuffer | Uint8Array, opts: PdfExtractionOptions = {}): Promise<PdfExtractionResult> {
   if (!pdfjs?.getDocument) throw new Error('PDF.js is not available.');
   throwIfAborted(opts.signal);
 
@@ -141,7 +141,7 @@ export async function extractPdfTextWithPdfJs(pdfjs: any, data: ArrayBuffer | Ui
     isEvalSupported: false,
   });
 
-  let doc: any | null = null;
+  let doc: AnyValue | null = null;
   try {
     doc = await loadingTask.promise;
     throwIfAborted(opts.signal);
@@ -267,7 +267,7 @@ export function formatPdfDiagnosticMarkdown(result: PdfExtractionResult): string
   return lines.join('\n');
 }
 
-export function textItemsToString(items: any[]): string {
+export function textItemsToString(items: AnyValue[]): string {
   const lines: string[] = [];
   let line = '';
   let lineY: number | null = null;
@@ -360,7 +360,7 @@ function selectionFromPages(pages: number[], pageCount: number, maxPages: number
   };
 }
 
-async function readPdfMetadataTitle(doc: any): Promise<string | undefined> {
+async function readPdfMetadataTitle(doc: AnyValue): Promise<string | undefined> {
   try {
     const metadata = await doc?.getMetadata?.();
     const info = metadata?.info ?? {};
@@ -557,4 +557,4 @@ function clampInt(value: number, min: number, max: number): number {
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error('PDF extraction aborted.');
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

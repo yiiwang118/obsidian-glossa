@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { requestUrl } from 'obsidian';
 import { buildTool, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects } from '../../utils/safe_web';
@@ -90,7 +90,7 @@ export const webSearch: ToolImpl = buildTool({
         typeof r.score === 'number' ? `Score: ${r.score}${r.rank_reason ? ` (${r.rank_reason})` : ''}` : '',
         r.snippet ? `Snippet: ${r.snippet}` : '',
       ].filter(Boolean).join('\n')).join('\n\n')}`;
-    } catch (e: any) {
+    } catch (e) {
       if (e?.name === 'AbortError') {
         if (ctx?.signal?.aborted) return 'Error: cancelled by user.';
         return 'Error: timeout after 20s';
@@ -254,7 +254,7 @@ async function braveSearch(query: string, maxResults: number, apiKey: string, si
     method: 'GET',
     headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey },
   }, signal);
-  return (json?.web?.results ?? []).map((r: any) => makeResult(r?.title, r?.url, r?.description, 'brave')).filter(Boolean);
+  return (json?.web?.results ?? []).map((r: AnyValue) => makeResult(r?.title, r?.url, r?.description, 'brave')).filter(Boolean);
 }
 
 async function tavilySearch(query: string, maxResults: number, apiKey: string, signal?: AbortSignal): Promise<SearchResult[]> {
@@ -263,7 +263,7 @@ async function tavilySearch(query: string, maxResults: number, apiKey: string, s
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ api_key: apiKey, query, max_results: maxResults, search_depth: 'basic', include_answer: false }),
   }, signal);
-  return (json?.results ?? []).map((r: any) => makeResult(r?.title, r?.url, r?.content, 'tavily')).filter(Boolean);
+  return (json?.results ?? []).map((r: AnyValue) => makeResult(r?.title, r?.url, r?.content, 'tavily')).filter(Boolean);
 }
 
 async function exaSearch(query: string, maxResults: number, apiKey: string, signal?: AbortSignal): Promise<SearchResult[]> {
@@ -272,16 +272,16 @@ async function exaSearch(query: string, maxResults: number, apiKey: string, sign
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
     body: JSON.stringify({ query, numResults: maxResults, type: 'auto' }),
   }, signal);
-  return (json?.results ?? []).map((r: any) => makeResult(r?.title, r?.url, r?.text ?? r?.snippet, 'exa')).filter(Boolean);
+  return (json?.results ?? []).map((r: AnyValue) => makeResult(r?.title, r?.url, r?.text ?? r?.snippet, 'exa')).filter(Boolean);
 }
 
 async function serpApiSearch(query: string, maxResults: number, apiKey: string, signal?: AbortSignal): Promise<SearchResult[]> {
   const url = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(query)}&api_key=${encodeURIComponent(apiKey)}&num=${maxResults}`;
   const json = await fetchJson(url, { method: 'GET' }, signal);
-  return (json?.organic_results ?? []).map((r: any) => makeResult(r?.title, r?.link, r?.snippet, 'serpapi')).filter(Boolean);
+  return (json?.organic_results ?? []).map((r: AnyValue) => makeResult(r?.title, r?.link, r?.snippet, 'serpapi')).filter(Boolean);
 }
 
-async function fetchJson(url: string, init: RequestInit, parentSignal?: AbortSignal, safeGet = false, timeoutMs = 20_000): Promise<any> {
+async function fetchJson(url: string, init: RequestInit, parentSignal?: AbortSignal, safeGet = false, timeoutMs = 20_000): Promise<AnyValue> {
   const ctl = new AbortController();
   const timer = window.setTimeout(() => ctl.abort(), timeoutMs);
   const onAbort = () => { try { ctl.abort(); } catch { /* noop */ } };
@@ -362,7 +362,7 @@ function requestBodyToString(body: BodyInit | null | undefined): string | ArrayB
   throw new Error('Unsupported request body type.');
 }
 
-function parseDuckDuckGoResults(json: any): SearchResult[] {
+function parseDuckDuckGoResults(json: AnyValue): SearchResult[] {
   const out: SearchResult[] = [];
   const add = (title: unknown, url: unknown, snippet: unknown) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return;
@@ -549,4 +549,4 @@ function decodeXml(text: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'");
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

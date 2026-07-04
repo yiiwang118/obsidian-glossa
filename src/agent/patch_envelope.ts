@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Codex-style `apply_patch` envelope parser + applier.
  * Ported from /codex-rs/apply-patch (parser.rs, seek_sequence.rs) to TypeScript.
@@ -242,7 +242,7 @@ export async function previewEnvelope(
 ): Promise<{ ops: FileOp[]; files: EnvelopeFilePreview[]; parseError?: string }> {
   let ops: FileOp[];
   try { ops = parseEnvelope(envelope); }
-  catch (e: any) { return { ops: [], files: [], parseError: e.message }; }
+  catch (e) { return { ops: [], files: [], parseError: e.message }; }
 
   const files: EnvelopeFilePreview[] = [];
   for (const op of ops) {
@@ -271,7 +271,7 @@ export async function previewEnvelope(
       try {
         const next = applyUpdate(cur, op.chunks);
         files.push({ kind: 'update', path: op.path, movePath: op.movePath, oldText: cur, newText: next });
-      } catch (e: any) {
+      } catch (e) {
         files.push({ kind: 'update', path: op.path, movePath: op.movePath, oldText: cur, newText: cur, warning: `hunk did not match — ${e.message}` });
       }
     }
@@ -302,4 +302,4 @@ export function summarizeOps(ops: FileOp[]): string {
   }
   return lines.join('\n');
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

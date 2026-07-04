@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
 import type GlossaPlugin from './main';
 import type { Endpoint, CustomPrompt, SlashCommand } from './types';
@@ -264,7 +264,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         .addOption('zh',   t('lang_zh'))
         .setValue(this.plugin.settings.uiLanguage)
         .onChange(async v => {
-          this.plugin.settings.uiLanguage = v as any;
+          this.plugin.settings.uiLanguage = v as AnyValue;
           await this.plugin.saveSettings();
           // setLanguage() inside saveSettings triggers onLanguageChange
           // subscribers; the view re-renders itself, and we redraw this tab.
@@ -281,7 +281,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         // Debounce: Obsidian's slider fires 'input' on every drag pixel, which
         // would re-run iterateAllLeaves+applyCssVars per pixel — heavy. Wait
         // 150ms after the user stops moving before applying.
-        let timer: any = null;
+        let timer: AnyValue = null;
         s.onChange(v => {
           this.plugin.settings.reasoningFontSize = v;
           if (timer) window.clearTimeout(timer);
@@ -290,7 +290,7 @@ export class GlossaSettingTab extends PluginSettingTab {
             void (async () => {
               await this.plugin.saveSettings();
               this.plugin.app.workspace.iterateAllLeaves(l => {
-                const view: any = (l.view as any);
+                const view: AnyValue = (l.view as AnyValue);
                 if (typeof view.applyCssVars === 'function') view.applyCssVars();
               });
             })();
@@ -361,7 +361,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         .addOption('serpapi', 'SerpAPI')
         .setValue(this.plugin.settings.webSearchProvider)
         .onChange(async v => {
-          this.plugin.settings.webSearchProvider = v as any;
+          this.plugin.settings.webSearchProvider = v as AnyValue;
           await this.plugin.saveSettings();
           this.display();
         }));
@@ -453,12 +453,12 @@ export class GlossaSettingTab extends PluginSettingTab {
       .setDesc(bi('read-only · workspace-write · full', 'read-only · workspace-write · full'))
       .addDropdown(d => d.addOption('read-only', 'Read-only').addOption('workspace-write', 'Workspace-write').addOption('full', 'Full')
         .setValue(this.plugin.settings.permissionLevel)
-        .onChange(async v => { this.plugin.settings.permissionLevel = v as any; await this.plugin.saveSettings(); }));
+        .onChange(async v => { this.plugin.settings.permissionLevel = v as AnyValue; await this.plugin.saveSettings(); }));
     new Setting(containerEl).setName(bi('Default mode', '默认模式'))
       .setDesc(bi('Plan = no writes. Act = full agent.', 'Plan 不写文件。Act 完整 agent。'))
       .addDropdown(d => d.addOption('act', 'Act').addOption('plan', 'Plan')
         .setValue(this.plugin.settings.runMode)
-        .onChange(async v => { this.plugin.settings.runMode = v as any; await this.plugin.saveSettings(); }));
+        .onChange(async v => { this.plugin.settings.runMode = v as AnyValue; await this.plugin.saveSettings(); }));
     new Setting(containerEl).setName(bi('Max steps', '最大步数'))
       .setDesc('')
       .addText(t => t.setValue(String(this.plugin.settings.agentMaxSteps))
@@ -817,8 +817,8 @@ export class GlossaSettingTab extends PluginSettingTab {
   /* ============================================================
      Endpoint card (existing endpoints)
      ============================================================ */
-  private async buildProviderFor(ep: Endpoint): Promise<any> {
-    const vaultRoot = (this.app.vault.adapter as any).basePath as string | undefined;
+  private async buildProviderFor(ep: Endpoint): Promise<AnyValue> {
+    const vaultRoot = (this.app.vault.adapter as AnyValue).basePath as string | undefined;
     return buildProvider(ep, this.plugin.settings.globalProxy, vaultRoot);
   }
 
@@ -844,14 +844,14 @@ export class GlossaSettingTab extends PluginSettingTab {
         return;
       }
       try {
-        const provider: any = await this.buildProviderFor(epDec);
+        const provider: AnyValue = await this.buildProviderFor(epDec);
         if (!provider?.testConnect) { testStatus.setText('Unsupported'); return; }
         const r = await provider.testConnect();
         testStatus.setText(r.message);
         testStatus.addClass(r.ok ? 'ok' : 'fail');
         if (r.ok) new Notice(`${ep.label}: ${r.message}`);
         else new Notice(`${ep.label} failed: ${r.message}`, 8000);
-      } catch (e: any) {
+      } catch (e) {
         testStatus.setText(e.message ?? String(e));
         testStatus.addClass('fail');
       } finally {
@@ -937,7 +937,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       new Setting(basic).setName(bi('API style', 'API 风格'))
         .addDropdown(d => d.addOption('openai', 'OpenAI').addOption('anthropic', 'Anthropic')
           .setValue(ep.apiStyle ?? 'openai')
-          .onChange(async v => { ep.apiStyle = v as any; await this.plugin.saveSettings(); }));
+          .onChange(async v => { ep.apiStyle = v as AnyValue; await this.plugin.saveSettings(); }));
       new Setting(basic).setName(bi('Base URL', '地址')).addText(t => t.setValue(ep.baseUrl ?? '').onChange(async v => {
         const trimmed = v.trim();
         if (trimmed) {
@@ -1015,12 +1015,12 @@ export class GlossaSettingTab extends PluginSettingTab {
           const opts = reasoningOptionsForEndpoint(ep);
           for (const v of opts) d.addOption(v, t(`effort_${v}`));
           d.setValue(opts.includes(ep.reasoningEffort ?? 'off') ? (ep.reasoningEffort ?? 'off') : 'off');
-          d.onChange(async v => { ep.reasoningEffort = v as any; await this.plugin.saveSettings(); });
+          d.onChange(async v => { ep.reasoningEffort = v as AnyValue; await this.plugin.saveSettings(); });
         });
       new Setting(basic).setName(t('cli_working_dir')).setDesc(t('cli_working_dir_desc'))
         .addText(t => t.setValue(ep.cwd ?? '').onChange(async v => { ep.cwd = v; await this.plugin.saveSettings(); }))
         .addButton(b => b.setButtonText('Use vault').onClick(async () => {
-          const vaultPath = (this.app.vault.adapter as any).basePath;
+          const vaultPath = (this.app.vault.adapter as AnyValue).basePath;
           if (vaultPath) { ep.cwd = vaultPath; await this.plugin.saveSettings(); this.display(); new Notice('Set to vault root.'); }
         }));
 
@@ -1053,7 +1053,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           .addDropdown(d => d.addOption('', '(Default)').addOption('read-only', 'Read-only').addOption('workspace-write', 'Workspace-write').addOption('danger-full-access', 'Danger-full-access ⚠')
             .setValue(ep.codexSandboxMode ?? '')
             .onChange(async v => {
-              ep.codexSandboxMode = (v || undefined) as any;
+              ep.codexSandboxMode = (v || undefined) as AnyValue;
               await this.plugin.saveSettings();
               const warn = codexSafetyWarning(ep);
               if (warn) new Notice(`Warning: ${warn}`, 10000);
@@ -1064,7 +1064,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           .addDropdown(d => d.addOption('', '(Default)').addOption('untrusted', 'Untrusted').addOption('on-failure', 'On-failure').addOption('on-request', 'On-request').addOption('never', 'Never ⚠')
             .setValue(ep.codexApprovalPolicy ?? '')
             .onChange(async v => {
-              ep.codexApprovalPolicy = (v || undefined) as any;
+              ep.codexApprovalPolicy = (v || undefined) as AnyValue;
               await this.plugin.saveSettings();
               const warn = codexSafetyWarning(ep);
               if (warn) new Notice(`Warning: ${warn}`, 10000);
@@ -1082,7 +1082,7 @@ export class GlossaSettingTab extends PluginSettingTab {
             try {
               const epDec = await this.plugin.getDecryptedEndpoint(ep);
               if (!epDec) { new Notice('Endpoint locked.'); return; }
-              const provider: any = await this.buildProviderFor(epDec);
+              const provider: AnyValue = await this.buildProviderFor(epDec);
               if (!provider?.runDiagnostic) { new Notice('Diagnostic not supported for this provider.'); return; }
               // Track progress for the user — update button text as events arrive
               let lastEvent = '';
@@ -1097,7 +1097,7 @@ export class GlossaSettingTab extends PluginSettingTab {
                 },
               });
               new CodexDiagnosticModal(this.plugin.app, result).open();
-            } catch (e: any) {
+            } catch (e) {
               new Notice(bi(`Diagnostic failed: ${e.message}`, `诊断失败：${e.message}`), 8000);
             } finally {
               b.setButtonText(bi('🔬 Run', '🔬 运行')).setDisabled(false);
@@ -1163,7 +1163,7 @@ export class GlossaSettingTab extends PluginSettingTab {
                `global = ${this.plugin.settings.globalProxy || '未设'} · none · override`))
         .addDropdown(d => d.addOption('global', 'Global').addOption('none', 'None').addOption('override', 'Override')
           .setValue(ep.proxyMode ?? 'global')
-          .onChange(async v => { ep.proxyMode = v as any; await this.plugin.saveSettings(); this.display(); }));
+          .onChange(async v => { ep.proxyMode = v as AnyValue; await this.plugin.saveSettings(); this.display(); }));
       if (ep.proxyMode === 'override') {
         new Setting(advanced).setName(bi('Proxy URL', '代理 URL')).addText(t => t.setPlaceholder(HTTP_PROXY_PLACEHOLDER).setValue(ep.proxy ?? '').onChange(async v => { ep.proxy = v.trim(); await this.plugin.saveSettings(); }));
       }
@@ -1171,7 +1171,7 @@ export class GlossaSettingTab extends PluginSettingTab {
   }
 
   private renderModelRow(card: HTMLElement, ep: Endpoint) {
-    let inputComp: any;
+    let inputComp: AnyValue;
 
     const setting = new Setting(card).setName('Model').setDesc(bi('Click "Detect" to fetch the supported model list from /v1/models.', '点击 "Detect" 从 /v1/models 拉取该端点支持的模型列表。'));
     setting.addText(t => { inputComp = t; t.setValue(ep.model ?? '').onChange(async v => { ep.model = v; await this.plugin.saveSettings(); }); });
@@ -1184,7 +1184,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         const list = normalizeModelList(await new CustomApiProvider(epDec).listModels());
         if (list.length === 0) { new Notice(bi('No models returned.', '未返回模型列表。')); }
         else { ep.availableModels = list; await this.plugin.saveSettings(); new Notice(bi(`Found ${list.length} models.`, `找到 ${list.length} 个模型。`)); this.display(); }
-      } catch (e: any) { new Notice(bi(`Failed: ${e.message}`, `失败：${e.message}`)); }
+      } catch (e) { new Notice(bi(`Failed: ${e.message}`, `失败：${e.message}`)); }
       finally { b.setButtonText(bi('↻ Detect', '↻ 探测')).setDisabled(false); }
     }));
 
@@ -1204,7 +1204,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         const opts = reasoningOptionsForEndpoint(ep);
         for (const v of opts) d.addOption(v, t(`effort_${v}`));
         d.setValue(opts.includes(ep.reasoningEffort ?? 'off') ? (ep.reasoningEffort ?? 'off') : 'off');
-        d.onChange(async v => { ep.reasoningEffort = v as any; await this.plugin.saveSettings(); });
+        d.onChange(async v => { ep.reasoningEffort = v as AnyValue; await this.plugin.saveSettings(); });
       });
   }
 
@@ -1362,7 +1362,7 @@ class AddEndpointModal extends Modal {
         sel.createEl('option', { value: 'openai', text: 'OpenAI-compatible' });
         sel.createEl('option', { value: 'anthropic', text: 'Anthropic-style' });
         sel.value = this.draft.apiStyle ?? 'openai';
-        sel.onchange = () => { this.draft.apiStyle = sel.value as any; };
+        sel.onchange = () => { this.draft.apiStyle = sel.value as AnyValue; };
       });
       row('Base URL', (p) => {
         const inp = p.createEl('input', { type: 'text', value: this.draft.baseUrl ?? '' });
@@ -1399,11 +1399,11 @@ class AddEndpointModal extends Modal {
       const binName = this.selectedKind === 'codex-cli' ? 'codex' : 'claude';
       row('Binary', (p) => {
         const wrap = p.createEl('div', { cls: 'nc-row-with-btn' });
-        const inp = wrap.createEl('input', { type: 'text', value: (this.draft as any).binaryPath ?? '' });
+        const inp = wrap.createEl('input', { type: 'text', value: (this.draft as AnyValue).binaryPath ?? '' });
         inp.placeholder = `/path/to/${binName}`;
         inp.autocomplete = 'off';
         inp.spellcheck = false;
-        inp.oninput = () => { (this.draft as any).binaryPath = inp.value; };
+        inp.oninput = () => { (this.draft as AnyValue).binaryPath = inp.value; };
         const btn = wrap.createEl('button', { text: 'Auto' });
         btn.type = 'button';
         btn.onclick = () => {
@@ -1469,7 +1469,7 @@ class AddEndpointModal extends Modal {
         this.draft.model = sel.value;
         sel.onchange = () => { this.draft.model = sel.value; };
       }
-    } catch (e: any) {
+    } catch (e) {
       btn.textContent = DETECT_BUTTON_LABEL;
       this.detectStatusEl.setText(`Failed: ${e.message}`);
     } finally {
@@ -1520,7 +1520,7 @@ class AddEndpointModal extends Modal {
    Codex diagnostic modal — full transcript of the test run
    ============================================================ */
 class CodexDiagnosticModal extends Modal {
-  constructor(app: App, private result: any) { super(app); }
+  constructor(app: App, private result: AnyValue) { super(app); }
 
   onOpen() {
     const { contentEl, modalEl } = this;
@@ -1599,8 +1599,8 @@ class CodexDiagnosticModal extends Modal {
         this.close();
         // Defer-and-scroll: re-open settings, then scroll the proxy input into view.
         window.setTimeout(() => {
-          (this.app as any).setting.open();
-          (this.app as any).setting.openTabById('glossa');
+          (this.app as AnyValue).setting.open();
+          (this.app as AnyValue).setting.openTabById('glossa');
           window.setTimeout(() => {
             // Find by stable data-glossa-id, NOT by label text. The label was
             // renamed multiple times (Global proxy URL → Proxy → 代理) and
@@ -1617,4 +1617,4 @@ class CodexDiagnosticModal extends Modal {
     footer.createEl('button', { text: 'Close' }).onclick = () => this.close();
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Skills system — vault-stored prompt skills the model can discover and invoke.
  * Mirrors upstream Claude Code's SkillTool. Each skill lives at
@@ -102,7 +102,7 @@ function parseInlineArray(raw: string): string[] {
  *  - quoted strings `"x"` / `'x'`
  *  - booleans `true` / `false` / `yes` / `no`
  *  - bare strings (returned as-is). */
-function parseScalar(raw: string): any {
+function parseScalar(raw: string): AnyValue {
   const val = raw.trim();
   if (val.startsWith('[') && val.endsWith(']')) return parseInlineArray(val);
   if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
@@ -144,7 +144,7 @@ function asBoolean(v: unknown): boolean | undefined {
  *  saved files) and Windows CRLF line endings — both would otherwise cause
  *  the opening `---` not to match, and the entire SKILL.md would be treated
  *  as having no frontmatter. */
-function parseFrontmatter(text: string): { meta: Record<string, any>; body: string } {
+function parseFrontmatter(text: string): { meta: Record<string,AnyValue>; body: string } {
   // Strip BOM if present, then normalise CRLF → LF for the regex test.
   // We keep the original line endings inside `body` because that's what the
   // skill body cares about for code-block fidelity; only the frontmatter
@@ -152,7 +152,7 @@ function parseFrontmatter(text: string): { meta: Record<string, any>; body: stri
   const stripped = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
   const m = stripped.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!m) return { meta: {}, body: stripped };
-  const meta: Record<string, any> = {};
+  const meta: Record<string,AnyValue> = {};
   const lines = m[1].replace(/\r\n/g, '\n').split('\n');
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -180,7 +180,7 @@ function parseFrontmatter(text: string): { meta: Record<string, any>; body: stri
 }
 
 /** Parse the extended fields out of a metadata object. Shared between disk + bundled. */
-export function parseSkillFrontmatter(meta: Record<string, any>, fallbackName: string): {
+export function parseSkillFrontmatter(meta: Record<string,AnyValue>, fallbackName: string): {
   title: string;
   description: string;
   triggers?: string[];
@@ -538,4 +538,4 @@ export async function getSkill(app: App, name: string): Promise<Skill | null> {
   const all = await discoverSkills(app);
   return all.find(s => s.name === name) ?? null;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
