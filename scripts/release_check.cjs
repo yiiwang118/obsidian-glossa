@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const { execFileSync } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
 function fail(message) {
   console.error(`release:check failed: ${message}`);
@@ -46,8 +47,35 @@ if (/[\r\n]/.test(description)) {
 if (pkg.description !== manifest.description) {
   fail('package description must match manifest.description.');
 }
-for (const path of ['README.md', 'LICENSE', 'PRIVACY.md', 'SECURITY.md', 'CHANGELOG.md', 'styles.css']) {
-  if (!fs.existsSync(path)) fail(`${path} is missing.`);
+for (const requiredPath of ['README.md', 'LICENSE', 'PRIVACY.md', 'SECURITY.md', 'CHANGELOG.md', 'styles.css']) {
+  if (!fs.existsSync(requiredPath)) fail(`${requiredPath} is missing.`);
+}
+
+function listTsFiles(dir) {
+  const out = [];
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, ent.name);
+    if (ent.isDirectory()) out.push(...listTsFiles(p));
+    else if (ent.isFile() && p.endsWith('.ts')) out.push(p);
+  }
+  return out;
+}
+
+for (const file of listTsFiles('src')) {
+  const source = fs.readFileSync(file, 'utf8');
+  const disableCount = (source.match(/\/\* eslint-disable /g) || []).length;
+  const enableCount = (source.match(/\/\* eslint-enable /g) || []).length;
+  if (disableCount !== enableCount) {
+    fail(`${file} has ${disableCount} eslint-disable directive(s) but ${enableCount} eslint-enable directive(s).`);
+  }
+  for (const [label, pattern] of [
+    ['globalThis', /\bglobalThis\b/],
+    ['instanceof HTMLElement', /\binstanceof\s+HTMLElement\b/],
+    ['navigator.clipboard', /\bnavigator\.clipboard\b/],
+    ['clipboardData', /\bclipboardData\b/],
+  ]) {
+    if (pattern.test(source)) fail(`${file} contains review-blocked source pattern: ${label}.`);
+  }
 }
 
 if (!process.argv.includes('--allow-dirty')) {

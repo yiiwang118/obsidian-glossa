@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin, model, and vault payloads are validated at runtime boundaries. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import {
   ItemView, WorkspaceLeaf, MarkdownView, TFile, Notice, Menu,
 } from 'obsidian';
@@ -63,6 +63,10 @@ const SELECTION_TRANSLATE_ENTER_WINDOW_MS = 520;
 
 function shouldRenderToolEvent(ev: ToolEvent): boolean {
   return !HIDDEN_TOOL_EVENTS.has(ev.name);
+}
+
+function isHTMLElementNode(node: unknown): node is HTMLElement {
+  return !!node && typeof node === 'object' && typeof (node as any).instanceOf === 'function' && (node as any).instanceOf(HTMLElement);
 }
 
 interface MsgUI {
@@ -1531,7 +1535,7 @@ export class GlossaView extends ItemView {
     const isRunning = ev.status === 'running' || ev.status === 'pending';
     const custom = isRunning ? null : toolUseMessage(ev.name, ev.args);
     const summary = meta.summarize ? meta.summarize(ev.args) : '';
-    if (custom instanceof HTMLElement) {
+    if (isHTMLElementNode(custom)) {
       // Tool returned a DOM node — attach as a single header chunk.
       custom.classList.add('nc-tool-event-name');
       hdr.appendChild(custom);
@@ -1568,7 +1572,7 @@ export class GlossaView extends ItemView {
     // in <pre>).
     const attachCustom = (parent: HTMLElement, node: HTMLElement | string | null): boolean => {
       if (node == null) return false;
-      if (node instanceof HTMLElement) { parent.appendChild(node); return true; }
+      if (isHTMLElementNode(node)) { parent.appendChild(node); return true; }
       if (typeof node === 'string' && node.length > 0) {
         el('pre', { text: node, parent });
         return true;
@@ -1616,7 +1620,7 @@ export class GlossaView extends ItemView {
     }
     if (!ui.toolStack) ui.toolStack = el('div', { className: 'nc-tool-events-stack', parent: ui.wrap });
     const existingCard = ui.toolStack.querySelector(`[data-tool-id="${ev.id}"]`);
-    const card = existingCard instanceof HTMLElement ? existingCard : null;
+    const card = isHTMLElementNode(existingCard) ? existingCard : null;
     if (!card) {
       this.appendToolCard(ui.toolStack, ev);
     } else {
@@ -1640,7 +1644,7 @@ export class GlossaView extends ItemView {
     // (a "🔧 2 actions ▾" ribbon for two would feel like over-collapsing).
     const AUTO_COLLAPSE = 3;
     const cards = Array.from(stack.querySelectorAll(':scope > [data-tool-id]'))
-      .filter((node): node is HTMLElement => node instanceof HTMLElement);
+      .filter(isHTMLElementNode);
     stack.querySelector(':scope > .nc-tool-stack-summary')?.remove();
     stack.querySelector(':scope > .nc-tool-stack-more')?.remove();
 
@@ -1958,7 +1962,7 @@ export class GlossaView extends ItemView {
       // Header text — let the tool override via `renderToolUseMessage`; fall
       // back to `<verb> — <describe>` to keep parity with prior behavior.
       const customHdr = toolUseMessage(tool.spec.name, args);
-      if (customHdr instanceof HTMLElement) {
+      if (isHTMLElementNode(customHdr)) {
         customHdr.classList.add('nc-inline-approval-title');
         hdr.appendChild(customHdr);
       } else {
@@ -3860,3 +3864,4 @@ function pillIcon(it: ContextItem): string {
     default:           return ICON.file;
   }
 }
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */

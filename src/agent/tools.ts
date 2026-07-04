@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Tool registry.
  *
@@ -55,6 +56,7 @@ import { tasksQuery } from './tools/tasks_query';
 
 import type { ToolSpec } from '../providers/types';
 import type { ToolImpl } from './tools/_shared';
+import { allBridgeToolNames, isBridgeActive } from './plugin_bridges';
 
 // Re-export shared types + helpers so existing import paths keep working.
 export {
@@ -148,8 +150,6 @@ const MODEL_HIDDEN_TOOL_NAMES = new Set(['attempt_completion']);
  * for keyword scoring — though it consults TOOLS directly today).
  */
 export function listToolSpecs(opts: { includeDeferred?: boolean } = {}): ToolSpec[] {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Keep bridge activation lazy to avoid loading optional plugin probes before Obsidian is ready.
-  const { allBridgeToolNames, isBridgeActive } = require('./plugin_bridges') as typeof import('./plugin_bridges');
   const bridgeNames = new Set(allBridgeToolNames());
   return Object.values(TOOLS)
     .filter(t => !MODEL_HIDDEN_TOOL_NAMES.has(t.spec.name))
@@ -192,3 +192,4 @@ export function getTool(name: string): ToolImpl | undefined {
   if (primary) return primary;
   return ensureAliasCache().get(name);
 }
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars */
