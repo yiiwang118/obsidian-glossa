@@ -17,8 +17,22 @@
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
-function getTemplater(app: AnyValue): AnyValue | null {
-  return app?.plugins?.plugins?.['templater-obsidian']?.templater ?? null;
+type TemplaterApi = Record<string, AnyValue> & {
+  create_new_note_from_template?: (template: TFile, folder: string, fileName: string, openNewFile: boolean) => Promise<unknown>;
+  parseTemplate?: (template: string, file?: TFile) => Promise<string> | string;
+  parser?: { parseTemplate?: (template: string, file?: TFile) => Promise<string> | string };
+};
+
+function objectRecord(value: unknown): Record<string, AnyValue> | null {
+  return value && typeof value === 'object' ? value as Record<string, AnyValue> : null;
+}
+
+function getTemplater(app: AnyValue): TemplaterApi | null {
+  const appRecord = objectRecord(app);
+  const plugins = objectRecord(objectRecord(appRecord?.plugins)?.plugins);
+  const plugin = objectRecord(plugins?.['templater-obsidian']);
+  const templater = objectRecord(plugin?.templater);
+  return templater as TemplaterApi | null;
 }
 
 export const templaterRender: ToolImpl = buildTool({

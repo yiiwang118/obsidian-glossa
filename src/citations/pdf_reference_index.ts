@@ -41,6 +41,26 @@ interface CachedIndex {
   touched: number;
 }
 
+interface PdfJsTextContent {
+  items?: AnyValue[];
+}
+
+interface PdfJsViewport {
+  width?: number;
+}
+
+interface PdfJsPage {
+  getTextContent: () => Promise<PdfJsTextContent>;
+  getViewport?: (options: { scale: number }) => PdfJsViewport;
+  cleanup?: () => unknown;
+}
+
+interface PdfJsDocument {
+  numPages?: number;
+  getPage: (pageNumber: number) => Promise<PdfJsPage>;
+  destroy?: () => Promise<unknown> | unknown;
+}
+
 const MAX_TAIL_PAGES = 24;
 const MAX_CACHE_ITEMS = 20;
 const MAX_REFERENCE_TEXT_CHARS = 180_000;
@@ -143,9 +163,9 @@ async function buildPdfReferenceIndex(app: App, file: TFile, signal?: AbortSigna
     isEvalSupported: false,
   });
 
-  let doc: AnyValue | null = null;
+  let doc: PdfJsDocument | null = null;
   try {
-    doc = await loadingTask.promise;
+    doc = await loadingTask.promise as PdfJsDocument;
     throwIfAborted(signal);
     const pageCount = Math.max(0, Number(doc?.numPages) || 0);
     const start = Math.max(1, pageCount - MAX_TAIL_PAGES + 1);

@@ -25,10 +25,9 @@ Glossa is not a cloud service. It runs locally as a desktop plugin. Your data go
 
 ## What's New
 
-- **2026-07-04 — 0.6.5 source review compliance.** Removed forbidden `no-explicit-any` disables, replaced explicit dynamic TypeScript boundaries with internal aliases, described all ESLint restore directives, and expanded release checks so source review regressions fail locally.
-- **2026-07-04 — 0.6.4 superseded source cleanup.** Added source review guardrails, then replaced by 0.6.5 after stricter review rejected the remaining directive shape.
-- **2026-07-04 — 0.6.3 community review build.** Removed advanced local integrations and vault-wide shortcuts from the marketplace package to match community review behavior requirements. The update prompt still prioritizes the in-app plugin page, with GitHub kept as a fallback.
-- **2026-07-04 — 0.6.2 release-readiness polish.** Tightened marketplace metadata, refreshed the README and changelog, removed review-scan noise from CSS/network/lint checks, and added stricter release checks.
+- **2026-07-04 — Marketplace-ready community build.** Glossa now focuses the plugin-marketplace package on Custom API chat, explicit note tools, bounded web research, approvals, and checkpoints.
+- **2026-07-04 — Cleaner update flow.** Update notices now prioritize the in-app plugin page, with GitHub release links kept as a fallback.
+- **2026-07-04 — Stronger release checks.** Local checks now catch manifest, source-review, CSS, and generated-bundle issues before a release is prepared.
 - **2026-07-03 — ⚡ Faster selection translation.** Select text and press Enter twice to translate; mixed-language Markdown now detects the natural-language source more carefully.
 - **2026-07-03 — 🧹 Cleaner selection card.** The selection preview stays compact, with the quick-translate hint moved into the composer placeholder.
 - **2026-06-30 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 🌐 Web research pipeline.** Glossa can now search through the free auto provider or Brave, Tavily, Exa, and SerpAPI, then fetch bounded source notes instead of dumping raw pages.

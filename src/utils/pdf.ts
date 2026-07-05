@@ -64,6 +64,22 @@ export interface PdfExtractionResult {
   warnings: string[];
 }
 
+interface PdfJsTextContent {
+  items?: AnyValue[];
+}
+
+interface PdfJsPage {
+  getTextContent: () => Promise<PdfJsTextContent>;
+  cleanup?: () => unknown;
+}
+
+interface PdfJsDocument {
+  numPages?: number;
+  getPage: (pageNumber: number) => Promise<PdfJsPage>;
+  getMetadata?: () => Promise<{ info?: { Title?: unknown; title?: unknown } }> | { info?: { Title?: unknown; title?: unknown } };
+  destroy?: () => Promise<unknown> | unknown;
+}
+
 const DEFAULT_MAX_PAGES = 80;
 const DEFAULT_MAX_CHARS = 100_000;
 const HARD_MAX_CHARS = 1_000_000;
@@ -141,9 +157,9 @@ export async function extractPdfTextWithPdfJs(pdfjs: AnyValue, data: ArrayBuffer
     isEvalSupported: false,
   });
 
-  let doc: AnyValue | null = null;
+  let doc: PdfJsDocument | null = null;
   try {
-    doc = await loadingTask.promise;
+    doc = await loadingTask.promise as PdfJsDocument;
     throwIfAborted(opts.signal);
 
     const pageCount = Math.max(0, Number(doc?.numPages) || 0);
@@ -360,7 +376,7 @@ function selectionFromPages(pages: number[], pageCount: number, maxPages: number
   };
 }
 
-async function readPdfMetadataTitle(doc: AnyValue): Promise<string | undefined> {
+async function readPdfMetadataTitle(doc: PdfJsDocument): Promise<string | undefined> {
   try {
     const metadata = await doc?.getMetadata?.();
     const info = metadata?.info ?? {};

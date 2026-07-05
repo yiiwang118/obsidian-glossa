@@ -11,8 +11,26 @@
  */
 import { buildTool, type ToolImpl } from './_shared';
 
-function getDvApi(app: AnyValue): AnyValue | null {
-  return app?.plugins?.plugins?.['dataview']?.api ?? null;
+type DataviewApi = Record<string, AnyValue> & {
+  queryMarkdown?: (query: string) => Promise<{ successful?: boolean; value?: unknown; error?: unknown }>;
+  pages?: (source: string) => unknown;
+};
+
+function objectRecord(value: unknown): Record<string, AnyValue> | null {
+  return value && typeof value === 'object' ? value as Record<string, AnyValue> : null;
+}
+
+function isIterableValue(value: unknown): value is Iterable<AnyValue> {
+  if (!value || (typeof value !== 'object' && typeof value !== 'function')) return false;
+  return typeof (value as { [Symbol.iterator]?: unknown })[Symbol.iterator] === 'function';
+}
+
+function getDvApi(app: AnyValue): DataviewApi | null {
+  const appRecord = objectRecord(app);
+  const plugins = objectRecord(objectRecord(appRecord?.plugins)?.plugins);
+  const dataview = objectRecord(plugins?.['dataview']);
+  const api = objectRecord(dataview?.api);
+  return api as DataviewApi | null;
 }
 
 export const dataviewQuery: ToolImpl = buildTool({
@@ -61,6 +79,7 @@ export const dataviewQuery: ToolImpl = buildTool({
         // dv.queryMarkdown returns { successful, value, error } where value
         // is a fully-rendered markdown string. Cheaper to use than .query()
         // (which yields raw arrays we\'d have to re-serialize).
+        if (typeof dv.queryMarkdown !== 'function') return 'Error: Dataview API queryMarkdown is unavailable.';
         const res = await dv.queryMarkdown(q);
         if (!res?.successful) return `Dataview error: ${res?.error ?? 'unknown'}`;
         let text = String(res.value ?? '');
@@ -74,8 +93,12 @@ export const dataviewQuery: ToolImpl = buildTool({
 
       // pages mode
       const source = String(args.source ?? '').trim();
+      if (typeof dv.pages !== 'function') return 'Error: Dataview API pages is unavailable.';
       const pages = dv.pages(source);
-      const arr = pages.array ? pages.array() : Array.from(pages);
+      const pagesRecord = objectRecord(pages);
+      const arr = typeof pagesRecord?.array === 'function'
+        ? pagesRecord.array()
+        : isIterableValue(pages) ? Array.from(pages) : [];
       const cap = arr.slice(0, limit);
       if (cap.length === 0) return `No pages match source: ${source || '(empty)'}.`;
       const lines = cap.map((p: AnyValue) => {

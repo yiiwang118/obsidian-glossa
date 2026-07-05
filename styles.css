@@ -290,8 +290,8 @@
   .nc-update-popover *,
   .modal.nc-add-modal,
   .modal.nc-add-modal * {
-    animation-duration: 1ms !important;
-    transition-duration: 1ms !important;
+    animation-duration: 1ms;
+    transition-duration: 1ms;
   }
 }
 
@@ -316,11 +316,11 @@
   min-width: 0;
   max-width: 116px;
   padding: 0 8px;
-  border: 1px solid color-mix(in srgb, var(--interactive-accent) 22%, transparent) !important;
-  border-radius: var(--nc-radius-pill) !important;
-  background: color-mix(in srgb, var(--interactive-accent) 9%, transparent) !important;
-  color: color-mix(in srgb, var(--interactive-accent) 76%, var(--text-normal)) !important;
-  box-shadow: none !important;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+  border-radius: var(--nc-radius-pill);
+  background: color-mix(in srgb, var(--interactive-accent) 9%, transparent);
+  color: color-mix(in srgb, var(--interactive-accent) 76%, var(--text-normal));
+  box-shadow: none;
   font-size: 11px;
   font-weight: 650;
   line-height: 1;
@@ -329,8 +329,8 @@
   overflow: hidden;
 }
 .nc-update-pill:hover {
-  background: color-mix(in srgb, var(--interactive-accent) 14%, transparent) !important;
-  border-color: color-mix(in srgb, var(--interactive-accent) 34%, transparent) !important;
+  background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--interactive-accent) 34%, transparent);
 }
 .nc-update-pill-icon {
   display: inline-flex;
@@ -399,15 +399,15 @@
 .nc-update-popover-close {
   width: 22px;
   height: 22px;
-  padding: 5px !important;
-  border: 0 !important;
-  border-radius: 999px !important;
-  background: transparent !important;
+  padding: 5px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: var(--text-muted);
-  box-shadow: none !important;
+  box-shadow: none;
 }
 .nc-update-popover-close:hover {
-  background: var(--background-modifier-hover) !important;
+  background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
 .nc-update-popover-body {
@@ -434,18 +434,18 @@
 }
 .nc-update-action {
   height: 28px;
-  padding: 0 10px !important;
-  border-radius: 999px !important;
-  border: 1px solid var(--background-modifier-border) !important;
-  background: var(--background-secondary) !important;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
   color: var(--text-normal);
-  box-shadow: none !important;
+  box-shadow: none;
   font-size: 12px;
   font-weight: 600;
 }
 .nc-update-action.primary {
-  border-color: color-mix(in srgb, var(--interactive-accent) 36%, transparent) !important;
-  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary)) !important;
+  border-color: color-mix(in srgb, var(--interactive-accent) 36%, transparent);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));
   color: color-mix(in srgb, var(--interactive-accent) 72%, var(--text-normal));
 }
 .nc-update-action.subtle {
@@ -463,7 +463,7 @@
    for Plan, ::after for Act) is `calc(50% - 4px)` wide and slides
    between (left:2px) and (left:2px + 100% + 4px) so its centre always
    lands exactly on the centre of its column.
-   Buttons defeat Obsidian's global button rules with !important on
+   Buttons defeat Obsidian's global button rules with on
    height / padding / line-height — without those overrides the
    default 32px input height pushed the labels off the knob.
    ============================================================ */
@@ -529,31 +529,31 @@
   60%      { box-shadow: 0 1px 3px rgba(63, 185, 80, 0.32), 0 0 0 5px rgba(63, 185, 80, 0); }
 }
 /* Buttons: fill the grid cell exactly, no extra padding / height
-   from Obsidian's button base rules. The `!important` on height,
+   from Obsidian's button base rules. The `` on height,
    min-height, padding, and line-height defeats every selector
    Obsidian uses; without them the label would sit too tall and
    appear vertically off-centre against the knob. */
 .nc-mode-seg-opt {
   position: relative;
   z-index: 1;
-  height: 100% !important;
-  min-height: 0 !important;
+  height: 100%;
+  min-height: 0;
   width: 100%;
-  padding: 0 !important;
+  padding: 0;
   margin: 0;
   font-size: var(--g-text-sm);
   font-weight: 600;
   color: var(--text-muted);
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  outline: 0 !important;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  outline: 0;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   letter-spacing: 0.1px;
-  line-height: 1 !important;
+  line-height: 1;
   transition: color var(--dur-fast) var(--ease-out-quart);
   min-width: 0;
   text-align: center;
@@ -601,19 +601,19 @@
     background var(--dur-micro) linear,
     color var(--dur-micro) linear,
     transform var(--dur-fast) var(--ease-spring);
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  padding: 0 !important;
-  outline: 0 !important;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  outline: 0;
 }
 .nc-icon-btn:hover {
-  background: var(--nc-bg-soft-hover) !important;
+  background: var(--nc-bg-soft-hover);
   color: var(--text-normal);
   transform: scale(1.06);
 }
 .nc-icon-btn:active {
-  background: color-mix(in srgb, var(--nc-bg-soft-hover) 80%, var(--nc-border)) !important;
+  background: color-mix(in srgb, var(--nc-bg-soft-hover) 80%, var(--nc-border));
   transform: scale(0.94);
   transition-duration: 80ms;
 }
@@ -666,12 +666,12 @@
   position: relative;
   width: 15px;
   height: 6px;
-  border: 0 !important;
-  border-radius: 999px !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  padding: 0 !important;
-  margin: 0 !important;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
   pointer-events: auto;
   cursor: pointer;
   opacity: 0.55;
@@ -873,7 +873,7 @@
 .theme-dark .nc-msg.user { background: rgba(139, 92, 246, 0.22); }
 .nc-msg.user:hover { background: rgba(139, 92, 246, 0.22); }
 .theme-dark .nc-msg.user:hover { background: rgba(139, 92, 246, 0.30); }
-.nc-msg.user > .nc-msg-role.hidden-role { display: none !important; }
+.nc-msg.user > .nc-msg-role.hidden-role { display: none; }
 .nc-msg.user > .nc-msg-body {
   margin: 0;
   line-height: 1.5;
@@ -947,7 +947,7 @@
    busy. A single overall token/budget bar at the bottom of the input still
    indicates session-level progress. Streaming is now signalled only by the
    subtle accent-shimmer on the "Glossa" role label. */
-.nc-msg-elapsed { display: none !important; }
+.nc-msg-elapsed { display: none; }
 
 /* Preamble: a short assistant intent statement right before a tool batch. We KEEP
    the typography normal (no italic, no fade) — the user-visible difference is just
@@ -1019,7 +1019,7 @@
 }
 .nc-msg.assistant.streaming > .nc-msg-body:empty { display: none; }
 /* Don't show edit/copy/regen actions on a message that's still being produced. */
-.nc-msg.assistant.streaming > .nc-msg-actions { display: none !important; }
+.nc-msg.assistant.streaming > .nc-msg-actions { display: none; }
 /* When two assistant bubbles share a turn but neither is the explicit
    .nc-asst-continuation (legacy state on older sessions), still tighten them. */
 .nc-msg.assistant + .nc-msg.assistant > .nc-msg-body:empty { display: none; }
@@ -1352,20 +1352,20 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 .nc-history-pop-search-icon svg { width: 100%; height: 100%; }
 /* Obsidian's global `input[type="text"]` / `button` selectors have higher
-   specificity than our class selectors, so without !important they paint a
+   specificity than our class selectors, so without they paint a
    second nested border around the input and a white background on the button.
    Defeating them locally keeps the popover visually clean. */
 .nc-history-pop-search-input {
-  flex: 1 !important;
-  border: 0 !important;
-  outline: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  color: var(--text-normal) !important;
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
   font-size: calc(var(--nc-base-font, 13px) - 1px);
-  padding: 2px 0 !important;
+  padding: 2px 0;
   min-width: 0;
-  height: auto !important;
+  height: auto;
   line-height: 1.4;
 }
 .nc-history-pop-search-input::placeholder {
@@ -1375,18 +1375,18 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-history-pop-more {
   width: 24px; height: 24px;
   display: inline-flex; align-items: center; justify-content: center;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--text-muted);
   border-radius: 5px;
   cursor: pointer;
   flex-shrink: 0;
-  padding: 0 !important;
+  padding: 0;
   transition: background var(--nc-dur-1) var(--nc-ease), color var(--nc-dur-1) var(--nc-ease);
 }
 .nc-history-pop-more:hover {
-  background: var(--nc-bg-soft-hover) !important;
+  background: var(--nc-bg-soft-hover);
   color: var(--text-normal);
 }
 .nc-history-pop-more svg { width: 14px; height: 14px; display: block; }
@@ -1666,7 +1666,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
    text) and collapse the nested paragraph. */
 .nc-thinking-body input[type='checkbox'],
 .nc-thinking-body .task-list-item-checkbox {
-  display: none !important;
+  display: none;
 }
 .nc-thinking-body .task-list-item,
 .nc-thinking-body li.task-list-item {
@@ -1714,7 +1714,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .glossa-view .nc-msg-body pre > button:not(.nc-code-action),
 .glossa-view .nc-msg-body pre .copy-code-button,
 .glossa-view .nc-msg-body pre .code-copy-button {
-  display: none !important;
+  display: none;
 }
 .nc-msg-body code {
   background: var(--nc-bg-soft);
@@ -1745,8 +1745,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-code-actions button {
   width: 24px;
   height: 24px;
-  min-width: 24px !important;
-  min-height: 24px !important;
+  min-width: 24px;
+  min-height: 24px;
   max-width: 24px;
   max-height: 24px;
   display: inline-flex;
@@ -1755,8 +1755,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   background: transparent;
   border: 1px solid transparent;
   border-radius: 5px;
-  padding: 0 !important;
-  margin: 0 !important;
+  padding: 0;
+  margin: 0;
   cursor: pointer;
   color: var(--nc-muted);
   transition: all 0.15s;
@@ -1850,20 +1850,20 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-msg.assistant.streaming > .nc-msg-footer,
 .nc-msg.assistant.preamble  > .nc-msg-footer { display: none; }
 .nc-msg-actions button.nc-icon-action {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
   cursor: pointer;
   color: var(--text-muted);
   width: 22px;
   height: 22px;
-  min-width: 22px !important;
-  min-height: 22px !important;
+  min-width: 22px;
+  min-height: 22px;
   max-width: 22px;
   max-height: 22px;
-  padding: 0 !important;
-  margin: 0 !important;
+  padding: 0;
+  margin: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1875,13 +1875,13 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-msg-actions button.nc-icon-action svg { width: 14px; height: 14px; }
 .nc-msg-actions button.nc-icon-action:focus,
 .nc-msg-actions button.nc-icon-action:focus-visible {
-  background: transparent !important;
-  box-shadow: none !important;
-  outline: none !important;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
 }
 .nc-msg-actions button.nc-icon-action:hover {
   opacity: 1;
-  background: transparent !important;
+  background: transparent;
   color: var(--nc-accent);
 }
 /* The CSS-positioned tooltip used to live here — removed 0.3.1 because it was
@@ -2037,7 +2037,6 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 .nc-tool-stack-summary-icon {
   opacity: 0.95;
-  font-size: 12px;
   /* Replace the bare wrench emoji with an aurora-painted dot */
   width: 8px; height: 8px;
   background: var(--aurora-gradient);
@@ -2126,9 +2125,9 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   margin-top: -2px;
   width: 14px; height: 10px;
   display: flex; align-items: center; justify-content: center;
-  background: transparent !important;
-  border: 0 !important;
-  padding: 0 !important;
+  background: transparent;
+  border: 0;
+  padding: 0;
   color: var(--text-faint);
   cursor: pointer;
   opacity: 0.4;
@@ -2573,14 +2572,14 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   font-size: var(--nc-font-sm, 11px);
   font-weight: 500;
   color: var(--text-muted);
-  /* `!important` on background/border/box-shadow/outline matches the
+  /* `` on background/border/box-shadow/outline matches the
      .nc-composer-pill fix — Obsidian's global button rules add a soft
      input-shadow that read as a ghost outline around the chip. */
-  background: transparent !important;
-  border: none !important;
+  background: transparent;
+  border: none;
   border-radius: var(--nc-radius-pill);
-  box-shadow: none !important;
-  outline: 0 !important;
+  box-shadow: none;
+  outline: 0;
   cursor: pointer;
   user-select: none;
   max-width: 200px;
@@ -2590,16 +2589,16 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
     transform var(--dur-fast) var(--ease-spring);
 }
 .nc-model-chip:hover {
-  background: var(--nc-bg-soft-hover) !important;
+  background: var(--nc-bg-soft-hover);
   color: var(--text-normal);
   transform: translateY(-0.5px);
 }
 .nc-model-chip:active { transform: translateY(0) scale(0.97); transition-duration: 80ms; }
 .nc-model-chip:focus,
 .nc-model-chip:focus-visible {
-  background: var(--nc-bg-soft-hover) !important;
-  outline: 0 !important;
-  box-shadow: none !important;
+  background: var(--nc-bg-soft-hover);
+  outline: 0;
+  box-shadow: none;
 }
 .nc-model-chip .nc-arrow { opacity: 0.55; width: 8px; height: 8px; display: inline-flex; }
 .nc-model-chip .nc-arrow svg { width: 100%; height: 100%; }
@@ -2883,23 +2882,23 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 /* Input textarea + footer */
 /* Textarea lives INSIDE the rounded composer card — no border of its own;
    the outer card supplies the visual frame. Obsidian's global `textarea`
-   selector has higher specificity than this class, so without !important
+   selector has higher specificity than this class, so without
    on border / outline / box-shadow / background, you'd see a nested border
    painted INSIDE the composer card. Defeat that locally. */
 .nc-input {
   width: 100%;
   min-height: 52px;
   max-height: 240px;
-  padding: 6px 8px 4px !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  padding: 6px 8px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   font: inherit;
   font-size: var(--nc-base-font, 13px);
   line-height: 1.5;
   resize: none;
-  outline: none !important;
+  outline: none;
   color: var(--text-normal);
   transition: background var(--nc-dur-2) var(--nc-ease);
   box-sizing: border-box;
@@ -2940,15 +2939,15 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   font-size: var(--nc-font-sm, 11px);
   font-weight: 500;
   color: var(--text-muted);
-  background: transparent !important;
-  /* `!important` defeats Obsidian's global
+  background: transparent;
+  /* `` defeats Obsidian's global
      `button { background, box-shadow, outline }` rules — without them
      each pill picked up the default input-style soft shadow which read
      as a ghost outline ringing the pill. Same fix as .nc-icon-btn. */
-  border: 1px solid transparent !important;
+  border: 1px solid transparent;
   border-radius: var(--nc-radius-pill);
-  box-shadow: none !important;
-  outline: 0 !important;
+  box-shadow: none;
+  outline: 0;
   cursor: pointer;
   user-select: none;
   /* Allow shrinking with text ellipsis when the sidebar is narrow. */
@@ -2962,16 +2961,16 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
     transform var(--dur-fast) var(--ease-spring);
 }
 .nc-composer-pill:hover {
-  background: var(--nc-bg-soft-hover) !important;
+  background: var(--nc-bg-soft-hover);
   color: var(--text-normal);
   transform: translateY(-0.5px);
 }
 .nc-composer-pill:active { transform: translateY(0) scale(0.97); transition-duration: 80ms; }
 .nc-composer-pill:focus,
 .nc-composer-pill:focus-visible {
-  background: var(--nc-bg-soft-hover) !important;
-  outline: 0 !important;
-  box-shadow: none !important;
+  background: var(--nc-bg-soft-hover);
+  outline: 0;
+  box-shadow: none;
 }
 /* Label text inside composer pills — ellipsis when squeezed. */
 .nc-composer-pill .nc-pill-text {
@@ -3310,9 +3309,9 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   overflow: hidden;
   isolation: isolate;
   contain: paint;
-  opacity: 1 !important;
-  background: var(--background-primary) !important;
-  background-image: none !important;
+  opacity: 1;
+  background: var(--background-primary);
+  background-image: none;
   border: 1px solid var(--background-modifier-border);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24), 0 2px 8px rgba(0, 0, 0, 0.16);
 }
@@ -3324,9 +3323,9 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   max-height: calc(100vh - 96px);
   overflow-y: auto;
   padding: 26px 28px 24px;
-  background: var(--background-primary) !important;
-  background-image: none !important;
-  opacity: 1 !important;
+  background: var(--background-primary);
+  background-image: none;
+  opacity: 1;
 }
 .nc-add-modal-header {
   margin-bottom: 8px;
@@ -3341,7 +3340,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 @media (max-width: 620px) {
   .nc-kind-tabs { grid-template-columns: 1fr; }
-  .nc-add-form-row { grid-template-columns: 1fr !important; }
+  .nc-add-form-row { grid-template-columns: 1fr; }
   .nc-add-form-row label { color: var(--text-muted); font-size: 11px; padding-top: 4px; }
 }
 .nc-kind-card {
@@ -3943,8 +3942,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   min-height: 14px;
 }
 .nc-mcp-cat-ext {
-  background: rgba(182, 108, 240, 0.18) !important;
-  color: var(--text-muted) !important;
+  background: rgba(182, 108, 240, 0.18);
+  color: var(--text-muted);
 }
 
 /* ============================================================
@@ -4189,25 +4188,25 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-msg-actions button.nc-icon-action,
 .nc-composer-icon-btn {
   color: var(--glossa-muted);
-  background: transparent !important;
-  border: 1px solid transparent !important;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 6px;
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 .nc-icon-btn:hover,
 .nc-msg-actions button.nc-icon-action:hover,
 .nc-composer-icon-btn:hover {
   color: var(--glossa-ink);
-  background: var(--glossa-hover) !important;
-  border-color: var(--glossa-line-soft) !important;
+  background: var(--glossa-hover);
+  border-color: var(--glossa-line-soft);
   transform: none;
 }
 
 .nc-icon-btn.active {
   color: var(--glossa-accent);
-  background: var(--glossa-accent-softer) !important;
-  border-color: color-mix(in srgb, var(--glossa-accent) 18%, transparent) !important;
+  background: var(--glossa-accent-softer);
+  border-color: color-mix(in srgb, var(--glossa-accent) 18%, transparent);
 }
 
 .nc-mode-seg {
@@ -4280,7 +4279,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   position: relative;
   margin: 10px 8px 8px 24px;
   padding: 12px 14px 10px 16px;
-  background: var(--glossa-user-bg) !important;
+  background: var(--glossa-user-bg);
   border: 1px solid var(--glossa-user-border);
   border-radius: 8px;
   color: var(--text-normal);
@@ -4300,7 +4299,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 
 .theme-dark .nc-msg.user {
-  background: var(--glossa-user-bg) !important;
+  background: var(--glossa-user-bg);
   border-color: var(--glossa-user-border);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24), 0 1px 2px rgba(0, 0, 0, 0.18);
 }
@@ -4308,7 +4307,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-msg.user:hover,
 .theme-dark .nc-msg.user:hover {
   border-color: color-mix(in srgb, var(--text-faint) 42%, var(--background-modifier-border));
-  background: var(--glossa-user-bg-hover) !important;
+  background: var(--glossa-user-bg-hover);
 }
 
 .nc-msg.user > .nc-msg-body {
@@ -4329,8 +4328,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 
 .nc-msg.user .nc-msg-actions button.nc-icon-action:hover {
   color: var(--text-normal);
-  background: var(--glossa-hover) !important;
-  border-color: var(--glossa-line-soft) !important;
+  background: var(--glossa-hover);
+  border-color: var(--glossa-line-soft);
 }
 
 .nc-msg.assistant {
@@ -4594,10 +4593,10 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-pill,
 .nc-model-chip,
 .nc-composer-pill {
-  background: transparent !important;
-  border: 1px solid transparent !important;
+  background: transparent;
+  border: 1px solid transparent;
   color: var(--glossa-muted);
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 .nc-pill:hover,
@@ -4607,17 +4606,17 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-model-chip:focus-visible,
 .nc-composer-pill:focus,
 .nc-composer-pill:focus-visible {
-  background: var(--glossa-hover) !important;
-  border-color: var(--glossa-line-soft) !important;
+  background: var(--glossa-hover);
+  border-color: var(--glossa-line-soft);
   color: var(--glossa-ink);
   transform: none;
 }
 
 .nc-pill.pinned,
 .nc-pill.current {
-  background: color-mix(in srgb, var(--glossa-accent) 10%, var(--glossa-surface-1)) !important;
-  border-color: color-mix(in srgb, var(--glossa-accent) 30%, var(--glossa-line-soft)) !important;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 24%, transparent), 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+  background: color-mix(in srgb, var(--glossa-accent) 10%, var(--glossa-surface-1));
+  border-color: color-mix(in srgb, var(--glossa-accent) 30%, var(--glossa-line-soft));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 24%, transparent), 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .nc-pill.pinned .nc-pill-icon,
@@ -4840,15 +4839,15 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-history-popover {
   isolation: isolate;
   contain: paint;
-  background-color: color-mix(in srgb, var(--background-primary) 96%, #ffffff) !important;
-  background-image: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+  background-color: color-mix(in srgb, var(--background-primary) 96%, #ffffff);
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .theme-dark .nc-history-popover {
-  background-color: color-mix(in srgb, var(--background-primary) 94%, #111418) !important;
-  background-image: none !important;
+  background-color: color-mix(in srgb, var(--background-primary) 94%, #111418);
+  background-image: none;
 }
 
 .nc-popup {
@@ -4856,13 +4855,13 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   isolation: isolate;
   contain: paint;
   opacity: 1;
-  background-color: color-mix(in srgb, var(--background-primary) 96%, #ffffff) !important;
-  background-image: none !important;
+  background-color: color-mix(in srgb, var(--background-primary) 96%, #ffffff);
+  background-image: none;
 }
 
 .theme-dark .nc-popup {
-  background-color: color-mix(in srgb, var(--background-primary) 94%, #111418) !important;
-  background-image: none !important;
+  background-color: color-mix(in srgb, var(--background-primary) 94%, #111418);
+  background-image: none;
 }
 
 .theme-dark .nc-popup,
@@ -4922,10 +4921,10 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-add-form-row textarea,
 .nc-history-search,
 .nc-history-pop-search-input {
-  background: var(--glossa-surface-2) !important;
-  border-color: var(--glossa-line-soft) !important;
+  background: var(--glossa-surface-2);
+  border-color: var(--glossa-line-soft);
   border-radius: 8px;
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 .nc-history-pop-search:focus-within,
@@ -4934,8 +4933,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-add-form-row input:focus,
 .nc-add-form-row select:focus,
 .nc-add-form-row textarea:focus {
-  border-color: color-mix(in srgb, var(--glossa-accent) 46%, var(--glossa-line)) !important;
-  box-shadow: 0 0 0 3px var(--glossa-accent-soft) !important;
+  border-color: color-mix(in srgb, var(--glossa-accent) 46%, var(--glossa-line));
+  box-shadow: 0 0 0 3px var(--glossa-accent-soft);
 }
 
 .nc-history-pop-more,
@@ -5081,22 +5080,22 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 
 .nc-inline-approve,
 .nc-mcp-chip.active {
-  background: var(--glossa-accent) !important;
-  border-color: var(--glossa-accent) !important;
-  color: #fff !important;
-  box-shadow: none !important;
+  background: var(--glossa-accent);
+  border-color: var(--glossa-accent);
+  color: #fff;
+  box-shadow: none;
 }
 
 .nc-inline-approve:hover {
-  background: color-mix(in srgb, var(--glossa-accent) 88%, black) !important;
-  color: #fff !important;
-  box-shadow: 0 0 0 3px var(--glossa-accent-soft) !important;
+  background: color-mix(in srgb, var(--glossa-accent) 88%, black);
+  color: #fff;
+  box-shadow: 0 0 0 3px var(--glossa-accent-soft);
 }
 
 .nc-inline-deny:hover {
-  background: var(--glossa-danger-soft) !important;
-  border-color: color-mix(in srgb, var(--glossa-danger) 32%, transparent) !important;
-  color: var(--glossa-danger) !important;
+  background: var(--glossa-danger-soft);
+  border-color: color-mix(in srgb, var(--glossa-danger) 32%, transparent);
+  color: var(--glossa-danger);
 }
 
 .nc-inline-approval-warning,
@@ -5152,8 +5151,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 
 .nc-mcp-cat,
 .nc-mcp-cat-ext {
-  color: var(--glossa-accent) !important;
-  background: var(--glossa-accent-soft) !important;
+  color: var(--glossa-accent);
+  background: var(--glossa-accent-soft);
   border-radius: 999px;
 }
 
@@ -5450,25 +5449,25 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   width: 30px;
   height: 30px;
   color: var(--glossa-muted);
-  background: transparent !important;
-  border: 1px solid transparent !important;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 8px;
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 .nc-icon-btn:hover,
 .nc-msg-actions button.nc-icon-action:hover,
 .nc-composer-icon-btn:hover {
   color: var(--glossa-ink);
-  background: var(--glossa-hover) !important;
-  border-color: var(--glossa-line-soft) !important;
+  background: var(--glossa-hover);
+  border-color: var(--glossa-line-soft);
   transform: none;
 }
 
 .nc-icon-btn.active {
   color: var(--glossa-accent);
-  background: var(--glossa-accent-soft) !important;
-  border-color: color-mix(in srgb, var(--glossa-accent) 18%, var(--glossa-line)) !important;
+  background: var(--glossa-accent-soft);
+  border-color: color-mix(in srgb, var(--glossa-accent) 18%, var(--glossa-line));
 }
 
 .nc-mode-seg {
@@ -5511,8 +5510,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-mode-seg[data-mode="act"] .nc-mode-seg-opt[data-opt="act"],
 .nc-mode-seg[data-mode="plan"] .nc-mode-seg-opt[data-opt="plan"]:hover,
 .nc-mode-seg[data-mode="act"] .nc-mode-seg-opt[data-opt="act"]:hover {
-  color: var(--glossa-ink) !important;
-  text-shadow: none !important;
+  color: var(--glossa-ink);
+  text-shadow: none;
 }
 
 .nc-token-badge,
@@ -5543,7 +5542,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   max-width: none;
   margin: 10px 8px 8px;
   padding: 12px 14px;
-  background: var(--glossa-user-bg) !important;
+  background: var(--glossa-user-bg);
   border: 1px solid var(--glossa-user-border);
   border-radius: 12px;
   box-shadow: none;
@@ -5555,7 +5554,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 
 .nc-msg.user:hover,
 .theme-dark .nc-msg.user:hover {
-  background: var(--glossa-user-bg-hover) !important;
+  background: var(--glossa-user-bg-hover);
   border-color: var(--glossa-line);
 }
 
@@ -5738,11 +5737,11 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   appearance: none;
   -webkit-appearance: none;
   min-height: 30px;
-  background: var(--glossa-surface-2) !important;
-  border: 1px solid transparent !important;
+  background: var(--glossa-surface-2);
+  border: 1px solid transparent;
   border-radius: 999px;
   color: var(--glossa-muted);
-  box-shadow: none !important;
+  box-shadow: none;
   font: inherit;
 }
 
@@ -5789,17 +5788,17 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-model-chip:focus-visible,
 .nc-composer-pill:focus,
 .nc-composer-pill:focus-visible {
-  background: var(--glossa-hover) !important;
-  border-color: var(--glossa-line-soft) !important;
+  background: var(--glossa-hover);
+  border-color: var(--glossa-line-soft);
   color: var(--glossa-ink);
   transform: none;
 }
 
 .nc-pill.pinned,
 .nc-pill.current {
-  background: var(--glossa-surface-1) !important;
-  border-color: var(--glossa-line) !important;
-  box-shadow: 0 1px 1px rgba(60, 64, 67, 0.08) !important;
+  background: var(--glossa-surface-1);
+  border-color: var(--glossa-line);
+  box-shadow: 0 1px 1px rgba(60, 64, 67, 0.08);
 }
 
 .nc-pill.pinned .nc-pill-icon,
@@ -5869,8 +5868,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-popup,
 .nc-history-popover,
 .modal.nc-add-modal {
-  background-color: var(--glossa-surface-1) !important;
-  background-image: none !important;
+  background-color: var(--glossa-surface-1);
+  background-image: none;
   border: 1px solid var(--glossa-line);
   border-radius: 12px;
   box-shadow: var(--glossa-shadow-popover);
@@ -5921,10 +5920,10 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-history-pop-search-input,
 .nc-mcp-search,
 .nc-inline-rule-select {
-  background: var(--glossa-surface-1) !important;
-  border-color: var(--glossa-line-soft) !important;
+  background: var(--glossa-surface-1);
+  border-color: var(--glossa-line-soft);
   border-radius: 8px;
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 .nc-history-pop-search:focus-within,
@@ -5935,8 +5934,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-add-form-row textarea:focus,
 .nc-mcp-search:focus,
 .nc-inline-rule-select:focus {
-  border-color: var(--glossa-accent) !important;
-  box-shadow: 0 0 0 3px var(--glossa-accent-soft) !important;
+  border-color: var(--glossa-accent);
+  box-shadow: 0 0 0 3px var(--glossa-accent-soft);
 }
 
 .nc-history-pop-more,
@@ -6000,18 +5999,18 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 
 .nc-kind-card.selected,
 .nc-mcp-chip.active {
-  background: var(--glossa-accent-soft) !important;
-  border-color: color-mix(in srgb, var(--glossa-accent) 26%, var(--glossa-line)) !important;
-  color: var(--glossa-accent) !important;
-  box-shadow: none !important;
+  background: var(--glossa-accent-soft);
+  border-color: color-mix(in srgb, var(--glossa-accent) 26%, var(--glossa-line));
+  color: var(--glossa-accent);
+  box-shadow: none;
 }
 
 .nc-kind-card .nc-kind-title-badge,
 .nc-endpoint-card-header .nc-endpoint-kind-badge,
 .nc-mcp-cat,
 .nc-mcp-cat-ext {
-  background: var(--glossa-surface-3) !important;
-  color: var(--glossa-muted) !important;
+  background: var(--glossa-surface-3);
+  color: var(--glossa-muted);
   border-radius: 999px;
 }
 
@@ -6096,7 +6095,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 
 .nc-msg.assistant.streaming > .nc-msg-role .nc-role-name {
-  background: none !important;
+  background: none;
   color: color-mix(in srgb, var(--glossa-active-text) 86%, var(--glossa-ink));
   -webkit-text-fill-color: currentColor;
   animation: none;
@@ -6226,29 +6225,29 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-popup-item .nc-popup-check,
 .nc-popup-item.selected .nc-popup-icon,
 .nc-popup-item.checked .nc-popup-icon {
-  color: var(--glossa-icon) !important;
+  color: var(--glossa-icon);
 }
 
 .nc-icon-btn:hover,
 .nc-msg-actions button.nc-icon-action:hover,
 .nc-composer-icon-btn:hover,
 .nc-popup-item:hover .nc-popup-icon {
-  color: var(--glossa-ink) !important;
+  color: var(--glossa-ink);
 }
 
 .nc-icon-btn.active,
 .nc-kind-card.selected,
 .nc-mcp-chip.active {
-  color: var(--glossa-active-text) !important;
-  background: var(--glossa-active-bg) !important;
-  border-color: var(--glossa-active-border) !important;
+  color: var(--glossa-active-text);
+  background: var(--glossa-active-bg);
+  border-color: var(--glossa-active-border);
 }
 
 .nc-turn-activity-dot,
 .nc-process-dot,
 .nc-tool-stack-summary-icon {
-  background: var(--glossa-active-text) !important;
-  box-shadow: none !important;
+  background: var(--glossa-active-text);
+  box-shadow: none;
 }
 
 .nc-tool-icon {
@@ -6555,7 +6554,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-settings input[type="password"],
 .nc-settings select,
 .nc-settings textarea {
-  border-radius: 8px !important;
+  border-radius: 8px;
 }
 
 /* Obsidian ribbon should look native: monochrome, no blue active tint. */
@@ -6563,40 +6562,40 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .workspace-ribbon .clickable-icon.glossa-ribbon-icon:hover,
 .workspace-ribbon .clickable-icon.glossa-ribbon-icon.is-active,
 .workspace-ribbon .clickable-icon.glossa-ribbon-icon[aria-pressed="true"] {
-  color: color-mix(in srgb, var(--text-muted) 88%, var(--text-normal)) !important;
+  color: color-mix(in srgb, var(--text-muted) 88%, var(--text-normal));
 }
 
 .theme-dark .workspace-ribbon .clickable-icon.glossa-ribbon-icon,
 .theme-dark .workspace-ribbon .clickable-icon.glossa-ribbon-icon:hover,
 .theme-dark .workspace-ribbon .clickable-icon.glossa-ribbon-icon.is-active,
 .theme-dark .workspace-ribbon .clickable-icon.glossa-ribbon-icon[aria-pressed="true"] {
-  color: color-mix(in srgb, var(--text-muted) 82%, var(--text-normal)) !important;
+  color: color-mix(in srgb, var(--text-muted) 82%, var(--text-normal));
 }
 
 .workspace-ribbon .clickable-icon.glossa-ribbon-icon svg {
-  color: currentColor !important;
-  stroke: currentColor !important;
+  color: currentColor;
+  stroke: currentColor;
 }
 
 .workspace-tab-header[data-type="glossa-view"] .workspace-tab-header-inner-icon,
 .workspace-tab-header[aria-label*="Glossa"] .workspace-tab-header-inner-icon,
 .workspace-tab-header[title*="Glossa"] .workspace-tab-header-inner-icon,
 .workspace-tab-header .workspace-tab-header-inner-icon svg[class*="glossa"] {
-  color: color-mix(in srgb, var(--text-muted) 88%, var(--text-normal)) !important;
+  color: color-mix(in srgb, var(--text-muted) 88%, var(--text-normal));
 }
 
 .workspace-tab-header[data-type="glossa-view"] .workspace-tab-header-inner-icon svg,
 .workspace-tab-header[aria-label*="Glossa"] .workspace-tab-header-inner-icon svg,
 .workspace-tab-header[title*="Glossa"] .workspace-tab-header-inner-icon svg,
 .workspace-tab-header .workspace-tab-header-inner-icon svg[class*="glossa"] {
-  stroke: currentColor !important;
+  stroke: currentColor;
 }
 
 .theme-dark .workspace-tab-header[data-type="glossa-view"] .workspace-tab-header-inner-icon,
 .theme-dark .workspace-tab-header[aria-label*="Glossa"] .workspace-tab-header-inner-icon,
 .theme-dark .workspace-tab-header[title*="Glossa"] .workspace-tab-header-inner-icon,
 .theme-dark .workspace-tab-header .workspace-tab-header-inner-icon svg[class*="glossa"] {
-  color: color-mix(in srgb, var(--text-muted) 82%, var(--text-normal)) !important;
+  color: color-mix(in srgb, var(--text-muted) 82%, var(--text-normal));
 }
 
 .nc-empty-title {
@@ -6636,10 +6635,10 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   align-self: flex-start;
   max-width: 100%;
   width: auto;
-  background: transparent !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   overflow: visible;
 }
 
@@ -6648,9 +6647,9 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   max-width: 100%;
   min-height: 20px;
   padding: 1px 0;
-  background: transparent !important;
-  border: 0 !important;
-  border-radius: 0 !important;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   color: color-mix(in srgb, var(--glossa-muted) 88%, var(--glossa-ink));
   font-size: 12px;
   line-height: 1.25;
@@ -6674,8 +6673,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 
 .nc-thinking-card[open] {
   align-self: stretch;
-  background: transparent !important;
-  border: 0 !important;
+  background: transparent;
+  border: 0;
 }
 
 .nc-thinking-card[open] .nc-thinking-body {
@@ -6700,7 +6699,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 
 .nc-msg.assistant.nc-asst-continuation > .nc-msg-role,
 .nc-msg.assistant.nc-asst-continuation.streaming > .nc-msg-role {
-  display: none !important;
+  display: none;
 }
 
 .nc-msg.assistant.streaming > .nc-turn-activity {
@@ -6710,11 +6709,11 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 
 .nc-msg.assistant.streaming > .nc-msg-body:empty {
-  display: none !important;
+  display: none;
 }
 
 .nc-msg.assistant.streaming > .nc-msg-body:empty::before {
-  content: none !important;
+  content: none;
 }
 
 .nc-tool-events-stack {
@@ -6757,7 +6756,7 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-tool-icon {
   width: 14px;
   height: 14px;
-  color: var(--glossa-icon-soft) !important;
+  color: var(--glossa-icon-soft);
   opacity: 0.9;
 }
 

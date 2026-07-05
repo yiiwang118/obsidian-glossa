@@ -17,25 +17,37 @@ interface TasksTaskResult {
   taskLocation?: { tasksFile?: { path?: string }; lineNumber?: number };
   description?: string;
   status?: { symbol?: string };
-  dueDate?: AnyValue;
-  scheduledDate?: AnyValue;
-  startDate?: AnyValue;
-  doneDate?: AnyValue;
+  dueDate?: unknown;
+  scheduledDate?: unknown;
+  startDate?: unknown;
+  doneDate?: unknown;
   tags?: string[];
   // Different versions expose different shapes; we read defensively below.
   [k: string]: unknown;
 }
 
-function getTasksApi(app: AnyValue): AnyValue | null {
-  const plugin = app?.plugins?.plugins?.['obsidian-tasks-plugin'];
-  return plugin?.apiV1 ?? plugin?.api ?? null;
+interface TasksApi {
+  queryTasks?: (request: { query: string }) => Promise<unknown>;
 }
 
-function fmtDate(d: AnyValue): string {
+function objectRecord(value: unknown): Record<string, AnyValue> | null {
+  return value && typeof value === 'object' ? value as Record<string, AnyValue> : null;
+}
+
+function getTasksApi(app: AnyValue): TasksApi | null {
+  const appRecord = objectRecord(app);
+  const plugins = objectRecord(objectRecord(appRecord?.plugins)?.plugins);
+  const plugin = objectRecord(plugins?.['obsidian-tasks-plugin']);
+  const api = objectRecord(plugin?.apiV1) ?? objectRecord(plugin?.api);
+  return api as TasksApi | null;
+}
+
+function fmtDate(d: unknown): string {
   if (!d) return '';
   if (typeof d === 'string') return d;
   // Tasks uses moment objects — call format if available, else toString.
-  if (typeof d?.format === 'function') return d.format('YYYY-MM-DD');
+  const record = objectRecord(d);
+  if (typeof record?.format === 'function') return String(record.format('YYYY-MM-DD'));
   return String(d);
 }
 
@@ -79,7 +91,8 @@ export const tasksQuery: ToolImpl = buildTool({
     const max = Math.max(1, Math.min(2000, Number(args.max_results) || 200));
     try {
       const result = await api.queryTasks({ query: q });
-      const tasks = (result?.tasks ?? result ?? []) as TasksTaskResult[];
+      const resultRecord = objectRecord(result);
+      const tasks = (resultRecord?.tasks ?? result ?? []) as TasksTaskResult[];
       if (!Array.isArray(tasks) || tasks.length === 0) return `No tasks match.`;
       const cap = tasks.slice(0, max);
       const lines = cap.map(t => {
