@@ -1,7 +1,7 @@
 {
   "name": "glossa",
-  "version": "0.6.6",
-  "description": "Local-first AI sidebar with context chat, note editing, web research, and approval-gated tools.",
+  "version": "0.6.7",
+  "description": "Local-first AI sidebar for context-aware chat, precise note editing, PDF and image analysis, and web research.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
@@ -9,16 +9,20 @@
     "test": "node tests/run.cjs",
     "typecheck": "tsc --noEmit",
     "lint:review": "eslint \"src/**/*.ts\" --max-warnings=0",
+    "lint:strict": "eslint \"src/**/*.ts\" --max-warnings=0 --rule '@typescript-eslint/no-explicit-any:error' --rule '@typescript-eslint/no-unsafe-argument:error' --rule '@typescript-eslint/no-unsafe-return:error' --rule '@typescript-eslint/no-duplicate-type-constituents:error' --rule '@typescript-eslint/only-throw-error:error' --rule '@typescript-eslint/no-unused-vars:error'",
+    "lint:directives": "eslint \"src/**/*.ts\" --report-unused-disable-directives --max-warnings=0 --rule '@typescript-eslint/no-explicit-any:error' --rule '@typescript-eslint/no-unsafe-argument:error' --rule '@typescript-eslint/no-unsafe-return:error' --rule '@typescript-eslint/no-duplicate-type-constituents:error' --rule '@typescript-eslint/only-throw-error:error' --rule '@typescript-eslint/no-unused-vars:error'",
+    "review:scan": "node scripts/review_scan.cjs",
+    "check": "npm run typecheck && npm run lint:review && npm run lint:strict && npm run lint:directives && npm test && npm audit --omit=optional && npm run build && npm run release:check -- --allow-dirty",
     "release:check": "node scripts/release_check.cjs"
   },
   "keywords": [
     "obsidian",
     "ai",
     "llm",
-    "codex",
     "agent",
-    "rag",
-    "mcp"
+    "research",
+    "notes",
+    "markdown"
   ],
   "author": "yiiwang",
   "license": "MIT",

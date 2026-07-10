@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * patch_canvas — surgical node/edge edits to a .canvas file.
  *
@@ -26,20 +26,23 @@ export const patchCanvas: ToolImpl = buildTool({
   isReadOnly: () => false,
   isDestructive: () => true,
   isConcurrencySafe: () => false,
+  shouldDefer: true,
   searchHint: 'edit canvas json file nodes edges',
+  searchTags: ['canvas modify', 'mind map graph', '编辑画布', '添加节点', '连接边'],
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => `${a.op ?? '?'} on canvas ${a.path}`,
   spec: {
     name: 'patch_canvas',
-    description: 'Mutate a .canvas file by adding / removing / updating a single node or edge. REQUIRES USER APPROVAL.',
+    description: 'Apply one validated node or edge operation to an existing JSON Canvas file. Read the canvas first, preserve existing IDs, and use separate calls only for genuinely separate operations. Requires user approval.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Vault-relative .canvas file path.' },
-        op: { type: 'string', enum: ['add_node', 'remove_node', 'update_node', 'add_edge', 'remove_edge'] },
+        op: { type: 'string', enum: ['add_node', 'remove_node', 'update_node', 'add_edge', 'remove_edge'], description: 'Single Canvas mutation to perform.' },
         payload: { type: 'object', description: 'Op-specific data. add_*: full object. remove_*: {id}. update_node: {id, ...patches} (shallow merged).' },
       },
       required: ['path', 'op', 'payload'],
+      additionalProperties: false,
     },
   },
   preview: async (a) => `${a.op} on ${a.path}\n\n${JSON.stringify(a.payload, null, 2).slice(0, 400)}`,
@@ -62,6 +65,8 @@ export const patchCanvas: ToolImpl = buildTool({
     if (op === 'add_node') {
       if (!payload.id || !payload.type) return 'Error: add_node payload requires id + type.';
       if (doc.nodes.some(n => n.id === payload.id)) return `Error: node ${payload.id} already exists.`;
+      const nodeError = validateNewNode(payload);
+      if (nodeError) return `Error: ${nodeError}`;
       doc.nodes.push(payload);
       summary = `Added node ${payload.id} (${payload.type}).`;
     } else if (op === 'remove_node') {
@@ -81,6 +86,11 @@ export const patchCanvas: ToolImpl = buildTool({
       // Shallow merge — preserves id.
       const patches = { ...payload };
       delete patches.id;
+      for (const field of ['x', 'y', 'width', 'height']) {
+        if (field in patches && !Number.isInteger(patches[field])) return `Error: update_node ${field} must be an integer.`;
+      }
+      if ('width' in patches && patches.width <= 0) return 'Error: update_node width must be positive.';
+      if ('height' in patches && patches.height <= 0) return 'Error: update_node height must be positive.';
       Object.assign(node, patches);
       summary = `Updated node ${id} (${Object.keys(patches).length} field(s)).`;
     } else if (op === 'add_edge') {
@@ -88,6 +98,10 @@ export const patchCanvas: ToolImpl = buildTool({
         return 'Error: add_edge payload requires id + fromNode + toNode.';
       }
       if (doc.edges.some(e => e.id === payload.id)) return `Error: edge ${payload.id} already exists.`;
+      const nodeIds = new Set(doc.nodes.map(node => String(node.id)));
+      if (!nodeIds.has(payload.fromNode) || !nodeIds.has(payload.toNode)) {
+        return 'Error: add_edge endpoints must reference existing node IDs.';
+      }
       doc.edges.push(payload);
       summary = `Added edge ${payload.id}: ${payload.fromNode} → ${payload.toNode}.`;
     } else if (op === 'remove_edge') {
@@ -105,4 +119,16 @@ export const patchCanvas: ToolImpl = buildTool({
     return `${summary}\n\nCanvas now: ${doc.nodes.length} nodes, ${doc.edges.length} edges.`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+
+function validateNewNode(node: AnyValue): string | null {
+  if (!['text', 'file', 'link', 'group'].includes(node.type)) return `unsupported node type "${node.type}"`;
+  for (const field of ['x', 'y', 'width', 'height']) {
+    if (!Number.isInteger(node[field])) return `add_node ${field} must be an integer`;
+  }
+  if (node.width <= 0 || node.height <= 0) return 'add_node width and height must be positive';
+  if (node.type === 'text' && typeof node.text !== 'string') return 'text node requires a text string';
+  if (node.type === 'file' && typeof node.file !== 'string') return 'file node requires a vault-relative file path';
+  if (node.type === 'link' && typeof node.url !== 'string') return 'link node requires a URL';
+  return null;
+}
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

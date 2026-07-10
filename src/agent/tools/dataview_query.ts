@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * dataview_query — bridge to the Dataview plugin's DQL engine.
  *
@@ -37,7 +37,9 @@ export const dataviewQuery: ToolImpl = buildTool({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   isDestructive: () => false,
+  shouldDefer: true,
   searchHint: 'run dataview dql query over notes',
+  searchTags: ['database table query', 'Dataview pages', '数据视图', '数据库查询'],
   describe: a => {
     const mode = a.mode ?? 'query';
     const q = String(a.query ?? a.source ?? '').slice(0, 60);
@@ -45,24 +47,16 @@ export const dataviewQuery: ToolImpl = buildTool({
   },
   spec: {
     name: 'dataview_query',
-    description: [
-      'Run a Dataview query against the vault. Requires the Dataview plugin to be installed and enabled.',
-      '',
-      'Modes:',
-      '  query  — DQL string starting with TABLE / LIST / TASK / CALENDAR.',
-      '           e.g. "TABLE file.mtime FROM #project WHERE status = \\"open\\""',
-      '  pages  — list pages from a source. e.g. source: "#project" returns all tagged notes.',
-      '',
-      'Output is a markdown table / list ready to drop into a note.',
-    ].join('\n'),
+    description: 'Run a read-only Dataview query through the installed Dataview plugin. Use query for DQL TABLE/LIST/TASK/CALENDAR output, or pages for a source expression such as #project. Returns Markdown and never writes notes.',
     parameters: {
       type: 'object',
       properties: {
         mode:   { type: 'string', enum: ['query', 'pages'], description: 'Default "query".' },
         query:  { type: 'string', description: 'DQL string (mode=query only).' },
         source: { type: 'string', description: 'Dataview source string (mode=pages only). e.g. "#tag", \'"folder/path"\'.' },
-        limit:  { type: 'number', description: 'Cap on rows. Default 100.' },
+        limit:  { type: 'integer', minimum: 1, maximum: 5000, description: 'Maximum rows to return. Default 100.' },
       },
+      additionalProperties: false,
     },
   },
   run: async (app, args, ctx) => {
@@ -113,4 +107,4 @@ export const dataviewQuery: ToolImpl = buildTool({
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, Component, MarkdownRenderer } from 'obsidian';
 import { ICON } from '../ui/icons';
 import { setTrustedSvg } from './dom';
@@ -22,7 +22,8 @@ export async function renderInto(
 ) {
   const original = src || '';
   const mightContainBlockedResources = hasBlockedResourceScheme(original);
-  const raw = mightContainBlockedResources ? sanitizeMarkdownResourceUrls(original) : original;
+  const sanitized = mightContainBlockedResources ? sanitizeMarkdownResourceUrls(original) : original;
+  const raw = normalizeObsidianMathDelimiters(sanitized);
   target.empty();
   await MarkdownRenderer.render(app, raw, target, sourcePath, component);
   if (mightContainBlockedResources) scrubRenderedResourceUrls(target);
@@ -59,6 +60,164 @@ export function sanitizeMarkdownResourceUrls(src: string): string {
     return omittedImageText(basenameFromUrl(url));
   });
   return out;
+}
+
+/** Obsidian's Markdown parser consumes `\(` / `\[` as backslash escapes
+ * before MathJax sees them. Convert complete LaTeX delimiter pairs to the
+ * native `$` / `$$` form while preserving fenced and inline code verbatim. */
+export function normalizeObsidianMathDelimiters(src: string): string {
+  if (!src || (!src.includes('\\(') && !src.includes('\\['))) return src;
+  const segments: string[] = [];
+  let markerPrefix = '\uE000GLOSSA_CODE_';
+  while (src.includes(markerPrefix)) markerPrefix += '_';
+  const markerSuffix = '\uE001';
+  const stash = (value: string): string => {
+    const marker = `${markerPrefix}${segments.length}${markerSuffix}`;
+    segments.push(value);
+    return marker;
+  };
+  let protectedText = protectFencedCode(src, stash);
+  protectedText = protectHtmlCode(protectedText, stash);
+  protectedText = protectInlineCode(protectedText, stash);
+  const normalized = normalizeMathPairs(protectedText);
+  const markerPattern = new RegExp(`${escapeRegExp(markerPrefix)}(\\d+)${markerSuffix}`, 'g');
+  return normalized.replace(markerPattern, (marker, indexText: string) => {
+    return segments[Number(indexText)] ?? marker;
+  });
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function protectFencedCode(src: string, stash: (value: string) => string): string {
+  let output = '';
+  let plainStart = 0;
+  let cursor = 0;
+  while (cursor < src.length) {
+    const lineEnd = nextLineEnd(src, cursor);
+    const line = src.slice(cursor, lineEnd);
+    const opener = /^[ \t]*(`{3,}|~{3,})/.exec(stripMarkdownContainerPrefix(line));
+    if (!opener) {
+      cursor = lineEnd;
+      continue;
+    }
+    const fenceChar = opener[1][0];
+    const fenceLength = opener[1].length;
+    let blockEnd = lineEnd;
+    let scan = lineEnd;
+    while (scan < src.length) {
+      const candidateEnd = nextLineEnd(src, scan);
+      const candidate = src.slice(scan, candidateEnd);
+      const closer = /^[ \t]*(`+|~+)[ \t]*(?:\r?\n)?$/.exec(stripMarkdownContainerPrefix(candidate));
+      blockEnd = candidateEnd;
+      if (closer && closer[1][0] === fenceChar && closer[1].length >= fenceLength) break;
+      scan = candidateEnd;
+    }
+    output += src.slice(plainStart, cursor) + stash(src.slice(cursor, blockEnd));
+    cursor = blockEnd;
+    plainStart = cursor;
+  }
+  return output + src.slice(plainStart);
+}
+
+function stripMarkdownContainerPrefix(line: string): string {
+  let value = line;
+  while (true) {
+    const match = /^[ \t]{0,3}(?:>[ \t]?|(?:[-+*]|\d+[.)])[ \t]+)/.exec(value);
+    if (!match) return value;
+    value = value.slice(match[0].length);
+  }
+}
+
+function protectHtmlCode(src: string, stash: (value: string) => string): string {
+  return src.replace(/<(pre|code)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, match => stash(match));
+}
+
+function protectInlineCode(src: string, stash: (value: string) => string): string {
+  let output = '';
+  let plainStart = 0;
+  let cursor = 0;
+  while (cursor < src.length) {
+    if (src[cursor] !== '`') {
+      cursor++;
+      continue;
+    }
+    const runLength = countRun(src, cursor, '`');
+    let search = cursor + runLength;
+    let closeEnd = -1;
+    while (search < src.length) {
+      const next = src.indexOf('`', search);
+      if (next < 0) break;
+      const closingLength = countRun(src, next, '`');
+      if (closingLength === runLength) {
+        closeEnd = next + closingLength;
+        break;
+      }
+      search = next + closingLength;
+    }
+    if (closeEnd < 0) {
+      cursor += runLength;
+      continue;
+    }
+    output += src.slice(plainStart, cursor) + stash(src.slice(cursor, closeEnd));
+    cursor = closeEnd;
+    plainStart = cursor;
+  }
+  return output + src.slice(plainStart);
+}
+
+function normalizeMathPairs(src: string): string {
+  let output = '';
+  let cursor = 0;
+  while (cursor < src.length) {
+    const display = src.startsWith('\\[', cursor) && !isEscapedAt(src, cursor);
+    const inline = !display && src.startsWith('\\(', cursor) && !isEscapedAt(src, cursor);
+    if (!display && !inline) {
+      output += src[cursor];
+      cursor++;
+      continue;
+    }
+    const closeToken = display ? '\\]' : '\\)';
+    const close = findUnescapedToken(src, closeToken, cursor + 2);
+    if (close < 0) {
+      output += src[cursor];
+      cursor++;
+      continue;
+    }
+    const delimiter = display ? '$$' : '$';
+    output += delimiter + src.slice(cursor + 2, close) + delimiter;
+    cursor = close + 2;
+  }
+  return output;
+}
+
+function findUnescapedToken(src: string, token: string, start: number): number {
+  let cursor = start;
+  while (cursor < src.length) {
+    const found = src.indexOf(token, cursor);
+    if (found < 0) return -1;
+    if (!isEscapedAt(src, found)) return found;
+    cursor = found + token.length;
+  }
+  return -1;
+}
+
+function isEscapedAt(src: string, index: number): boolean {
+  let slashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && src[cursor] === '\\'; cursor--) slashes++;
+  return slashes % 2 === 1;
+}
+
+function countRun(src: string, start: number, char: string): number {
+  let cursor = start;
+  while (cursor < src.length && src[cursor] === char) cursor++;
+  return cursor - start;
+}
+
+function nextLineEnd(src: string, start: number): number {
+  const newline = src.indexOf('\n', start);
+  return newline < 0 ? src.length : newline + 1;
 }
 
 function hasBlockedResourceScheme(src: string): boolean {
@@ -143,6 +302,7 @@ export function trimIncompleteMath(buf: string): string {
   let single = 0;     // count of standalone $ outside code (and outside $$)
   let lastDdIdx = -1;
   let lastSingleIdx = -1;
+  const slashMath: { kind: '(' | '['; index: number }[] = [];
   let i = 0;
   const n = buf.length;
   let inFenced = false;
@@ -157,6 +317,20 @@ export function trimIncompleteMath(buf: string): string {
     if (!inFenced && !inInline && buf[i] === '`') { inInline = true; i++; continue; }
     if (inInline && buf[i] === '`') { inInline = false; i++; continue; }
     if (inFenced || inInline) { i++; continue; }
+    if (buf[i] === '\\' && !isEscapedAt(buf, i)) {
+      const next = buf[i + 1];
+      if (next === '(' || next === '[') {
+        slashMath.push({ kind: next, index: i });
+        i += 2;
+        continue;
+      }
+      if (next === ')' || next === ']') {
+        const expected = next === ')' ? '(' : '[';
+        if (slashMath[slashMath.length - 1]?.kind === expected) slashMath.pop();
+        i += 2;
+        continue;
+      }
+    }
     if (buf.startsWith('$$', i)) {
       dd++; lastDdIdx = i; i += 2; continue;
     }
@@ -165,8 +339,12 @@ export function trimIncompleteMath(buf: string): string {
     }
     i++;
   }
-  if (dd % 2 === 1 && lastDdIdx >= 0) return buf.slice(0, lastDdIdx);
-  if (single % 2 === 1 && lastSingleIdx >= 0) return buf.slice(0, lastSingleIdx);
+  const incomplete = [
+    dd % 2 === 1 ? lastDdIdx : -1,
+    single % 2 === 1 ? lastSingleIdx : -1,
+    slashMath[0]?.index ?? -1,
+  ].filter(index => index >= 0);
+  if (incomplete.length) return buf.slice(0, Math.min(...incomplete));
   return buf;
 }
 
@@ -243,4 +421,4 @@ export function decorateCodeBlocks(
     decoratedPres.add(pre);
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

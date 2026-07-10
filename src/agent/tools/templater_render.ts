@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * templater_render — bridge to the Templater plugin.
  *
@@ -39,28 +39,23 @@ export const templaterRender: ToolImpl = buildTool({
   isReadOnly: a => a?.mode === 'to_string',
   isConcurrencySafe: () => false,
   isDestructive: a => a?.mode !== 'to_string',
+  shouldDefer: true,
   searchHint: 'render templater template to file or string',
+  searchTags: ['template expansion', 'create from template', '模板渲染', 'Templater'],
   backfillObservableInput: normalizePathFields(['template_path', 'target_path']),
   describe: a => `templater ${a.mode ?? 'to_file'}: ${a.template_path}`,
   spec: {
     name: 'templater_render',
-    description: [
-      'Render a Templater template. Requires the Templater plugin to be installed and enabled.',
-      '',
-      'Modes:',
-      '  to_file    — render template into target_path (new file). Fails if target exists.',
-      '  to_string  — render template and return the result as a string, no vault write.',
-      '',
-      'Templater syntax is preserved: <% tp.date.now("YYYY-MM-DD") %>, <% tp.file.title %>, etc.',
-    ].join('\n'),
+    description: 'Render one installed Templater template. to_string returns rendered text without writing; to_file creates a new target and fails if it exists. Use only when Templater semantics are required.',
     parameters: {
       type: 'object',
       properties: {
-        mode: { type: 'string', enum: ['to_file', 'to_string'] },
+        mode: { type: 'string', enum: ['to_file', 'to_string'], description: 'Render to a new vault file or return a string without writing.' },
         template_path: { type: 'string', description: 'Vault-relative path to the .md template.' },
         target_path: { type: 'string', description: 'Required for mode=to_file. Vault-relative path of the new file.' },
       },
       required: ['mode', 'template_path'],
+      additionalProperties: false,
     },
   },
   preview: async (a) => `Templater ${a.mode}\n  template: ${a.template_path}\n  ${a.mode === 'to_file' ? `target:   ${a.target_path}` : '(no write — string output)'}`,
@@ -115,4 +110,4 @@ export const templaterRender: ToolImpl = buildTool({
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

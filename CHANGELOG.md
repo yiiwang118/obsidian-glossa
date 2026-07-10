@@ -2,6 +2,69 @@
 
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.6.7] — 2026-07-10
+
+### Added
+- Added current-file context policy so content tasks can use the open note without requiring a selection while explicit attachments retain target priority.
+- Added independent response-language decisions so source language cannot override the user's current language preference.
+- Added bounded prompt snapshots, long-chat rendering windows, compact historical tool evidence, and media-safe chat persistence.
+- Added task-aware PDF visual rendering, image crop/OCR/chart/color modes, and bounded in-memory media caches.
+- Added precise `read_note` line ranges, deferred multi-file `read_files`, and model-only `context_prune` for stale read/search evidence.
+- Added result-aware tool failure handling, repeated-failure convergence guards, and schema validation before approval or execution.
+- Added six focused built-in Skills plus Skill creation and validation for triggers, paths, workflow structure, and tool references.
+- Added working deferred tool disclosure so specialized schemas enter the next provider request only when requested by `tool_search` or a Skill.
+- Added task-continuity grounding so short follow-up requests can preserve the previous explicit target, failed tool context, and ambient-current-file boundaries.
+- Added explicit task target-lock cues for follow-up requests so titles, authors, source URLs, and requested output folders stay visible before file writes.
+- Added regression coverage for ambiguous follow-ups involving selected text, explicit attachments, current files, output paths, titles, URLs/domains, replacement targets, and negated previous-task references.
+- Added regression coverage for update notices so the primary update action stays on the in-app plugin page.
+- Added fixture-level regression coverage for release version, metadata, artifact, secret-file, and source-review checks.
+- Added fixture-level regression coverage for the release review scanner.
+- Added `npm run check`, `npm run lint:strict`, and `npm run review:scan` so local and CI checks share the same stricter release gate.
+
+### Changed
+- Rebuilt the English and Chinese READMEs around current capabilities, workflows, safety boundaries, and installation instead of a long update timeline.
+- Reduced the default model-facing tool surface while keeping specialized tools dynamically loadable under the same permission checks.
+- Kept write confirmations, downloads, failures, plans, Skills, and tool-disclosure state protected from context pruning.
+- Removed the decorative selection-preview quote icon so selected context uses less horizontal space and relies on the composer placeholder for quick-translate hints.
+- Removed the now-unused quote icon asset and added a review-scan guard against reintroducing selection-preview icon chrome.
+- Updated the lightweight test runner so explicit test-file arguments run only those tests.
+- Updated CI's independent build-output check to require non-empty release assets.
+- Updated CI, release workflow, README, contributing notes, and PR checklist to use the new `npm run check` gate.
+- Expanded `npm run release:check` so it also runs the generated-bundle/source/CSS review scan.
+- Expanded `npm run release:check` to require the Chinese README and reject stale marketplace description text.
+- Expanded `npm run release:check` to require the desktop-only manifest flag.
+- Expanded `npm run release:check` to keep package name, main entry, and license aligned with release metadata.
+- Expanded `npm run release:check` to ensure package scripts keep the strict check/review-scan/build/typecheck chain.
+- Added a strict unused-ESLint-directive gate to keep review disable directives minimal.
+- Expanded `npm run release:check` to require non-empty release assets before publishing.
+- Expanded `npm run release:check` to verify CI/release artifact blocks only publish `main.js`, `manifest.json`, and `styles.css`.
+- Expanded `npm run release:check` to reject tracked runtime state, local secret files, and live-looking provider tokens.
+- Expanded the review scan to reject CSS `:has()` selectors before they can reintroduce older WebView compatibility warnings.
+- Expanded the review scan to reject unsafe HTML sinks, dynamic code execution, and string-based timer execution.
+- Expanded the review scan to reject sourcemap/source-content markers in release assets.
+- Expanded the review scan to reject source-level filesystem, shell execution, system identity, and environment-variable access.
+- Expanded the review scan to reject source-level vault-wide enumeration calls.
+- Expanded the review scan to reject command-palette dispatch from the source and release bundle.
+- Removed disabled legacy local CLI, MCP, and semantic-index implementation sources from the community review surface.
+- Removed unregistered vault-wide search/tag/Bases tool implementation sources and stale model-facing references from the community review surface.
+- Removed command-palette dispatch tools from the community review surface.
+- Updated privacy and security docs to describe the current community build instead of removed local subprocess/MCP paths.
+
+### Fixed
+- Fixed historical `\(...\)` and `\[...\]` formulas failing to render while preserving code fences, inline code, and incomplete streaming math.
+- Fixed tool-returned `Error:` text being represented as a successful tool result.
+- Fixed newly created, deleted, or renamed Skill files temporarily using stale discovery cache entries.
+- Added a same-host HTTP fallback for `web_fetch` and `web_research` source fetching when HTTPS fails at the network/TLS layer, with explicit fallback metadata in tool results.
+- Added explicit `download_file` guidance for HTTPS network/TLS failures while keeping file-saving paths from automatically downgrading to HTTP.
+- Preserved task continuity when a prior failure is only present in assistant text instead of structured tool events.
+- Removed remaining top-type union review warnings from PDF-related dynamic boundaries.
+
+### Checks
+- Added regression coverage for context targeting, compaction fidelity, media caching, PDF/image delivery, formula normalization, deferred tools, Skill quality, context pruning, and tool failure convergence.
+- Passed the full typecheck, strict/review lint, directive audit, dependency audit, production build, source/bundle review scan, and release metadata gate.
+
 ## [0.6.5] — 2026-07-04
 
 Source review compliance for community directory checks.

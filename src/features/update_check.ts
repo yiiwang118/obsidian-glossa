@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+
 import { requestUrl } from 'obsidian';
 import { compareSemver, normalizeVersion } from '../utils/version';
 
@@ -18,7 +18,7 @@ export interface UpdateInfo {
   checkedAt: number;
 }
 
-interface GitHubRelease {
+export interface GitHubRelease {
   tag_name?: string;
   name?: string;
   html_url?: string;
@@ -41,6 +41,14 @@ export async function fetchLatestUpdate(currentVersion: string): Promise<UpdateI
     throw new Error(`GitHub release check failed (${res.status})`);
   }
   const release = res.json as GitHubRelease;
+  return releaseToUpdateInfo(currentVersion, release);
+}
+
+export function releaseToUpdateInfo(
+  currentVersion: string,
+  release: GitHubRelease | null | undefined,
+  checkedAt = Date.now(),
+): UpdateInfo | null {
   if (!release || release.draft || release.prerelease || !release.tag_name) return null;
   const latestVersion = normalizeVersion(release.tag_name);
   if (compareSemver(latestVersion, currentVersion) <= 0) return null;
@@ -52,7 +60,7 @@ export async function fetchLatestUpdate(currentVersion: string): Promise<UpdateI
     releaseName: release.name || release.tag_name,
     body: release.body || '',
     notes: extractReleaseNotes(release.body || ''),
-    checkedAt: Date.now(),
+    checkedAt,
   };
 }
 
@@ -69,4 +77,3 @@ function extractReleaseNotes(body: string): string[] {
   }
   return notes;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

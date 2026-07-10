@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * rename_note — move or rename a note, preserving all wikilinks to it.
  *
@@ -14,12 +14,14 @@ export const renameNote: ToolImpl = buildTool({
   isReadOnly: () => false,
   isDestructive: () => true,
   isConcurrencySafe: () => false,
+  shouldDefer: true,
   searchHint: 'rename or move note preserving wikilinks',
+  searchTags: ['move file', 'rename file', '重命名笔记', '移动文件'],
   backfillObservableInput: normalizePathFields(['from', 'to']),
   describe: a => `rename ${a.from} → ${a.to}`,
   spec: {
     name: 'rename_note',
-    description: 'Move / rename a note. Obsidian automatically rewrites every wikilink pointing at the old path. REQUIRES USER APPROVAL.',
+    description: 'Move or rename one vault file through the file manager so resolvable internal links can be updated. The destination must not exist. Requires user approval.',
     parameters: {
       type: 'object',
       properties: {
@@ -27,6 +29,7 @@ export const renameNote: ToolImpl = buildTool({
         to:   { type: 'string', description: 'New vault-relative path.' },
       },
       required: ['from', 'to'],
+      additionalProperties: false,
     },
   },
   preview: async (a) => `Rename:\n  ${a.from}\n→ ${a.to}\n\n(wikilinks pointing at the old path will be auto-updated)`,
@@ -50,4 +53,4 @@ export const renameNote: ToolImpl = buildTool({
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

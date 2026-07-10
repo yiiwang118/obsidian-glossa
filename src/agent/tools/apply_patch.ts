@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import { parseEnvelope, applyUpdate, looksLikeEnvelope, summarizeOps, seekSequence, type FileOp } from '../patch_envelope';
 import { assertVaultPath, buildTool, vaultFolderOf, type ToolImpl } from './_shared';
@@ -62,25 +62,7 @@ export const applyPatch: ToolImpl = buildTool({
   },
   spec: {
     name: 'apply_patch',
-    description: [
-      'Apply edits to one or more notes. TWO input modes:',
-      '',
-      '(A) ENVELOPE (preferred for multi-file or context-anchored edits) — pass a single `patch` string in codex format:',
-      '    *** Begin Patch',
-      '    *** Update File: path/to/note.md',
-      '    @@ optional context (e.g. heading text)',
-      '     unchanged context line',
-      '    -old line',
-      '    +new line',
-      '     unchanged context line',
-      '    *** End Patch',
-      '  Supports *** Add File:, *** Delete File:, *** Update File: (with optional *** Move to:).',
-      '  Each hunk: 3 lines of context above/below, "-" removes, "+" adds, " " keeps. Context must uniquely anchor.',
-      '',
-      '(B) LEGACY (single-file simple replace) — pass `path` + `edits: [{search, replace}, …]`. "search" must match exactly once.',
-      '',
-      'Prefer (A) for any non-trivial edit. REQUIRES USER APPROVAL.'
-    ].join('\n'),
+    description: 'Apply one atomic patch across one or more vault files. Prefer patch envelope mode for multiple hunks/files: wrap Add File, Delete File, Update File, and optional Move to operations between *** Begin Patch and *** End Patch; prefix hunk lines with space, -, or + and include unique context. Legacy path+edits mode performs ordered exact replacements in one file. Requires user approval.',
     parameters: {
       type: 'object',
       properties: {
@@ -96,9 +78,11 @@ export const applyPatch: ToolImpl = buildTool({
               replace: { type: 'string', description: 'Replacement text.' },
             },
             required: ['search', 'replace'],
+            additionalProperties: false,
           },
         },
       },
+      additionalProperties: false,
     },
   },
   run: async (app, args) => {
@@ -170,4 +154,4 @@ export const applyPatch: ToolImpl = buildTool({
     return `Patched ${path} (${edits.length} edits).`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

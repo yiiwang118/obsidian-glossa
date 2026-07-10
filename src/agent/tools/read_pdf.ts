@@ -1,7 +1,10 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import { setStyle } from '../../utils/dom';
-import { extractPdfTextFromArrayBuffer, formatPdfDiagnosticMarkdown, type PdfExtractionResult, type PdfReadTask } from '../../utils/pdf';
+import { formatPdfDiagnosticMarkdown, type PdfExtractionResult, type PdfReadTask } from '../../utils/pdf';
+import { extractVaultPdfCached } from '../../utils/media_cache';
+import { renderVaultPdfPagesCached, type RenderedPdfPages } from '../../utils/pdf_render';
+import type { ToolContentBlock } from '../../providers/types';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
 const READ_PDF_MAX_PAGES = 120;
@@ -71,28 +74,23 @@ export const readPdf: ToolImpl = buildTool({
   describe: a => `read PDF ${a.path}`,
   spec: {
     name: 'read_pdf',
-    description: [
-      'Browse a PDF file in the vault using a task-aware pipeline. Use this for PDF attachments, papers, reports, and books.',
-      'If the user explicitly uploaded/attached a PDF, prefer the attached PDF content already present in context. Do not read the current/open PDF instead unless the user explicitly asks for the current/open file.',
-      'Pipeline: first classify the PDF text layer (text/scanned/mixed/complex), keep page numbers, then extract only the minimum useful pages for the task.',
-      'Modes: inspect/rename reads the first page and title candidates; summarize reads front matter plus ending pages; search locates query hit pages and returns snippets; pages/full return page-grouped text.',
-      'For scanned/image-only PDFs or complex visual layouts, this tool reports that rendering/OCR or visual inspection is needed instead of pretending the text layer is complete.',
-      'Use pages for targeted reads, e.g. "1-3", "5", or "1-3,8".',
-    ].join('\n'),
+    description: 'Read one explicitly targeted vault PDF with page numbers and text-layer diagnostics. Choose inspect/rename for identity, summarize for document structure, search for a phrase, pages for a range, or full only when genuinely necessary; visual renders up to 4 requested pages for scans, figures, and formulas. Prefer attached PDF context already supplied in the prompt.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Vault-relative path to a PDF file.' },
         mode: {
           type: 'string',
-          description: 'Optional task mode: auto, inspect, rename, summarize, search, pages, or full. Default auto.',
+          enum: ['auto', 'inspect', 'rename', 'summarize', 'search', 'pages', 'full', 'visual'],
+          description: 'Task-aware read mode. Default auto.',
         },
         query: { type: 'string', description: 'Optional search phrase. Use with mode=search or when locating specific details.' },
         pages: { type: 'string', description: 'Optional page range, e.g. "1-3", "5", or "1-3,8". Default reads from page 1 up to max_pages.' },
-        max_pages: { type: 'number', description: `Maximum pages to extract. Default ${READ_PDF_MAX_PAGES}.` },
-        max_chars: { type: 'number', description: `Maximum extracted characters. Default ${READ_PDF_CHAR_CAP}.` },
+        max_pages: { type: 'integer', minimum: 1, maximum: READ_PDF_MAX_PAGES, description: `Maximum pages to extract. Default ${READ_PDF_MAX_PAGES}.` },
+        max_chars: { type: 'integer', minimum: 1000, maximum: READ_PDF_CHAR_CAP, description: `Maximum extracted characters. Default ${READ_PDF_CHAR_CAP}.` },
       },
       required: ['path'],
+      additionalProperties: false,
     },
   },
   run: async (app, args, ctx) => {
@@ -108,14 +106,21 @@ export const readPdf: ToolImpl = buildTool({
     }
 
     try {
-      const buf = await app.vault.readBinary(f);
+      const mode = normalizeMode(args.mode);
+      if (mode === 'visual') {
+        const { value: rendered } = await renderVaultPdfPagesCached(app, f, visualPageRange(args.pages), {
+          maxPages: 4,
+          signal: ctx?.signal,
+        });
+        return visualPdfToolResult(path, rendered);
+      }
       const maxPages = clampToolNumber(args.max_pages, 1, 500, READ_PDF_MAX_PAGES);
       const maxChars = clampToolNumber(args.max_chars, 1_000, 500_000, READ_PDF_CHAR_CAP);
-      const res = await extractPdfTextFromArrayBuffer(buf, {
+      const { value: res } = await extractVaultPdfCached(app, f, {
         pages: args.pages,
         maxPages,
         maxChars,
-        task: normalizeMode(args.mode),
+        task: mode,
         query: typeof args.query === 'string' ? args.query : undefined,
         signal: ctx?.signal,
       });
@@ -124,7 +129,17 @@ export const readPdf: ToolImpl = buildTool({
       const body = shouldUseSearchSnippets(res, args.query)
         ? formatSearchSnippets(res)
         : res.text;
-      return `PDF: ${path} (${res.pageCount} pages, read ${res.pageLabel}, ${res.chars} chars)\n\n${diagnostic}\n\n---\n${body || '[No extracted text returned for this mode]'}${warnings}`;
+      const text = `PDF: ${path} (${res.pageCount} pages, read ${res.pageLabel}, ${res.chars} chars)\n\n${diagnostic}\n\n---\n${body || '[No extracted text returned for this mode]'}${warnings}`;
+      if (!needsVisualEvidence(res, mode)) return text;
+      const pages = res.pagesRead.slice(0, 2).join(',') || '1';
+      const { value: rendered } = await renderVaultPdfPagesCached(app, f, pages, {
+        maxPages: 2,
+        signal: ctx?.signal,
+      });
+      return {
+        text: `${text}\n\nRendered visual evidence: page(s) ${rendered.pageLabel}.`,
+        contentBlocks: renderedPdfBlocks(rendered),
+      };
     } catch (e) {
       return `Error extracting PDF text from ${path}: ${e?.message ?? e}`;
     }
@@ -142,12 +157,37 @@ function humanSize(b: number): string {
   return (b / (1024 * 1024)).toFixed(1) + 'MB';
 }
 
-function normalizeMode(value: unknown): PdfReadTask {
+function normalizeMode(value: unknown): PdfReadTask | 'visual' {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  if (raw === 'inspect' || raw === 'rename' || raw === 'summarize' || raw === 'search' || raw === 'pages' || raw === 'full') return raw;
+  if (raw === 'inspect' || raw === 'rename' || raw === 'summarize' || raw === 'search' || raw === 'pages' || raw === 'full' || raw === 'visual') return raw;
   if (raw === 'summary') return 'summarize';
   if (raw === 'metadata' || raw === 'title') return 'inspect';
   return 'auto';
+}
+
+function visualPageRange(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : '1';
+}
+
+function needsVisualEvidence(res: PdfExtractionResult, mode: PdfReadTask): boolean {
+  if (mode !== 'auto' && mode !== 'inspect' && mode !== 'summarize') return false;
+  return res.diagnostic.textLayer === 'absent' || res.diagnostic.documentKind === 'complex-layout';
+}
+
+export function visualPdfToolResult(path: string, rendered: RenderedPdfPages): { text: string; contentBlocks: ToolContentBlock[] } {
+  return {
+    text: `PDF visual: ${path} (${rendered.totalPages} pages, rendered ${rendered.pageLabel}). Inspect the attached page images directly.`,
+    contentBlocks: renderedPdfBlocks(rendered),
+  };
+}
+
+export function renderedPdfBlocks(rendered: RenderedPdfPages): ToolContentBlock[] {
+  const blocks: ToolContentBlock[] = [];
+  for (const page of rendered.pages) {
+    blocks.push({ type: 'text', text: `PDF page ${page.page} (${page.width} x ${page.height}px)` });
+    blocks.push({ type: 'image', source: { type: 'base64', media_type: page.mime, data: page.data } });
+  }
+  return blocks;
 }
 
 function shouldUseSearchSnippets(res: PdfExtractionResult, query: unknown): boolean {
@@ -173,4 +213,4 @@ function formatSearchSnippets(res: PdfExtractionResult): string {
   }
   return lines.join('\n');
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

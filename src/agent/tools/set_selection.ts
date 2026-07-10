@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * set_selection — set the cursor / selection in the currently-active editor.
  *
@@ -14,11 +14,13 @@ import { MarkdownView } from 'obsidian';
 import { buildTool, type ToolImpl } from './_shared';
 
 export const setSelection: ToolImpl = buildTool({
-  isReadOnly: () => false,
+  isReadOnly: () => true,
   isDestructive: () => false,
   isConcurrencySafe: () => false,
   dangerous: false,
+  shouldDefer: true,
   searchHint: 'select text in editor cursor placement',
+  searchTags: ['editor selection', 'cursor range', '选中文本', '定位光标'],
   describe: a => {
     if (a.from && a.to) return `select ${a.from.line}:${a.from.ch}-${a.to.line}:${a.to.ch}`;
     if (a.heading) return `select heading "${a.heading}"`;
@@ -27,15 +29,16 @@ export const setSelection: ToolImpl = buildTool({
   },
   spec: {
     name: 'set_selection',
-    description: 'Set the selection (or just the cursor) in the active editor. Pass either an explicit {from,to} range, or a heading text, or a block ref.',
+    description: 'Move the cursor or selection in the active Markdown editor by one explicit range, heading, or block reference. Use only for user-visible editor positioning, not to provide context to the model.',
     parameters: {
       type: 'object',
       properties: {
-        from:    { type: 'object', properties: { line: { type: 'number' }, ch: { type: 'number' } } },
-        to:      { type: 'object', properties: { line: { type: 'number' }, ch: { type: 'number' } } },
+        from:    { type: 'object', description: '0-based start position; requires matching to.', properties: { line: { type: 'integer', minimum: 0, description: '0-based line.' }, ch: { type: 'integer', minimum: 0, description: '0-based character.' } }, required: ['line', 'ch'], additionalProperties: false },
+        to:      { type: 'object', description: '0-based end position; requires matching from.', properties: { line: { type: 'integer', minimum: 0, description: '0-based line.' }, ch: { type: 'integer', minimum: 0, description: '0-based character.' } }, required: ['line', 'ch'], additionalProperties: false },
         heading: { type: 'string', description: 'Exact heading text — selects that line.' },
         block:   { type: 'string', description: 'Block ref id — selects the line containing ^id.' },
       },
+      additionalProperties: false,
     },
   },
   run: async (app, args) => {
@@ -81,4 +84,4 @@ export const setSelection: ToolImpl = buildTool({
     return 'Error: provide either {from,to} OR heading OR block.';
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Re-enable review lint rules after dynamic boundary module. */

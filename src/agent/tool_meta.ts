@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { ICON } from '../ui/icons';
 
 export interface ToolMeta {
@@ -16,30 +16,10 @@ export const TOOL_META: Record<string, ToolMeta> = {
     color: '#5b9bff', category: 'read',
     summarize: a => a.path,
   },
-  list_files: {
-    icon: ICON.folder, label: 'List files', verb: 'Listing',
+  read_files: {
+    icon: ICON.file, label: 'Read files', verb: 'Reading files',
     color: '#5b9bff', category: 'read',
-    summarize: a => a.folder || '/',
-  },
-  search_vault: {
-    icon: ICON.globe, label: 'Search vault', verb: 'Searching',
-    color: '#5b9bff', category: 'search',
-    summarize: a => `"${a.query}"`,
-  },
-  grep_vault: {
-    icon: ICON.globe, label: 'Grep vault', verb: 'Grepping',
-    color: '#5b9bff', category: 'search',
-    summarize: a => `/${a.pattern}/${a.flags ?? 'i'}`,
-  },
-  search_by_tag: {
-    icon: ICON.tag, label: 'Find by tag', verb: 'Searching',
-    color: '#5b9bff', category: 'search',
-    summarize: a => a.tag,
-  },
-  semantic_search: {
-    icon: ICON.brain, label: 'Semantic search', verb: 'Embedding-searching',
-    color: '#b66cf0', category: 'search',
-    summarize: a => `"${a.query}" (top ${a.top_k ?? 8})`,
+    summarize: a => `${Array.isArray(a.requests) ? a.requests.length : 0} files`,
   },
   get_active_file: {
     icon: ICON.file, label: 'Active file', verb: 'Loading active',
@@ -163,6 +143,16 @@ export const TOOL_META: Record<string, ToolMeta> = {
     color: '#888', category: 'meta',
     summarize: a => `"${String(a.query ?? '').slice(0, 32)}"`,
   },
+  context_prune: {
+    icon: ICON.wrench, label: 'Prune context', verb: 'Pruning context',
+    color: '#888', category: 'system',
+    summarize: a => String(a.mode ?? 'selected'),
+  },
+  validate_skill: {
+    icon: ICON.sparkles, label: 'Validate skill', verb: 'Validating skill',
+    color: '#b66cf0', category: 'meta',
+    summarize: a => String(a.skill ?? ''),
+  },
 
   // Phase 1 surgical tools.
   patch_note: {
@@ -207,10 +197,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     color: '#5b9bff', category: 'meta',
     summarize: a => a.path,
   },
-  list_tags: {
-    icon: ICON.tag, label: 'List tags', verb: 'Listing tags',
-    color: '#5b9bff', category: 'meta',
-  },
   get_periodic_note: {
     icon: ICON.file, label: 'Periodic note', verb: 'Resolving periodic',
     color: '#5b9bff', category: 'read',
@@ -248,17 +234,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     icon: ICON.folder, label: 'Open tabs', verb: 'Listing tabs',
     color: '#5b9bff', category: 'meta',
   },
-  execute_command: {
-    icon: ICON.wrench, label: 'Run command', verb: 'Dispatching',
-    color: '#ff9d3d', category: 'system',
-    summarize: a => a?.command_id ?? '?',
-  },
-  list_commands: {
-    icon: ICON.wrench, label: 'List commands', verb: 'Listing commands',
-    color: '#5b9bff', category: 'meta',
-    summarize: a => a?.filter ? `"${a.filter}"` : '(all)',
-  },
-
   // Phase 3 plugin bridges.
   dataview_query: {
     icon: ICON.brain, label: 'Dataview', verb: 'Querying Dataview',
@@ -274,11 +249,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     icon: ICON.check, label: 'Tasks query', verb: 'Querying tasks',
     color: '#b66cf0', category: 'search',
     summarize: a => String(a.query ?? '').replace(/\n/g, ' · ').slice(0, 50),
-  },
-  bases_query: {
-    icon: ICON.brain, label: 'Bases query', verb: 'Querying base',
-    color: '#b66cf0', category: 'search',
-    summarize: a => `${a.base_path}${a.view ? `  [${a.view}]` : ''}`,
   },
 };
 
@@ -350,4 +320,4 @@ export function activityDescriptionFor(name: string, args: AnyValue): string {
   const summary = tool?.getToolUseSummary?.(args) ?? meta.summarize?.(args) ?? '';
   return summary ? `${meta.verb} ${summary}` : meta.verb;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

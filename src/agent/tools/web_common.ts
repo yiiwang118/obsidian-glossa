@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import type { App } from 'obsidian';
 import type { GlossaSettings, WebSearchProvider } from '../../types';
 import type { PermissionResult } from './_shared';
@@ -39,4 +39,24 @@ export function webReadPermission(app: App, message: string): PermissionResult {
     ? { behavior: 'allow', decisionReason: 'Web reads are auto-approved in settings.' }
     : { behavior: 'ask', message };
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+
+export function httpFallbackUrl(url: string, error: unknown, signal?: AbortSignal): string {
+  if (signal?.aborted || errorName(error) === 'AbortError') return '';
+  const message = errorMessage(error);
+  if (/^refused:|not a valid url|only http\(s\)|too many redirects/i.test(message)) return '';
+  let parsed: URL;
+  try { parsed = new URL(url); }
+  catch { return ''; }
+  if (parsed.protocol !== 'https:') return '';
+  parsed.protocol = 'http:';
+  return parsed.toString();
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : '';
+}
+/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

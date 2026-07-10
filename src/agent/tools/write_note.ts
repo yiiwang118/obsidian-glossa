@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
@@ -6,17 +6,23 @@ export const writeNote: ToolImpl = buildTool({
   isReadOnly: () => false,
   isDestructive: () => true,
   isConcurrencySafe: () => false,
+  shouldDefer: true,
   searchHint: 'overwrite entire note content',
+  searchTags: ['replace whole file', 'full rewrite', '覆盖全文', '重写笔记'],
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => `write ${a.path}`,
   preview: async (a) => `Replace entire content of\n\n${a.path}\n\n→ ${(a.content ?? '').length} chars`,
   spec: {
     name: 'write_note',
-    description: 'Overwrite the entire content of an existing note. For partial edits use file_edit or apply_patch. REQUIRES USER APPROVAL.',
+    description: 'Replace every character of one existing note. Use only for an intentional full rewrite; use file_edit, patch_note, or apply_patch for partial changes. The file must already exist. Requires user approval.',
     parameters: {
       type: 'object',
-      properties: { path: { type: 'string' }, content: { type: 'string' } },
+      properties: {
+        path: { type: 'string', description: 'Vault-relative path of an existing file.' },
+        content: { type: 'string', description: 'Complete replacement content, including frontmatter and final newline if desired.' },
+      },
       required: ['path', 'content'],
+      additionalProperties: false,
     },
   },
   run: async (app, args) => {
@@ -30,4 +36,4 @@ export const writeNote: ToolImpl = buildTool({
     return `Wrote ${path} (${content.length} chars).`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+
 /**
  * Tool registry.
  *
@@ -7,6 +7,7 @@
  * and exposes the unified registry + helpers.
  */
 import { readNote } from './tools/read_note';
+import { readFiles } from './tools/read_files';
 import { discoverSkillsTool } from './tools/discover_skills';
 import { runSkill } from './tools/run_skill';
 import { getActiveFile } from './tools/get_active_file';
@@ -29,6 +30,8 @@ import { webResearch } from './tools/web_research';
 import { downloadFile } from './tools/download_file';
 import { skillTool } from './tools/skill';
 import { toolSearchTool } from './tools/tool_search';
+import { contextPrune } from './tools/context_prune';
+import { validateSkill } from './tools/validate_skill';
 
 // Phase 1 surgical / metadata tools.
 import { patchNote } from './tools/patch_note';
@@ -42,12 +45,9 @@ import { getPeriodicNote } from './tools/get_periodic_note';
 import { readCanvas } from './tools/read_canvas';
 import { patchCanvas } from './tools/patch_canvas';
 
-// Phase 2 workspace tools.
 import { openInEditor } from './tools/open_in_editor';
 import { setSelection } from './tools/set_selection';
 import { listOpenFiles } from './tools/list_open_files';
-import { executeCommand } from './tools/execute_command';
-import { listCommands } from './tools/list_commands';
 
 // Phase 3 plugin bridges (detect-then-register; see ./plugin_bridges.ts).
 import { dataviewQuery } from './tools/dataview_query';
@@ -64,6 +64,7 @@ export {
   isReadOnlyTool,
   isConcurrencySafeTool,
   isDestructiveTool,
+  validateToolInput,
   findWithQuoteNormalization,
   buildTool,
 } from './tools/_shared';
@@ -78,6 +79,7 @@ export type {
  *  reads → metadata → writes → edits → planning → control → media → network. */
 export const TOOLS: Record<string, ToolImpl> = {
   read_note: readNote,
+  read_files: readFiles,
   get_active_file: getActiveFile,
   get_selection: getSelection,
   query_metadata: queryMetadata,
@@ -103,6 +105,8 @@ export const TOOLS: Record<string, ToolImpl> = {
   // registered with [deprecated] markers so old sessions / docs still work.
   skill: skillTool,
   tool_search: toolSearchTool,
+  context_prune: contextPrune,
+  validate_skill: validateSkill,
   discover_skills: discoverSkillsTool,
   run_skill: runSkill,
 
@@ -118,12 +122,9 @@ export const TOOLS: Record<string, ToolImpl> = {
   read_canvas: readCanvas,
   patch_canvas: patchCanvas,
 
-  // Phase 2 workspace tools.
   open_in_editor: openInEditor,
   set_selection: setSelection,
   list_open_files: listOpenFiles,
-  execute_command: executeCommand,
-  list_commands: listCommands,
 
   // Phase 3 plugin bridges — always registered; filtered out of the model's
   // visible tool list when the upstream plugin isn't detected (see
@@ -133,29 +134,102 @@ export const TOOLS: Record<string, ToolImpl> = {
   tasks_query: tasksQuery,
 };
 
-const MODEL_HIDDEN_TOOL_NAMES = new Set(['attempt_completion']);
+const MODEL_HIDDEN_TOOL_NAMES = new Set([
+  'attempt_completion',
+  'append_to_note',
+  'edit_section',
+  'discover_skills',
+  'run_skill',
+]);
+const BRIDGE_TOOL_NAMES = new Set(allBridgeToolNames());
+
+/** True when a registered local tool is eligible for model exposure. This
+ *  centralizes bridge/deferred filtering so tool_search cannot advertise a
+ *  schema that the agent loop is unable to load. */
+export function isToolAvailableForModel(
+  name: string,
+  opts: { includeDeferred?: boolean } = {},
+): boolean {
+  const tool = TOOLS[name];
+  if (!tool || MODEL_HIDDEN_TOOL_NAMES.has(name)) return false;
+  if (BRIDGE_TOOL_NAMES.has(name) && !isBridgeActive(name)) return false;
+  if (tool.shouldDefer && !opts.includeDeferred) return false;
+  return true;
+}
 
 /**
  * Build the model-facing tool spec list.
  *
  * Two filters apply by default — both produce the surface the model SHOULD see:
- *  1. Bridge filter: dataview_query / templater_render / tasks_query / bases_query
+   *  1. Bridge filter: dataview_query / templater_render / tasks_query
  *     are hidden when their upstream plugin isn't detected. (plugin_bridges.ts)
- *  2. Defer filter: tools flagged `shouldDefer:true` (e.g. legacy edit_section,
- *     append_to_note, discover_skills, run_skill) are hidden from the initial
- *     prompt; the model must call `tool_search` to load their schemas.
+ *  2. Defer filter: specialized tools (Canvas, links, metadata, workspace UI,
+ *     plugin bridges, full-file writes) are hidden from the initial prompt;
+ *     tool_search or a matching skill loads their schemas for the next step.
  *
  * Pass `{ includeDeferred: true }` only when you specifically want the full
- * spec list including deferred tools (e.g. tool_search itself enumerating them
- * for keyword scoring — though it consults TOOLS directly today).
+ * spec list including deferred tools (tool_search uses this availability rule
+ * so inactive bridges and model-hidden compatibility tools stay unreachable).
  */
 export function listToolSpecs(opts: { includeDeferred?: boolean } = {}): ToolSpec[] {
-  const bridgeNames = new Set(allBridgeToolNames());
   return Object.values(TOOLS)
-    .filter(t => !MODEL_HIDDEN_TOOL_NAMES.has(t.spec.name))
-    .filter(t => !bridgeNames.has(t.spec.name) || isBridgeActive(t.spec.name))
-    .filter(t => opts.includeDeferred || !t.shouldDefer)
+    .filter(t => isToolAvailableForModel(t.spec.name, opts))
     .map(t => t.spec);
+}
+
+interface RegistrySchema {
+  type?: string;
+  description?: string;
+  properties?: Record<string, RegistrySchema>;
+  required?: string[];
+  items?: RegistrySchema;
+  additionalProperties?: boolean;
+}
+
+/** Static quality audit for model-facing tool contracts. Kept side-effect free
+ *  so tests and release checks can fail with actionable per-tool messages. */
+export function toolRegistryIssues(): string[] {
+  const issues: string[] = [];
+  const aliases = new Map<string, string>();
+  for (const [key, tool] of Object.entries(TOOLS)) {
+    const name = tool.spec.name;
+    if (key !== name) issues.push(`${key}: registry key differs from spec name "${name}"`);
+    if (!/^[a-z][a-z0-9_]*$/.test(name)) issues.push(`${name}: name must be snake_case`);
+    if (tool.spec.description.trim().length < 20) issues.push(`${name}: description is too short`);
+    if (tool.shouldDefer && !tool.searchHint && !tool.searchTags?.length) {
+      issues.push(`${name}: deferred tool needs searchHint or searchTags`);
+    }
+    const schema = tool.spec.parameters as RegistrySchema;
+    if (schema.type !== 'object') issues.push(`${name}: parameter schema must be an object`);
+    if (schema.additionalProperties !== false) issues.push(`${name}: top-level schema must reject unknown properties`);
+    const properties = schema.properties ?? {};
+    for (const required of schema.required ?? []) {
+      if (!(required in properties)) issues.push(`${name}: required property "${required}" is undefined`);
+    }
+    collectSchemaDescriptionIssues(name, schema, '', issues);
+    for (const alias of tool.aliases ?? []) {
+      if (!/^[a-z][a-z0-9_]*$/.test(alias)) issues.push(`${name}: invalid alias "${alias}"`);
+      const owner = aliases.get(alias);
+      if (owner && owner !== name) issues.push(`${name}: alias "${alias}" conflicts with ${owner}`);
+      if (TOOLS[alias] && alias !== name) issues.push(`${name}: alias "${alias}" shadows a primary tool`);
+      aliases.set(alias, name);
+    }
+  }
+  return issues;
+}
+
+function collectSchemaDescriptionIssues(
+  toolName: string,
+  schema: RegistrySchema,
+  prefix: string,
+  issues: string[],
+): void {
+  for (const [name, child] of Object.entries(schema.properties ?? {})) {
+    const path = prefix ? `${prefix}.${name}` : name;
+    if (!child.description?.trim()) issues.push(`${toolName}: parameter "${path}" needs a description`);
+    collectSchemaDescriptionIssues(toolName, child, path, issues);
+    if (child.items) collectSchemaDescriptionIssues(toolName, child.items, `${path}[]`, issues);
+  }
 }
 
 /** Lazy alias index: { aliasName → primary ToolImpl }. Built on first access
@@ -192,4 +266,3 @@ export function getTool(name: string): ToolImpl | undefined {
   if (primary) return primary;
   return ensureAliasCache().get(name);
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

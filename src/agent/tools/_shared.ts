@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Shared types and helpers for the per-tool modules in this directory.
  * Mirrors the upstream Claude Code tool architecture: each tool lives in its own file
@@ -6,6 +6,7 @@
  */
 import type { App } from 'obsidian';
 import type { ToolSpec, ToolContentBlock } from '../../providers/types';
+import type { ContextPruneRequest } from '../../utils/context_pruning';
 
 /** Permission decision returned by Tool.checkPermissions — mirrors upstream Claude Code's
  *  PermissionResult union. Most tools don't need to override checkPermissions; the agent
@@ -24,6 +25,12 @@ export interface ToolRunResult {
   /** Anthropic content blocks. When present, providers prefer these over `text`
    *  for the actual tool_result payload sent to the model. */
   contentBlocks?: ToolContentBlock[];
+  /** Deferred local tools whose schemas should be added to the next model
+   *  request. Used by tool_search and skills that declare required tools. */
+  loadedToolNames?: string[];
+  /** Request model-only removal of stale historical tool results. The agent
+   *  loop validates eligible IDs and keeps visible chat history unchanged. */
+  contextPruneRequest?: ContextPruneRequest;
 }
 
 export interface ToolImpl {
@@ -58,6 +65,9 @@ export interface ToolImpl {
   /** One-line keyword phrase used by ToolSearch for deferred-tool matching.
    *  3–10 words, no trailing period. Prefer terms not already in the tool name. */
   searchHint?: string;
+  /** Extra capability terms used by tool_search. Keep these short and include
+   *  common user wording (including localized terms where useful). */
+  searchTags?: string[];
   /** When tool result exceeds this many chars, the agent loop will persist it
    *  to disk under `.glossa/tool_outputs/<id>.txt` and replace the inlined text
    *  with a `[truncated, see <path>]` preview. `Infinity` disables persistence
@@ -142,7 +152,135 @@ export function buildTool(def: ToolDef): ToolImpl {
 /** Normalize a tool's return value (string OR ToolRunResult) into a uniform shape. */
 export function normalizeToolResult(raw: string | ToolRunResult): ToolRunResult {
   if (typeof raw === 'string') return { text: raw };
-  return { text: raw.text ?? '', contentBlocks: raw.contentBlocks };
+  return {
+    text: raw.text ?? '',
+    contentBlocks: raw.contentBlocks,
+    loadedToolNames: raw.loadedToolNames,
+    contextPruneRequest: raw.contextPruneRequest,
+  };
+}
+
+interface ToolJsonSchema {
+  type?: 'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null';
+  properties?: Record<string, ToolJsonSchema>;
+  required?: string[];
+  items?: ToolJsonSchema;
+  enum?: unknown[];
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
+  additionalProperties?: boolean;
+}
+
+/** Validate model-authored tool arguments against the JSON-schema subset used
+ *  by Glossa tools. Providers usually validate too, but compatible gateways
+ *  vary; this keeps malformed calls away from approval and execution paths. */
+export function validateToolInput(parameters: unknown, input: unknown): string[] {
+  const errors: string[] = [];
+  validateSchemaNode(parameters as ToolJsonSchema, input, 'arguments', errors);
+  return errors.slice(0, 8);
+}
+
+function validateSchemaNode(
+  schema: ToolJsonSchema,
+  value: unknown,
+  path: string,
+  errors: string[],
+): void {
+  if (errors.length >= 8 || !schema || typeof schema !== 'object') return;
+
+  if (schema.enum && !schema.enum.some(candidate => Object.is(candidate, value))) {
+    errors.push(`${path} must be one of: ${schema.enum.map(String).join(', ')}`);
+    return;
+  }
+
+  switch (schema.type) {
+    case 'object': {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        errors.push(`${path} must be an object`);
+        return;
+      }
+      const objectValue = value as Record<string, unknown>;
+      for (const required of schema.required ?? []) {
+        if (!Object.prototype.hasOwnProperty.call(objectValue, required)) {
+          errors.push(`${path}.${required} is required`);
+        }
+      }
+      const properties = schema.properties ?? {};
+      for (const [key, child] of Object.entries(properties)) {
+        if (Object.prototype.hasOwnProperty.call(objectValue, key)) {
+          validateSchemaNode(child, objectValue[key], `${path}.${key}`, errors);
+        }
+      }
+      if (schema.additionalProperties === false) {
+        for (const key of Object.keys(objectValue)) {
+          if (!(key in properties)) errors.push(`${path}.${key} is not allowed`);
+        }
+      }
+      return;
+    }
+    case 'array': {
+      if (!Array.isArray(value)) {
+        errors.push(`${path} must be an array`);
+        return;
+      }
+      if (schema.minItems !== undefined && value.length < schema.minItems) {
+        errors.push(`${path} must contain at least ${schema.minItems} item(s)`);
+      }
+      if (schema.maxItems !== undefined && value.length > schema.maxItems) {
+        errors.push(`${path} must contain at most ${schema.maxItems} item(s)`);
+      }
+      if (schema.items) {
+        const itemSchema = schema.items;
+        value.forEach((item, index) => validateSchemaNode(itemSchema, item, `${path}[${index}]`, errors));
+      }
+      return;
+    }
+    case 'string':
+      if (typeof value !== 'string') errors.push(`${path} must be a string`);
+      else {
+        if (schema.minLength !== undefined && value.length < schema.minLength) {
+          errors.push(`${path} must contain at least ${schema.minLength} character(s)`);
+        }
+        if (schema.maxLength !== undefined && value.length > schema.maxLength) {
+          errors.push(`${path} must contain at most ${schema.maxLength} character(s)`);
+        }
+      }
+      return;
+    case 'number':
+      if (typeof value !== 'number' || !Number.isFinite(value)) errors.push(`${path} must be a finite number`);
+      else validateNumberBounds(schema, value, path, errors);
+      return;
+    case 'integer':
+      if (typeof value !== 'number' || !Number.isInteger(value)) errors.push(`${path} must be an integer`);
+      else validateNumberBounds(schema, value, path, errors);
+      return;
+    case 'boolean':
+      if (typeof value !== 'boolean') errors.push(`${path} must be a boolean`);
+      return;
+    case 'null':
+      if (value !== null) errors.push(`${path} must be null`);
+      return;
+    default:
+      return;
+  }
+}
+
+function validateNumberBounds(
+  schema: ToolJsonSchema,
+  value: number,
+  path: string,
+  errors: string[],
+): void {
+  if (schema.minimum !== undefined && value < schema.minimum) {
+    errors.push(`${path} must be at least ${schema.minimum}`);
+  }
+  if (schema.maximum !== undefined && value > schema.maximum) {
+    errors.push(`${path} must be at most ${schema.maximum}`);
+  }
 }
 
 /** Unicode normalization mirroring upstream Claude Code's findActualString helper:
@@ -266,9 +404,7 @@ export function vaultFolderOf(path: string): string {
   return i > 0 ? path.slice(0, i) : '';
 }
 
-/** Translate an Obsidian-style glob (`**`, `*`, `?`) to a RegExp. Used by
- *  list_files and grep_vault — keep these in lockstep so user-facing glob
- *  semantics don't drift between the two. */
+/** Translate an Obsidian-style glob (`**`, `*`, `?`) to a RegExp. */
 export function globToRegExp(glob: string): RegExp {
   // Anchor + escape regex metachars except `*` and `?` which we expand below.
   let rx = '^';
@@ -283,4 +419,4 @@ export function globToRegExp(glob: string): RegExp {
   rx += '$';
   return new RegExp(rx);
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

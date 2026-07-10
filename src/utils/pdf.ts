@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { loadPdfJs } from 'obsidian';
 
 export interface PdfExtractionOptions {
@@ -77,7 +77,7 @@ interface PdfJsDocument {
   numPages?: number;
   getPage: (pageNumber: number) => Promise<PdfJsPage>;
   getMetadata?: () => Promise<{ info?: { Title?: unknown; title?: unknown } }> | { info?: { Title?: unknown; title?: unknown } };
-  destroy?: () => Promise<unknown> | unknown;
+  destroy?: () => void | Promise<void>;
 }
 
 const DEFAULT_MAX_PAGES = 80;
@@ -171,10 +171,13 @@ export async function extractPdfTextWithPdfJs(pdfjs: AnyValue, data: ArrayBuffer
 
     const chunks: string[] = [];
     const pageTexts: { page: number; text: string }[] = [];
+    let charsUsed = 0;
     let truncatedByChars = false;
     let foundExtractableText = false;
-    for (const pageNo of selection.pages) {
+    for (let pageIndex = 0; pageIndex < selection.pages.length; pageIndex++) {
+      const pageNo = selection.pages[pageIndex];
       throwIfAborted(opts.signal);
+      if (pageIndex > 0 && pageIndex % 4 === 0) await yieldPdfExtraction(opts.signal);
       const page = await doc.getPage(pageNo);
       try {
         const content = await page.getTextContent();
@@ -182,14 +185,18 @@ export async function extractPdfTextWithPdfJs(pdfjs: AnyValue, data: ArrayBuffer
         pageTexts.push({ page: pageNo, text: pageText });
         if (pageText.trim()) foundExtractableText = true;
         const block = `### Page ${pageNo}\n${pageText || '[No extractable text on this page]'}`;
-        const next = chunks.length ? `${chunks.join('\n\n')}\n\n${block}` : block;
-        if (next.length > maxChars) {
-          const remaining = Math.max(0, maxChars - (chunks.length ? chunks.join('\n\n').length + 2 : 0));
-          if (remaining > 0) chunks.push(block.slice(0, remaining));
+        const separatorChars = chunks.length ? 2 : 0;
+        const remaining = Math.max(0, maxChars - charsUsed - separatorChars);
+        if (block.length > remaining) {
+          if (remaining > 0) {
+            chunks.push(block.slice(0, remaining));
+            charsUsed += separatorChars + remaining;
+          }
           truncatedByChars = true;
           break;
         }
         chunks.push(block);
+        charsUsed += separatorChars + block.length;
       } finally {
         try { page?.cleanup?.(); } catch { /* best effort */ }
       }
@@ -573,4 +580,10 @@ function clampInt(value: number, min: number, max: number): number {
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error('PDF extraction aborted.');
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+
+async function yieldPdfExtraction(signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+  throwIfAborted(signal);
+}
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

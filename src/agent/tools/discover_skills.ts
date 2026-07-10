@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+
 import { discoverSkills } from '../skills';
 import { listAvailableSkills } from './skill';
 import { buildTool, type ToolImpl } from './_shared';
@@ -13,7 +13,7 @@ export const discoverSkillsTool: ToolImpl = buildTool({
     description:
       '[deprecated: available skills are listed in the system prompt under ' +
       '"Available Skills"; call the `skill` tool directly] List vault skills.',
-    parameters: { type: 'object', properties: {} },
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
   isReadOnly: () => true,
   shouldDefer: true,
@@ -37,4 +37,3 @@ export const discoverSkillsTool: ToolImpl = buildTool({
     return `${visible.length} skill${visible.length === 1 ? '' : 's'} available:\n\n${lines.join('\n')}\n\nInvoke via skill({ skill: '<name>' }).${footer}`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

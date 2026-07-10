@@ -1,10 +1,18 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import { setStyle } from '../../utils/dom';
+import { formatNoteRead } from '../../utils/note_read';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
-const READ_BYTE_CAP = 50_000;
-const READ_LINE_CAP = 5_000;
+function inputRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined;
+}
 
 export const readNote: ToolImpl = buildTool({
   isReadOnly: () => true,
@@ -78,14 +86,20 @@ export const readNote: ToolImpl = buildTool({
     wrap.appendChild(det);
     return wrap;
   },
-  describe: a => `read ${a.path}`,
+  describe: a => `read ${a.path}${a.start_line ? ` lines ${a.start_line}-${a.end_line ?? '...'}` : ''}`,
   spec: {
     name: 'read_note',
-    description: 'Read the full content of a markdown note in the vault. Returns the file content as a string. Use this when the user asks about a specific file.',
+    description: 'Read one explicitly targeted vault file before editing or answering about its body. Optional 1-based line ranges avoid loading irrelevant content. Full reads are capped at 50,000 characters or 5,000 lines. Do not call when the same current-file content is already attached in context.',
     parameters: {
       type: 'object',
-      properties: { path: { type: 'string', description: 'Vault-relative path, e.g. "Notes/Foo.md"' } },
+      properties: {
+        path: { type: 'string', description: 'Vault-relative path, e.g. "Notes/Foo.md"' },
+        start_line: { type: 'integer', minimum: 1, description: 'Optional 1-based first line. Defaults to 1 when another range field is set.' },
+        end_line: { type: 'integer', minimum: 1, description: 'Optional inclusive last line. Takes precedence over max_lines.' },
+        max_lines: { type: 'integer', minimum: 1, maximum: 5_000, description: 'Lines to return when end_line is omitted. Default 200.' },
+      },
       required: ['path'],
+      additionalProperties: false,
     },
   },
   run: async (app, args) => {
@@ -95,22 +109,16 @@ export const readNote: ToolImpl = buildTool({
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: file not found: ${path}`;
     const text = await app.vault.read(f);
-    // Cap by chars AND lines so an attacker-controlled file with millions of
-    // short lines can't blow up the context window or the transcript renderer.
-    let body = text;
-    let truncatedNote = '';
-    if (body.length > READ_BYTE_CAP) {
-      body = body.slice(0, READ_BYTE_CAP);
-      truncatedNote = `\n\n[truncated at ${READ_BYTE_CAP.toLocaleString()} chars — file is ${text.length.toLocaleString()} chars total]`;
+    try {
+      const input = inputRecord(args);
+      return formatNoteRead(path, text, {
+        startLine: optionalNumber(input.start_line),
+        endLine: optionalNumber(input.end_line),
+        maxLines: optionalNumber(input.max_lines),
+      });
+    } catch (error) {
+      return `Error: ${error instanceof Error ? error.message : String(error)}`;
     }
-    const lines = body.split('\n');
-    if (lines.length > READ_LINE_CAP) {
-      body = lines.slice(0, READ_LINE_CAP).join('\n');
-      truncatedNote = `\n\n[truncated at ${READ_LINE_CAP.toLocaleString()} lines — original had ${text.split('\n').length.toLocaleString()} lines]`;
-    }
-    const totalLines = text.split('\n').length;
-    const header = `Path: ${path}  (${totalLines} lines, ${text.length} chars)\n\n---\n`;
-    return header + body + truncatedNote;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

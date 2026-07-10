@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * manage_tags — add/remove/list tags on a note.
  *
@@ -22,7 +22,9 @@ export const manageTags: ToolImpl = buildTool({
   isReadOnly: a => a?.op === 'list',
   isDestructive: a => a?.op === 'add' || a?.op === 'remove',
   isConcurrencySafe: a => a?.op === 'list',
+  shouldDefer: true,
   searchHint: 'add remove list note tags frontmatter inline',
+  searchTags: ['tag metadata', '分类标签', '标签增删', 'frontmatter tags'],
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => `${a.op ?? 'list'} tags on ${a.path}`,
   // Render: a horizontal row of colored tag chips when the result is a
@@ -84,12 +86,12 @@ export const manageTags: ToolImpl = buildTool({
   },
   spec: {
     name: 'manage_tags',
-    description: 'Add, remove, or list tags on a note. Handles both inline (#tag) and frontmatter (tags: []) styles; new tags are written to frontmatter.',
+    description: 'List, add, or remove tags on one note. Add writes canonical frontmatter tags; remove reconciles frontmatter and inline tags. Use only for tag changes, not arbitrary metadata.',
     parameters: {
       type: 'object',
       properties: {
-        path: { type: 'string' },
-        op: { type: 'string', enum: ['add', 'remove', 'list'] },
+        path: { type: 'string', description: 'Vault-relative path of the note.' },
+        op: { type: 'string', enum: ['add', 'remove', 'list'], description: 'Tag operation. list is read-only; add/remove modify the note.' },
         tags: {
           type: 'array',
           items: { type: 'string' },
@@ -97,6 +99,7 @@ export const manageTags: ToolImpl = buildTool({
         },
       },
       required: ['path', 'op'],
+      additionalProperties: false,
     },
   },
   preview: async (a) => `${a.op} ${(a.tags ?? []).join(', ')} on ${a.path}`,
@@ -176,4 +179,4 @@ export const manageTags: ToolImpl = buildTool({
     return removed.size === 0 ? '(no matching tags found)' : `Removed: ${[...removed].sort().join(', ')}`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

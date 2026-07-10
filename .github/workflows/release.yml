@@ -29,10 +29,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build (production)
-        run: npm run build
+      - name: Full pre-release check
+        run: npm run check
 
-      - name: Release metadata check
+      - name: Release metadata check (clean tree)
         run: npm run release:check
 
       - name: Verify version match (manifest.json vs tag)

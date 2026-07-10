@@ -24,10 +24,7 @@ Then in the host app: Settings → Community plugins → reload (or use the [hot
 
 ## Before opening a PR
 
-- [ ] `npm test` clean
-- [ ] `npm run typecheck` clean
-- [ ] `npm run build` succeeds
-- [ ] `npm run release:check -- --allow-dirty` succeeds before release prep
+- [ ] `npm run check` clean
 - [ ] No `console.log` / `console.error` left in production code paths (devtools-only is OK with a `// debug` comment)
 - [ ] If touching a tool: focused coverage in `tests/*.test.cjs`
 - [ ] If touching UI: screenshot or short GIF in PR description
@@ -35,7 +32,7 @@ Then in the host app: Settings → Community plugins → reload (or use the [hot
 
 ## Code style
 
-- TypeScript strict-null is OFF intentionally — we accept `any` at the edges (provider parsing, MCP) and tighten in `src/types.ts` instead.
+- Keep review-facing TypeScript clean. Avoid explicit `any`; validate dynamic provider, plugin, and host-app values at the boundary.
 - No comments that restate the code. Only comment WHY when the answer isn't obvious from the names.
 - Prefer editing existing files over creating new ones.
 - Tool implementations live in `src/agent/tools/<name>.ts`, one file per tool, exported via `src/agent/tools.ts`.
@@ -64,13 +61,14 @@ Then in the host app: Settings → Community plugins → reload (or use the [hot
 | Quick feedback during dev | `npm test` |
 | Type/API safety | `npm run typecheck` |
 | Bundle verification | `npm run build` |
-| Release metadata | `npm run release:check -- --allow-dirty` |
+| Full pre-release gate | `npm run check` |
+| Release metadata and post-build review scan only | `npm run release:check -- --allow-dirty` |
 
 ## Release process (maintainer)
 
 1. Edit `manifest.json`, `package.json`, `package-lock.json`, `versions.json` — bump version (no `v` prefix per Obsidian spec)
 2. Update `CHANGELOG.md`, `README.md`, `README.zh-CN.md`, `PRIVACY.md`, and screenshots if behavior changed
-3. Run `npm test`, `npm run typecheck`, `npm run build`, and `npm run release:check`
+3. Run `npm run check`
 4. Commit, tag the exact manifest version, and push: `git tag 0.X.Y && git push --tags`
 5. GitHub Action auto-builds and creates a release with `main.js / manifest.json / styles.css` attached
 6. For first community-plugin submission, use the current Obsidian plugin submission flow on <https://community.obsidian.md/> rather than the retired `obsidian-releases` PR flow

@@ -2794,14 +2794,6 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
     linear-gradient(180deg, #8b5cf6 0%, #d946ef 100%));
   box-shadow: 0 0 6px rgba(139, 92, 246, 0.32);
 }
-.nc-selection-preview-icon {
-  flex-shrink: 0;
-  color: var(--aurora-violet, #8b5cf6);
-  width: 14px; height: 14px;
-  display: inline-flex;
-  margin-top: 2px;
-}
-.nc-selection-preview-icon svg { width: 100%; height: 100%; }
 .nc-selection-preview-body {
   flex: 1; min-width: 0;
 }
@@ -2848,6 +2840,13 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-muted);
+}
+.nc-selection-preview-language {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 .nc-selection-preview-chars {
   flex-shrink: 0;
@@ -4655,16 +4654,8 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   bottom: 7px;
 }
 
-.nc-selection-preview-icon,
 .nc-selection-preview-close:hover {
   color: var(--glossa-accent);
-}
-
-.nc-selection-preview-icon {
-  width: 13px;
-  height: 13px;
-  margin-top: 0;
-  align-self: center;
 }
 
 .nc-selection-preview-body {
@@ -5425,6 +5416,43 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .glossa-view .nc-messages {
   background: var(--glossa-surface-1);
   padding: 14px 16px 6px;
+}
+
+.nc-history-window-nav {
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--glossa-line-soft);
+  border-radius: 0;
+  background: transparent;
+  color: var(--glossa-muted);
+  font-size: var(--nc-font-xs, 10px);
+  letter-spacing: 0;
+}
+
+.nc-history-window-nav:hover {
+  background: var(--glossa-hover);
+  color: var(--glossa-ink);
+}
+
+.nc-history-window-nav-icon {
+  width: 13px;
+  height: 13px;
+  display: inline-flex;
+}
+
+.nc-history-window-nav-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.nc-history-window-nav.earlier .nc-history-window-nav-icon {
+  transform: rotate(180deg);
 }
 
 .nc-header {

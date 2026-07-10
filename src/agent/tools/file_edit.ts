@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import { findWithQuoteNormalization, assertVaultPath, buildTool, normalizePathFields, vaultFolderOf, type ToolImpl } from './_shared';
 
@@ -32,17 +32,7 @@ export const fileEdit: ToolImpl = buildTool({
   },
   spec: {
     name: 'file_edit',
-    description: [
-      'Perform exact string replacement in a single note. Upstream Claude Code shape.',
-      '',
-      'Args:',
-      '- file_path: vault-relative path',
-      '- old_string: exact text to replace. Pass an empty string to CREATE a new file (new_string becomes the contents).',
-      '- new_string: replacement text. Must differ from old_string.',
-      '- replace_all (optional): when true, replace EVERY occurrence; otherwise old_string must match exactly once.',
-      '',
-      'For multi-hunk or multi-file edits prefer `apply_patch` (envelope mode). REQUIRES USER APPROVAL.'
-    ].join('\n'),
+    description: 'Replace one exact string in one file. By default old_string must occur exactly once; set replace_all only for the same intentional replacement everywhere. An empty old_string creates a new file and never overwrites. Use apply_patch for multiple hunks or files. Requires user approval.',
     parameters: {
       type: 'object',
       properties: {
@@ -52,6 +42,7 @@ export const fileEdit: ToolImpl = buildTool({
         replace_all: { type: 'boolean', description: 'Default false. When true, replace every occurrence.' },
       },
       required: ['file_path', 'old_string', 'new_string'],
+      additionalProperties: false,
     },
   },
   run: async (app, args) => {
@@ -87,4 +78,4 @@ export const fileEdit: ToolImpl = buildTool({
       : `Edited ${file_path}.`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

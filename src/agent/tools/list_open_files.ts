@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * list_open_files — enumerate every currently-open editor tab + its cursor.
  *
@@ -29,12 +29,14 @@ export const listOpenFiles: ToolImpl = buildTool({
   isConcurrencySafe: () => true,
   isDestructive: () => false,
   dangerous: false,
+  shouldDefer: true,
   searchHint: 'list open editor tabs cursor positions',
+  searchTags: ['workspace tabs', 'open panes', '打开标签页', '当前窗口'],
   describe: () => 'list open tabs',
   spec: {
     name: 'list_open_files',
-    description: 'List every open editor tab with its file path, leaf id, focus state, cursor (markdown only), and view type.',
-    parameters: { type: 'object', properties: {} },
+    description: 'List open workspace tabs with paths, active state, view type, and Markdown cursor/selection. Use only when the request refers to multiple visible tabs or panes.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
   run: async (app) => {
     const activeLeaf = app.workspace.getMostRecentLeaf();
@@ -82,4 +84,4 @@ export const listOpenFiles: ToolImpl = buildTool({
     return [`${out.length} tab${out.length === 1 ? '' : 's'} open (★ = focused):`, ...lines].join('\n');
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

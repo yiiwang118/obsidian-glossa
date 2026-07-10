@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * open_in_editor — open a vault file in the editor, optionally jumping to a
  * line / heading / block, and optionally selecting it.
@@ -53,13 +53,15 @@ function lineOfBlock(text: string, blockRef: string): number | null {
 
 export const openInEditor: ToolImpl = buildTool({
   // Modifies workspace state (open tab, cursor, selection) but does NOT mutate
-  // the vault. Not dangerous in the destructive sense, but also not safe to
-  // run in parallel (multiple opens race for the active leaf).
-  isReadOnly: () => false,
+  // the vault. It is read-only for vault permission, but not concurrency-safe
+  // because multiple opens race for the active leaf.
+  isReadOnly: () => true,
   isDestructive: () => false,
   isConcurrencySafe: () => false,
   dangerous: false,                    // workspace nav, no approval needed
+  shouldDefer: true,
   searchHint: 'open file in editor jump heading block',
+  searchTags: ['navigate tab', 'jump to line', '打开文件', '跳转标题'],
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => {
     const tail = a.to?.line ? ` :${a.to.line}`
@@ -70,32 +72,26 @@ export const openInEditor: ToolImpl = buildTool({
   },
   spec: {
     name: 'open_in_editor',
-    description: [
-      'Open a vault file in the editor. Optionally jump to a heading / block / line',
-      'and optionally place the selection on the target line.',
-      '',
-      'Args:',
-      '  path: vault-relative file path.',
-      '  leaf: "active" (default) | "new-tab" | "split-right" | "split-down".',
-      '  to.line / to.heading / to.block: optional jump target (first set wins).',
-      '  select: when true, select the matched line.',
-    ].join('\n'),
+    description: 'Open one vault file in the editor, optionally in a new tab/split and at one line, heading, or block. Use only when the user asks to navigate or reveal a result; reading a file does not require opening it.',
     parameters: {
       type: 'object',
       properties: {
-        path: { type: 'string' },
-        leaf: { type: 'string', enum: ['active', 'new-tab', 'split-right', 'split-down'] },
+        path: { type: 'string', description: 'Vault-relative file path to open.' },
+        leaf: { type: 'string', enum: ['active', 'new-tab', 'split-right', 'split-down'], description: 'Destination workspace leaf. Default active.' },
         to: {
           type: 'object',
+          description: 'Optional single jump target. When multiple fields are present, line wins, then heading, then block.',
           properties: {
-            line:    { type: 'number', description: '1-based line number.' },
+            line:    { type: 'integer', minimum: 1, description: '1-based line number.' },
             heading: { type: 'string', description: 'Exact heading text (with or without `#`).' },
             block:   { type: 'string', description: 'Block ref id (with or without `^`).' },
           },
+          additionalProperties: false,
         },
         select: { type: 'boolean', description: 'When true, place selection on the jump target line.' },
       },
       required: ['path'],
+      additionalProperties: false,
     },
   },
   run: async (app, args) => {
@@ -147,4 +143,4 @@ export const openInEditor: ToolImpl = buildTool({
     return `Opened ${path} (${mode})${targetDesc}.`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Re-enable review lint rules after dynamic boundary module. */

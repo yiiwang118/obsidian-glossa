@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+
 import type { TokenUsage } from '../types';
 
 export type ChatChunk =
@@ -27,8 +27,9 @@ export interface MessageInput {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   /** For role='tool' — optional rich content blocks (images, etc.) sent in addition
-   *  to (or in place of) the text content. When set, providers serialize as the
-   *  Anthropic tool_result content array. OpenAI providers ignore non-text blocks. */
+   *  to (or in place of) the text content. Anthropic serializes them inside the
+   *  tool_result; OpenAI-compatible providers append image blocks after the
+   *  complete tool-result group so tool-call ordering remains valid. */
   toolContentBlocks?: ToolContentBlock[];
   /** For role='tool' — links result back to the assistant's tool_call. */
   toolCallId?: string;
@@ -70,4 +71,3 @@ export interface LLMProvider {
   defaultModel(): string;
   stream(req: ChatRequest): AsyncGenerator<ChatChunk>;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

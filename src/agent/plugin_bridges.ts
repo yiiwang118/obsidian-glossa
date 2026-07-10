@@ -1,9 +1,9 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Plugin bridge registration — detect-then-register.
  *
- * Each "bridge tool" (dataview_query / templater_render / tasks_query /
- * bases_query) only makes sense when the upstream Obsidian plugin is
+ * Each "bridge tool" (dataview_query / templater_render / tasks_query)
+ * only makes sense when the upstream Obsidian plugin is
  * actually loaded. We probe `app.plugins.plugins[<id>]` at plugin init AND
  * subscribe to Obsidian's plugin-enabled / plugin-disabled events so the
  * tool registry stays in sync if the user toggles plugins mid-session.
@@ -56,20 +56,6 @@ export const BRIDGE_DESCRIPTORS: BridgeDescriptor[] = [
       const t = (app as AnyValue).plugins?.plugins?.['obsidian-tasks-plugin'];
       // Tasks plugin exposes apiV1 (and earlier apiV0); accept either.
       return !!(t?.apiV1 || t?.api);
-    },
-  },
-  {
-    toolName: 'bases_query',
-    pluginId: '',                       // built-in (Obsidian 1.9+)
-    label: 'Bases',
-    isReady: (app) => {
-      // Bases is core; available iff Obsidian build supports .base files.
-      // We can't truly probe at module-import time (the .base type registry
-      // is internal to Obsidian), so we just confirm an app-shaped object
-      // exists. Defensive `?.` chain so a malformed/partial app (mock, hot
-      // reload, plugin disable racing init) doesn't TypeError before the
-      // workspace finishes loading.
-      return !!app?.vault?.adapter;
     },
   },
 ];
@@ -156,4 +142,4 @@ export function watchPluginBridges(app: App): () => void {
     }
   };
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

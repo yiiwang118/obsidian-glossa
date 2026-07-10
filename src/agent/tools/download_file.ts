@@ -1,13 +1,14 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
-import { TFile } from 'obsidian';
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+import { TFile, TFolder } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, vaultFolderOf, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects, parseHttpUrl } from '../../utils/safe_web';
-import { fetchBytesWithCap, inferExtension, sanitizeFilename, sha256Hex } from '../../utils/web_content';
+import { fetchBytesWithCap, inferExtension, sanitizeFilename, sha256Hex, type WebFetchBytesResult } from '../../utils/web_content';
 import { safeWriteJson } from '../../utils/safe_write';
 import type { GlossaSettings } from '../../types';
 import { setStyle } from '../../utils/dom';
 import { extractPdfTextFromArrayBuffer, formatPdfDiagnosticMarkdown } from '../../utils/pdf';
-import { clampNumber, readWebSettings } from './web_common';
+import { clampNumber, httpFallbackUrl, readWebSettings } from './web_common';
+import { findDownloadCandidates } from './web_search';
 
 const DEFAULT_DOWNLOAD_DIR = 'Downloads/Glossa';
 const DEFAULT_MAX_BYTES = 80 * 1024 * 1024;
@@ -19,18 +20,19 @@ export const downloadFile: ToolImpl = buildTool({
   isConcurrencySafe: () => false,
   searchHint: 'download public URL file to vault',
   backfillObservableInput: normalizePathFields(['save_to']),
-  describe: a => `download ${a.url}`,
+  describe: a => `download ${a.url ?? a.query ?? 'file'}`,
   preview: async (a) => {
     const target = typeof a.save_to === 'string' && a.save_to.trim()
       ? a.save_to.trim()
       : `${DEFAULT_DOWNLOAD_DIR}/<inferred filename>`;
     const url = typeof a.url === 'string' ? a.url.trim() : '';
+    const query = typeof a.query === 'string' ? a.query.trim() : '';
     let domain = '';
     try { domain = new URL(url).hostname; } catch { /* noop */ }
     return [
       'Download file',
       domain ? `Domain: ${domain}` : '',
-      `URL: ${url}`,
+      url ? `URL: ${url}` : `Find: ${query}`,
       `Target: ${target}`,
       `Max size: ${humanSize(clampNumber(a.max_bytes, 1_000, HARD_MAX_BYTES, DEFAULT_MAX_BYTES))}`,
       a.overwrite === true ? 'Overwrite: yes' : 'Overwrite: no',
@@ -62,30 +64,32 @@ export const downloadFile: ToolImpl = buildTool({
   },
   spec: {
     name: 'download_file',
-    description: [
-      'Download a public HTTP(S) file into the Obsidian vault. Use after web_search/web_fetch discovers a real asset URL.',
-      'Blocks private/local network targets at every redirect hop, checks size caps, sanitizes filenames, and writes a .source.json provenance file.',
-      'For papers, PDFs, images, datasets, release assets, or other downloadable resources. REQUIRES USER APPROVAL.',
-    ].join('\n'),
+    description: 'Save one public file into the vault. Pass url when known; otherwise pass an exact title/query so candidates can be ranked and validated before writing. Private-network redirects, oversize responses, wrong file types, and accidental overwrites are rejected. Requires explicit download intent and user approval.',
     parameters: {
       type: 'object',
       properties: {
         url: { type: 'string', description: 'Public HTTP(S) URL to download.' },
+        query: { type: 'string', description: 'Title or search query used when a direct URL is unknown. For papers, pass the exact title.' },
         save_to: { type: 'string', description: 'Optional vault-relative file path. If omitted, saves under Downloads/Glossa/.' },
         filename: { type: 'string', description: 'Optional filename used when save_to is a folder or omitted.' },
         allowed_types: { type: 'array', items: { type: 'string' }, description: 'Optional extension/type allowlist, e.g. ["pdf", "png", "html"].' },
-        max_bytes: { type: 'number', description: `Maximum bytes to read. Default ${DEFAULT_MAX_BYTES}.` },
+        max_bytes: { type: 'integer', minimum: 1000, maximum: HARD_MAX_BYTES, description: `Maximum bytes to read. Default ${DEFAULT_MAX_BYTES}.` },
         overwrite: { type: 'boolean', description: 'Whether to replace an existing file. Default false.' },
         inspect_after_download: { type: 'boolean', description: 'For PDFs, extract the first page and diagnostic after saving. Use when the user asks to inspect/summarize the downloaded PDF.' },
         confirm_intent: { type: 'boolean', description: 'Set true only when the user explicitly asked to download/save this resource.' },
       },
-      required: ['url'],
+      required: [],
+      additionalProperties: false,
     },
   },
   run: async (app, args, ctx) => {
     const rawUrl = typeof args.url === 'string' ? args.url.trim() : '';
-    try { parseHttpUrl(rawUrl); }
-    catch (e) { return `Error: ${e.message}`; }
+    const query = typeof args.query === 'string' ? args.query.trim() : '';
+    if (!rawUrl && query.length < 2) return 'Error: provide either a public url or a query/title with at least 2 characters.';
+    if (rawUrl) {
+      try { parseHttpUrl(rawUrl); }
+      catch (e) { return `Error: ${e.message}`; }
+    }
     const settings = readWebSettings(app) as GlossaSettings;
     if (!settings.webAllowAutoDownload && args.confirm_intent !== true) {
       return 'Error: downloads require explicit user intent. Ask the user or call download_file with confirm_intent=true only when the user asked to download/save.';
@@ -94,22 +98,38 @@ export const downloadFile: ToolImpl = buildTool({
     const maxBytes = clampNumber(args.max_bytes, 1_000, configuredMax, configuredMax);
     const allowed = normalizeTypes(args.allowed_types);
 
+    const candidates = await resolveDownloadCandidates(rawUrl, query, ctx?.signal);
+    if (!candidates.length) return `Error: no download candidates found for "${query}". Nothing was saved.`;
+    const failures: string[] = [];
+    let selected: { fetched: WebFetchBytesResult; ext: string; candidate: DownloadCandidate } | null = null;
+    for (const candidate of candidates.slice(0, 8)) {
+      try {
+        const fetched = await fetchBytesWithCap(fetchWithSafeRedirects, candidate.url, {
+          signal: ctx?.signal,
+          timeoutMs: 60_000,
+          maxBytes,
+        });
+        const ext = validateFetchedCandidate(fetched, allowed, !!query);
+        selected = { fetched, ext, candidate };
+        break;
+      } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') throw e;
+        failures.push(`${candidate.url} -> ${errorMessage(e)}`);
+      }
+    }
+    if (!selected) {
+      return [
+        `Error: none of ${Math.min(candidates.length, 8)} download candidate(s) passed validation. Nothing was saved.`,
+        ...failures.slice(0, 8).map(failure => `- ${failure}`),
+      ].join('\n');
+    }
+
+    const { fetched, ext, candidate } = selected;
     try {
-      const fetched = await fetchBytesWithCap(fetchWithSafeRedirects, rawUrl, {
-        signal: ctx?.signal,
-        timeoutMs: 60_000,
-        maxBytes,
-      });
-      if (fetched.truncated) {
-        return `Error: download exceeded max_bytes (${maxBytes.toLocaleString()} bytes). Nothing was saved.`;
-      }
-
-      const ext = inferExtension(fetched.contentType, fetched.finalUrl);
-      if (allowed.length && !allowed.includes(ext) && !allowed.some(t => fetched.contentType.toLowerCase().includes(t))) {
-        return `Error: downloaded content type "${fetched.contentType || 'unknown'}" / extension ".${ext}" is not allowed (${allowed.join(', ')}).`;
-      }
-
-      const target = chooseTargetPath(args.save_to, args.filename, fetched.finalUrl, ext, settings.webDefaultDownloadFolder);
+      const requestedName = args.filename ?? (query ? filenameFromQuery(query, ext) : undefined);
+      const saveTo = typeof args.save_to === 'string' ? args.save_to.trim().replace(/\/+$/, '') : '';
+      const saveToIsFolder = !!saveTo && app.vault.getAbstractFileByPath(saveTo) instanceof TFolder;
+      const target = chooseTargetPath(args.save_to, requestedName, fetched.finalUrl, ext, settings.webDefaultDownloadFolder, saveToIsFolder);
       const existing = app.vault.getAbstractFileByPath(target);
       if (existing && !args.overwrite) {
         return `Error: target already exists: ${target}. Pass overwrite=true or choose a different save_to.`;
@@ -134,6 +154,9 @@ export const downloadFile: ToolImpl = buildTool({
           sha256,
           status: fetched.status,
           status_text: fetched.statusText,
+          discovery_query: query || null,
+          discovery_source: candidate.source,
+          candidate_failures: failures,
         }, { pretty: true });
       }
 
@@ -143,6 +166,7 @@ export const downloadFile: ToolImpl = buildTool({
       return [
         `Downloaded: ${target}`,
         `Source: ${fetched.finalUrl}`,
+        query ? `Discovery: ${candidate.source} · ${query}` : '',
         `Content-Type: ${fetched.contentType || 'unknown'}`,
         `Size: ${humanSize(fetched.bytes.byteLength)}`,
         `SHA256: ${sha256}`,
@@ -155,17 +179,110 @@ export const downloadFile: ToolImpl = buildTool({
         if (ctx?.signal?.aborted) return 'Error: cancelled by user.';
         return 'Error: timeout after 60s';
       }
-      return `Error downloading ${rawUrl}: ${e?.message ?? e}`;
+      const failedUrl = selected?.candidate.url ?? rawUrl;
+      return `Error downloading ${failedUrl}: ${e?.message ?? e}${downloadHttpFallbackHint(failedUrl, e, ctx?.signal)}`;
     }
   },
 });
 
-function chooseTargetPath(saveTo: unknown, filename: unknown, finalUrl: string, ext: string, defaultFolder: unknown): string {
+export function downloadHttpFallbackHint(url: string, error: unknown, signal?: AbortSignal): string {
+  const fallbackUrl = httpFallbackUrl(url, error, signal);
+  if (!fallbackUrl) return '';
+  return [
+    '',
+    'HTTPS failed before saving. For read-only extraction, use web_fetch or web_research; those tools can report an HTTP fallback without writing files.',
+    `To save via HTTP, retry download_file with url="${fallbackUrl}" only if the user accepts the non-HTTPS source.`,
+  ].join('\n');
+}
+
+interface DownloadCandidate {
+  url: string;
+  source: string;
+}
+
+async function resolveDownloadCandidates(
+  rawUrl: string,
+  query: string,
+  signal?: AbortSignal,
+): Promise<DownloadCandidate[]> {
+  const out: DownloadCandidate[] = [];
+  const seen = new Set<string>();
+  const add = (url: string, source: string) => {
+    try { parseHttpUrl(url); }
+    catch { return; }
+    const key = url.replace(/#.*$/, '').replace(/\/$/, '');
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ url, source });
+  };
+  if (rawUrl) add(rawUrl, 'direct URL');
+  if (query) {
+    const discovered = await findDownloadCandidates(query, 12, signal).catch(() => []);
+    for (const result of discovered) add(result.url, result.source);
+  }
+  return out;
+}
+
+export function validateFetchedCandidate(
+  fetched: WebFetchBytesResult,
+  allowedTypes: readonly string[],
+  queryMode: boolean,
+): string {
+  if (fetched.status < 200 || fetched.status >= 300) {
+    throw new Error(`HTTP ${fetched.status} ${fetched.statusText}`.trim());
+  }
+  if (fetched.truncated) throw new Error('candidate exceeded max_bytes');
+  if (fetched.bytes.byteLength === 0) throw new Error('candidate returned an empty body');
+  const ext = verifiedExtension(fetched);
+  const type = fetched.contentType.toLowerCase();
+  if (queryMode && allowedTypes.length === 0 && (ext === 'html' || type.includes('text/html'))) {
+    throw new Error('candidate is an HTML landing page, not a downloadable asset');
+  }
+  if (allowedTypes.length && !allowedTypes.includes(ext) && !allowedTypes.some(item => type.includes(item))) {
+    throw new Error(`content type "${fetched.contentType || 'unknown'}" / extension ".${ext}" is not allowed (${allowedTypes.join(', ')})`);
+  }
+  if (ext === 'pdf' && !hasPdfMagic(fetched.bytes)) {
+    throw new Error('candidate claimed to be PDF but does not contain a PDF file header');
+  }
+  return ext;
+}
+
+function verifiedExtension(fetched: WebFetchBytesResult): string {
+  if (hasPdfMagic(fetched.bytes)) return 'pdf';
+  const contentTypeExt = inferExtension(fetched.contentType, 'https://download.invalid/file');
+  if (contentTypeExt !== 'bin') return contentTypeExt;
+  return inferExtension('', fetched.finalUrl);
+}
+
+function hasPdfMagic(bytes: Uint8Array): boolean {
+  const limit = Math.min(bytes.byteLength - 4, 1_024);
+  for (let index = 0; index <= limit; index++) {
+    if (bytes[index] === 0x25 && bytes[index + 1] === 0x50 && bytes[index + 2] === 0x44 && bytes[index + 3] === 0x46 && bytes[index + 4] === 0x2d) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function filenameFromQuery(query: string, ext: string): string {
+  const title = query
+    .replace(/\b(?:find|locate|get|download|fetch|save|official|paper|pdf|file|url|link|source|filetype)\b/gi, ' ')
+    .replace(/(?:下载|查找|搜索|获取|保存|论文|文件|链接|地址|一下)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return withExtension(sanitizeFilename(title || 'download'), ext);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function chooseTargetPath(saveTo: unknown, filename: unknown, finalUrl: string, ext: string, defaultFolder: unknown, saveToIsFolder = false): string {
   const explicit = typeof saveTo === 'string' ? saveTo.trim() : '';
   if (explicit) {
     const normalized = assertVaultPath(explicit, 'save_to');
-    if (!normalized.endsWith('/')) return normalized;
-    return `${normalized}${inferFilename(filename, finalUrl, ext)}`;
+    if (!normalized.endsWith('/') && !saveToIsFolder) return normalized;
+    return `${normalized.replace(/\/+$/, '')}/${inferFilename(filename, finalUrl, ext)}`;
   }
   const folder = typeof defaultFolder === 'string' && defaultFolder.trim()
     ? assertVaultPath(defaultFolder.trim(), 'webDefaultDownloadFolder').replace(/\/+$/, '')
@@ -238,4 +355,4 @@ function parseResultFields(result: string): Record<string, string> {
   }
   return out;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

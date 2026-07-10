@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+
 /**
  * Auto-compaction — long conversations get summarised into a single assistant turn
  * before token budget runs out. Mirrors upstream Claude Code's reactive compact flow.
@@ -40,40 +40,53 @@ export function estimateSessionTokens(session: ChatSession): number {
   return n;
 }
 
-const SUMMARY_SYSTEM_PROMPT = `You are summarising an in-progress Obsidian chat session for context compression. Your job is to produce a dense, factual recap so the assistant can resume without re-reading the originals.
+const SUMMARY_SYSTEM_PROMPT = `You are summarising an in-progress chat session for context compression. Produce a dense, factual restart record so another assistant can resume without guessing.
 
 The transcript may contain blocks marked [PRIOR SUMMARY — …]. Those are summaries from a previous compaction round; treat their content as fully authoritative for everything they cover, and CARRY THEIR INFORMATION FORWARD into your new summary without loss. Merge it with the newer turns.
 
 MUST preserve:
-- User's overall goal(s) and current sub-goal
-- Every file path that was READ, WRITTEN, EDITED, or DELETED, plus a one-line note of what changed
-- Every decision made (technology choices, naming, architectural calls)
-- Open questions, blockers, and pending actions
-- Any error messages or constraints the user surfaced
-- All content from any [PRIOR SUMMARY] blocks (don't drop them — fold them in)
+- The latest explicit user goal and the exact target being discussed
+- Every user correction, preference, constraint, language request, and change of intent
+- Every file path, URL, DOI, title, version, ID, and output destination needed to continue
+- Tool attempts and their concrete outcomes; retain exact error text for failed approaches
+- Decisions and why they were made
+- Completed work, open questions, blockers, pending actions, and the single best next step
+- All information from [PRIOR SUMMARY] blocks
 
 MUST drop:
 - Verbose model reasoning / chain-of-thought (keep only conclusions)
 - Full file contents (replace with paths + brief description)
 - Repeated apologies, hedging, or filler
 
-Output format: plain text, structured as 3–6 short markdown sections (### Goal / ### Files touched / ### Decisions / ### Open / etc.). Aim for ~400–800 tokens total. No preamble, no commentary about the summarisation itself.`;
+Output exactly these markdown sections:
+### Active task and target
+### User corrections and response preferences
+### Key entities and evidence
+### Attempts, failures, and decisions
+### Completed and pending
+### Recent user messages (verbatim)
+### Next action
+
+Write in the language requested by the latest user message. If no language was requested, use the dominant language of recent user messages, not the language of attached source material. Aim for 700–1,400 tokens, with no preamble or commentary about summarisation.`;
 
 interface BuildTranscriptOptions {
   /** Keep the most recent N messages OUT of the summary (they stay in the live history). */
   keepRecent: number;
   /** Max chars per individual message body in the transcript. */
   perMsgCap: number;
+  /** Total transcript cap; keeps the compaction request below the model window. */
+  maxTranscriptChars: number;
 }
 
-function buildTranscript(messages: ChatMessage[], opts: BuildTranscriptOptions): { transcript: string; summarisedCount: number; tokensSaved: number } {
+export function buildCompactionTranscript(messages: ChatMessage[], opts: BuildTranscriptOptions): { transcript: string; summarisedCount: number; tokensSaved: number } {
   const cutoff = Math.max(0, messages.length - opts.keepRecent);
   const toSummarise = messages.slice(0, cutoff);
   if (toSummarise.length === 0) return { transcript: '', summarisedCount: 0, tokensSaved: 0 };
 
-  const lines: string[] = [];
+  const blocks: Array<{ index: number; text: string; mandatory: boolean }> = [];
   let tokensSaved = 0;
-  for (const m of toSummarise) {
+  for (let index = 0; index < toSummarise.length; index++) {
+    const m = toSummarise[index];
     tokensSaved += estimateMessageTokens(m);
     if (m.role === 'tool') {
       // Tool results are referenced via the parent assistant's toolEvents — skip the bare role:tool dump
@@ -82,25 +95,39 @@ function buildTranscript(messages: ChatMessage[], opts: BuildTranscriptOptions):
     // Earlier compactSummary messages are surfaced explicitly so the new summary
     // doesn't drop their content — they're the load-bearing recap of even-older turns.
     if (m.compactSummary) {
-      lines.push(`[PRIOR SUMMARY — already represents ${m.summaryOfCount ?? '?'} earlier msgs, depth ${m.summaryDepth ?? 1}]\n${(m.content ?? '').trim()}`);
+      blocks.push({
+        index,
+        text: `[PRIOR SUMMARY — already represents ${m.summaryOfCount ?? '?'} earlier msgs, depth ${m.summaryDepth ?? 1}]\n${(m.content ?? '').trim()}`,
+        mandatory: true,
+      });
       continue;
     }
     const label = m.role === 'user' ? 'USER' : 'ASSISTANT';
-    let body = (m.content ?? '').trim();
+    let body = (m.role === 'user' ? (m.displayContent ?? m.content) : m.content ?? '').trim();
     if (body.length > opts.perMsgCap) body = body.slice(0, opts.perMsgCap) + ` …[${body.length - opts.perMsgCap} chars truncated]`;
-    lines.push(`[${label}]\n${body}`);
+    const parts = [`[${label}]\n${body}`];
+    if (m.role === 'user' && m.selectionEcho?.text) {
+      const selection = m.selectionEcho.text.slice(0, 700);
+      parts.push(`[SELECTION CONTEXT: ${m.selectionEcho.source}${m.selectionEcho.file ? ` · ${m.selectionEcho.file}` : ''}]\n${selection}${m.selectionEcho.text.length > selection.length ? '\n[selection truncated]' : ''}`);
+    }
     if (m.toolEvents?.length) {
       const tools = m.toolEvents
         .map(ev => {
-          const argSummary = JSON.stringify(ev.args ?? {}).slice(0, 200);
-          const resSummary = (ev.result ?? '').slice(0, 200);
+          const argSummary = JSON.stringify(ev.args ?? {}).slice(0, 500);
+          const resultLimit = ev.status === 'error' || ev.status === 'denied' ? 900 : 500;
+          const resSummary = (ev.result ?? '').slice(0, resultLimit);
           return `  · ${ev.name}(${argSummary}) → ${ev.status}: ${resSummary}`;
         })
         .join('\n');
-      lines.push(`[TOOLS]\n${tools}`);
+      parts.push(`[TOOLS]\n${tools}`);
     }
+    blocks.push({ index, text: parts.join('\n\n'), mandatory: index < 4 });
   }
-  return { transcript: lines.join('\n\n'), summarisedCount: toSummarise.length, tokensSaved };
+  return {
+    transcript: fitTranscriptBlocks(blocks, opts.maxTranscriptChars),
+    summarisedCount: toSummarise.length,
+    tokensSaved,
+  };
 }
 
 export interface CompactOptions {
@@ -110,6 +137,8 @@ export interface CompactOptions {
   keepRecent?: number;
   /** Per-message char cap when building the transcript (default 4000). */
   perMsgCap?: number;
+  /** Total transcript char cap (default 240000). */
+  maxTranscriptChars?: number;
   signal?: AbortSignal;
 }
 
@@ -126,11 +155,16 @@ export interface CompactResult {
 export async function compactSession(session: ChatSession, opts: CompactOptions): Promise<CompactResult | null> {
   const keepRecent = opts.keepRecent ?? 2;
   const perMsgCap = opts.perMsgCap ?? 4000;
+  const maxTranscriptChars = opts.maxTranscriptChars ?? 240_000;
 
   // Don't compact if there's nothing meaningful to compact
   if (session.messages.length <= keepRecent + 1) return null;
 
-  const { transcript, summarisedCount, tokensSaved } = buildTranscript(session.messages, { keepRecent, perMsgCap });
+  const { transcript, summarisedCount, tokensSaved } = buildCompactionTranscript(session.messages, {
+    keepRecent,
+    perMsgCap,
+    maxTranscriptChars,
+  });
   if (summarisedCount === 0 || !transcript) return null;
 
   const messages: MessageInput[] = [
@@ -142,7 +176,7 @@ export async function compactSession(session: ChatSession, opts: CompactOptions)
     systemPrompt: SUMMARY_SYSTEM_PROMPT,
     messages,
     model: opts.model,
-    maxTokens: 2000,
+    maxTokens: 3000,
     signal: opts.signal,
   })) {
     if (ch.type === 'text') summaryText += ch.text;
@@ -170,6 +204,41 @@ export async function compactSession(session: ChatSession, opts: CompactOptions)
     summaryDepth: inheritedDepth + 1,
   };
   return { summaryMsg, summarisedCount, tokensSaved };
+}
+
+function fitTranscriptBlocks(
+  blocks: readonly { index: number; text: string; mandatory: boolean }[],
+  maxChars: number,
+): string {
+  const full = blocks.map(block => block.text).join('\n\n');
+  if (full.length <= maxChars) return full;
+
+  const selected = new Map<number, string>();
+  let used = 0;
+  for (const block of blocks) {
+    if (!block.mandatory) continue;
+    if (used + block.text.length > Math.floor(maxChars * 0.45)) break;
+    selected.set(block.index, block.text);
+    used += block.text.length + 2;
+  }
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (selected.has(block.index)) continue;
+    if (used + block.text.length + 80 > maxChars) continue;
+    selected.set(block.index, block.text);
+    used += block.text.length + 2;
+  }
+  const ordered = [...selected.entries()].sort((a, b) => a[0] - b[0]);
+  const out: string[] = [];
+  let previousIndex = -1;
+  for (const [index, text] of ordered) {
+    if (previousIndex >= 0 && index > previousIndex + 1) {
+      out.push(`[...${index - previousIndex - 1} middle transcript block(s) omitted by compaction input cap...]`);
+    }
+    out.push(text);
+    previousIndex = index;
+  }
+  return out.join('\n\n').slice(0, maxChars);
 }
 
 /** Apply a CompactResult to a session in-place: replace the summarised prefix with
@@ -202,4 +271,3 @@ export function undoCompact(session: ChatSession, summaryId: string): boolean {
   session.updatedAt = Date.now();
   return true;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

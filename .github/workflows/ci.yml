@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   test:
-    name: typecheck + unit tests + build
+    name: full local check + build artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -26,23 +26,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: TypeScript typecheck
-        run: npm run typecheck
-
-      - name: Run unit tests (in-tree runner)
-        run: npm test
-
-      - name: Production build (esbuild)
-        run: npm run build
-
-      - name: Release metadata check
-        run: npm run release:check -- --allow-dirty
+      - name: Full local check
+        run: npm run check
 
       - name: Verify build output
         run: |
-          test -f main.js || (echo "main.js missing" && exit 1)
-          test -f manifest.json || (echo "manifest.json missing" && exit 1)
-          test -f styles.css || (echo "styles.css missing" && exit 1)
+          test -s main.js || (echo "main.js missing or empty" && exit 1)
+          test -s manifest.json || (echo "manifest.json missing or empty" && exit 1)
+          test -s styles.css || (echo "styles.css missing or empty" && exit 1)
           ls -lh main.js manifest.json styles.css
 
       - name: Upload build artifacts

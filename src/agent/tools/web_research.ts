@@ -1,9 +1,10 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { buildTool, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects } from '../../utils/safe_web';
-import { decodeUtf8, extractWebMarkdown, fetchBytesWithCap, summarizeMarkdown } from '../../utils/web_content';
+import { decodeUtf8, extractWebMarkdown, summarizeMarkdown } from '../../utils/web_content';
 import { rankSearchResults, runWebSearchProvider, type SearchResult } from './web_search';
 import { clampNumber, normalizeDomains, normalizeSearchProvider, readWebSettings, webReadPermission } from './web_common';
+import { fetchBytesWithHttpFallback } from './web_fetch';
 
 export const webResearch: ToolImpl = buildTool({
   dangerous: true,
@@ -25,23 +26,20 @@ export const webResearch: ToolImpl = buildTool({
   },
   spec: {
     name: 'web_research',
-    description: [
-      'High-level web research pipeline: search the web, fetch the best source pages, extract relevant content, and return grounded source candidates.',
-      'Use this when the user wants current information or wants to find a downloadable resource but has not provided a direct URL.',
-      'This tool does not write files. If a file should be saved, call download_file separately with the chosen direct URL.',
-    ].join('\n'),
+    description: 'Run one bounded public-web research pass: search, rank sources, fetch the best pages, and extract goal-relevant evidence. Use when current information or an unknown URL is required. It never writes files; use download_file after selecting a resource. Network access requires approval.',
     parameters: {
       type: 'object',
       properties: {
         goal: { type: 'string', description: 'User goal or research question.' },
         query: { type: 'string', description: 'Optional explicit search query. Defaults to goal.' },
-        mode: { type: 'string', description: 'answer, find_sources, or find_downloads. Default answer.' },
-        allowed_domains: { type: 'array', items: { type: 'string' } },
-        blocked_domains: { type: 'array', items: { type: 'string' } },
-        max_results: { type: 'number', description: 'Search results to keep. Default 6.' },
-        fetch_top: { type: 'number', description: 'Top results to fetch. Default 3.' },
+        mode: { type: 'string', enum: ['answer', 'find_sources', 'find_downloads'], description: 'Research objective. Default answer.' },
+        allowed_domains: { type: 'array', items: { type: 'string' }, description: 'Optional domain allowlist; do not combine with blocked_domains.' },
+        blocked_domains: { type: 'array', items: { type: 'string' }, description: 'Optional domain denylist; do not combine with allowed_domains.' },
+        max_results: { type: 'integer', minimum: 1, maximum: 12, description: 'Search candidates to retain. Default 6.' },
+        fetch_top: { type: 'integer', minimum: 0, maximum: 6, description: 'Highest-ranked pages to fetch. Default 3.' },
       },
       required: ['goal'],
+      additionalProperties: false,
     },
   },
   run: async (app, args, ctx) => {
@@ -90,9 +88,14 @@ export const webResearch: ToolImpl = buildTool({
   },
 });
 
-async function fetchSourceExcerpt(result: SearchResult, goal: string, signal?: AbortSignal): Promise<string> {
+export async function fetchSourceExcerpt(
+  result: SearchResult,
+  goal: string,
+  signal?: AbortSignal,
+  fetcher: (url: string, signal: AbortSignal) => Promise<Response> = fetchWithSafeRedirects,
+): Promise<string> {
   try {
-    const fetched = await fetchBytesWithCap(fetchWithSafeRedirects, result.url, {
+    const fetched = await fetchBytesWithHttpFallback(fetcher, result.url, {
       signal,
       timeoutMs: 20_000,
       maxBytes: 2 * 1024 * 1024,
@@ -105,6 +108,8 @@ async function fetchSourceExcerpt(result: SearchResult, goal: string, signal?: A
     return [
       `### ${parsed.title || result.title || result.domain}`,
       `URL: ${fetched.finalUrl}`,
+      fetched.fallbackFrom ? `Fallback from URL: ${fetched.fallbackFrom}` : '',
+      fetched.fallbackError ? `Initial fetch error: ${fetched.fallbackError}` : '',
       parsed.description ? `Description: ${parsed.description}` : '',
       excerpt,
     ].filter(Boolean).join('\n');
@@ -141,4 +146,4 @@ function inferArxivPdfUrl(raw: string): string | null {
     return null;
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * get_periodic_note — resolve a daily / weekly / monthly note by type + offset.
  *
@@ -86,19 +86,22 @@ export const getPeriodicNote: ToolImpl = buildTool({
   isReadOnly: a => !a?.create_if_missing,
   isConcurrencySafe: a => !a?.create_if_missing,
   isDestructive: a => !!a?.create_if_missing,
+  shouldDefer: true,
   searchHint: 'find or create daily weekly monthly note',
+  searchTags: ['daily note', 'weekly note', 'journal', '日记', '周期笔记'],
   describe: a => `${a.type ?? 'daily'} note${a.offset ? ` (${a.offset > 0 ? '+' : ''}${a.offset})` : ''}`,
   spec: {
     name: 'get_periodic_note',
-    description: 'Locate a periodic note by type + offset. Type is daily/weekly/monthly/quarterly/yearly; offset is signed integer (0 = current, -1 = previous, 1 = next). Returns the resolved path + whether it exists. Optionally creates the file if missing.',
+    description: 'Resolve a configured daily, weekly, monthly, quarterly, or yearly note by signed offset. By default this only reports the path and existence; create_if_missing writes the configured template and requires approval.',
     parameters: {
       type: 'object',
       properties: {
-        type: { type: 'string', enum: ['daily', 'weekly', 'monthly', 'quarterly', 'yearly'] },
-        offset: { type: 'number', description: 'Default 0 (today). Negative = past, positive = future.' },
+        type: { type: 'string', enum: ['daily', 'weekly', 'monthly', 'quarterly', 'yearly'], description: 'Periodic-note granularity.' },
+        offset: { type: 'integer', minimum: -1000, maximum: 1000, description: 'Default 0. Negative selects an earlier period; positive selects a later period.' },
         create_if_missing: { type: 'boolean', description: 'Default false. When true, create the file (empty) if it does not exist.' },
       },
       required: ['type'],
+      additionalProperties: false,
     },
   },
   run: async (app, args) => {
@@ -135,4 +138,4 @@ export const getPeriodicNote: ToolImpl = buildTool({
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

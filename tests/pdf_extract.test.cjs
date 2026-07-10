@@ -62,4 +62,15 @@ exports.run = async (t, loadModule) => {
   ]), new Uint8Array([1, 2, 3]), { maxPages: 10, maxChars: 1000 });
   t.eq(scanned.diagnostic.documentKind, 'scanned', 'pdf diagnostic: empty text layer is scanned');
   t.ok(scanned.warnings.some(w => /No extractable text/.test(w)), 'pdf diagnostic: scanned PDF warns about missing text');
+
+  const readPdfMod = await loadModule(path.resolve(__dirname, '../src/agent/tools/read_pdf.ts'));
+  t.ok(readPdfMod.readPdf.spec.description.includes('visual renders up to 4'), 'read_pdf advertises bounded visual page rendering');
+  const visual = readPdfMod.visualPdfToolResult('paper.pdf', {
+    totalPages: 10,
+    pageLabel: '2',
+    pages: [{ page: 2, mime: 'image/jpeg', data: 'AAAA', width: 1200, height: 1600 }],
+  });
+  t.ok(visual.text.includes('rendered 2'), 'visual PDF result names the rendered page');
+  t.eq(visual.contentBlocks[0].text, 'PDF page 2 (1200 x 1600px)', 'visual PDF result includes page dimensions');
+  t.eq(visual.contentBlocks[1].source.media_type, 'image/jpeg', 'visual PDF result emits provider-compatible image block');
 };

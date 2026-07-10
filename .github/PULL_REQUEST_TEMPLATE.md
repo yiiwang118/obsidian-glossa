@@ -14,9 +14,7 @@
 
 ## Checklist
 
-- [ ] `npm test` passes locally
-- [ ] `npm run typecheck` passes
-- [ ] `npm run build` produces a working `main.js`
+- [ ] `npm run check` passes locally
 - [ ] Added or updated focused tests in `tests/*.test.cjs` as appropriate
 - [ ] No `console.log` / `console.error` left in production paths
 - [ ] If UI changed: screenshot or GIF in the PR description

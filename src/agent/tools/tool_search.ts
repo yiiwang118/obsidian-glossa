@@ -1,137 +1,212 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
-/**
- * tool_search — surface deferred tools by keyword match.
- *
- * When the Glossa tool registry grows beyond ~20 entries, including every
- * tool's full schema in the initial system prompt becomes wasteful: most
- * conversations only need 5–6 tools and the rest just inflate cache_write
- * cost. We mark rarely-needed tools with `shouldDefer: true` so they're
- * excluded from the default tool spec list. The model invokes `tool_search`
- * with a keyword query; we match against each deferred tool's `searchHint`,
- * `name`, and `spec.description`, and return the schemas of matching tools.
- * The model can then call them on a subsequent turn.
- *
- * Mirrors upstream Claude Code's ToolSearchTool. Simplified: we always
- * return the schemas inline as a JSON block in the tool result, rather than
- * having a separate deferred-loading channel.
- */
-
-import { TOOLS } from '../tools';
-import { buildTool, type ToolImpl } from './_shared';
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/** Load schemas for specialized tools omitted from the default model surface. */
+import { TOOLS, getTool, isToolAvailableForModel } from '../tools';
+import { buildTool, type ToolImpl, type ToolRunResult } from './_shared';
 
 interface MatchedTool {
-  name: string;
-  description: string;
-  searchHint?: string;
-  parameters: AnyValue;
-  /** Match score — higher is better. Used for sorting in result. */
+  tool: ToolImpl;
   score: number;
 }
 
-/** Tokenize a query into lower-cased word tokens. */
-function tokens(q: string): string[] {
-  return q.toLowerCase().split(/[^a-z0-9_]+/).filter(t => t.length > 1);
+const STOP_WORDS = new Set([
+  'a', 'an', 'and', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'tool', 'use', 'with',
+]);
+
+const QUERY_EXPANSIONS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['编辑', ['edit', 'patch', 'replace', 'write']],
+  ['修改', ['edit', 'patch', 'replace']],
+  ['覆盖', ['overwrite', 'write']],
+  ['创建', ['create', 'write']],
+  ['新建', ['create', 'write']],
+  ['追加', ['append', 'patch']],
+  ['删除', ['delete', 'remove']],
+  ['重命名', ['rename', 'move']],
+  ['移动', ['move', 'rename']],
+  ['标签', ['tag', 'tags']],
+  ['属性', ['frontmatter', 'metadata', 'property']],
+  ['元数据', ['frontmatter', 'metadata']],
+  ['反链', ['backlink', 'backlinks']],
+  ['出链', ['outgoing', 'wikilink']],
+  ['链接', ['link', 'wikilink', 'resolve']],
+  ['周期笔记', ['periodic', 'daily', 'weekly', 'monthly']],
+  ['日记', ['periodic', 'daily']],
+  ['画布', ['canvas', 'node', 'edge']],
+  ['流程图', ['canvas', 'node', 'edge']],
+  ['思维导图', ['canvas', 'node', 'edge']],
+  ['打开', ['open', 'editor']],
+  ['跳转', ['open', 'editor', 'heading']],
+  ['选中', ['selection', 'cursor']],
+  ['光标', ['selection', 'cursor']],
+  ['模板', ['template', 'templater', 'render']],
+  ['任务查询', ['tasks', 'query']],
+  ['数据库', ['dataview', 'query', 'table']],
+  ['表格查询', ['dataview', 'query', 'table']],
+  ['网页搜索', ['web', 'search']],
+  ['技能', ['skill', 'playbook']],
+  ['批量读取', ['batch', 'read', 'files']],
+  ['多文件', ['batch', 'read', 'files']],
+  ['校验技能', ['validate', 'skill', 'quality']],
+  ['检查技能', ['validate', 'skill', 'quality']],
+];
+
+function normalize(value: string): string {
+  return value.normalize('NFKC').toLowerCase().trim();
 }
 
-/** Score a deferred tool against the query. Each query token that appears in
- *  any of `name`, `searchHint`, `spec.description` adds points. Name hits
- *  weigh most (×3), hint next (×2), description ×1. */
-function scoreTool(tool: ToolImpl, queryTokens: string[]): number {
-  const name = tool.spec.name.toLowerCase();
-  const hint = (tool.searchHint ?? '').toLowerCase();
-  const desc = (tool.spec.description ?? '').toLowerCase();
-  let score = 0;
-  for (const t of queryTokens) {
-    if (name.includes(t)) score += 3;
-    if (hint.includes(t)) score += 2;
-    if (desc.includes(t)) score += 1;
+/** Tokenize English and localized capability requests, then add a small set
+ *  of deterministic domain synonyms. This avoids an embedding dependency in
+ *  the hot path while making common Chinese requests discoverable. */
+export function toolSearchTerms(query: string): string[] {
+  const normalized = normalize(query);
+  const out = new Set<string>();
+  for (const match of normalized.matchAll(/[\p{L}\p{N}_]+/gu)) {
+    const token = match[0];
+    if (token.length > 1 && !STOP_WORDS.has(token)) out.add(token);
+    for (const part of token.split('_')) {
+      if (part.length > 1 && !STOP_WORDS.has(part)) out.add(part);
+    }
   }
+  for (const [trigger, expansions] of QUERY_EXPANSIONS) {
+    if (!normalized.includes(trigger)) continue;
+    for (const expansion of expansions) out.add(expansion);
+  }
+  return [...out];
+}
+
+function scoreTool(tool: ToolImpl, terms: readonly string[], rawQuery: string): number {
+  const name = normalize(tool.spec.name);
+  const aliases = (tool.aliases ?? []).map(normalize);
+  const hint = normalize(tool.searchHint ?? '');
+  const tags = (tool.searchTags ?? []).map(normalize);
+  const description = normalize(tool.spec.description);
+  const parameterSchema = tool.spec.parameters as { properties?: Record<string, unknown> };
+  const parameterNames = Object.keys(parameterSchema.properties ?? {}).map(normalize);
+  const phrase = normalize(rawQuery);
+  let score = 0;
+  let covered = 0;
+
+  if (phrase && name === phrase) score += 40;
+  else if (phrase.length > 2 && name.includes(phrase)) score += 16;
+  if (aliases.some(alias => alias === phrase)) score += 32;
+
+  for (const term of terms) {
+    let hit = false;
+    if (name === term) { score += 14; hit = true; }
+    else if (name.includes(term)) { score += 8; hit = true; }
+    if (aliases.some(alias => alias === term)) { score += 12; hit = true; }
+    else if (aliases.some(alias => alias.includes(term))) { score += 7; hit = true; }
+    if (tags.some(tag => tag === term)) { score += 9; hit = true; }
+    else if (tags.some(tag => tag.includes(term))) { score += 5; hit = true; }
+    if (hint.includes(term)) { score += 4; hit = true; }
+    if (parameterNames.some(parameter => parameter.includes(term))) { score += 3; hit = true; }
+    if (description.includes(term)) { score += 1; hit = true; }
+    if (hit) covered += 1;
+  }
+  if (terms.length > 1 && covered === terms.length) score += 6;
   return score;
+}
+
+export function searchDeferredTools(query: string, maxResults = 5): ToolImpl[] {
+  const terms = toolSearchTerms(query);
+  if (terms.length === 0) return [];
+  const matches: MatchedTool[] = [];
+  for (const tool of Object.values(TOOLS)) {
+    if (!tool.shouldDefer || !isToolAvailableForModel(tool.spec.name, { includeDeferred: true })) continue;
+    const score = scoreTool(tool, terms, query);
+    if (score > 0) matches.push({ tool, score });
+  }
+  matches.sort((a, b) => b.score - a.score || a.tool.spec.name.localeCompare(b.tool.spec.name));
+  return matches.slice(0, Math.max(1, Math.min(8, maxResults))).map(match => match.tool);
 }
 
 export const toolSearchTool: ToolImpl = buildTool({
   spec: {
     name: 'tool_search',
-    description:
-      'Search the deferred-tool catalog by keyword. Some specialty tools ' +
-      '(plugin bridges, legacy tools) are not loaded in the default tool list ' +
-      'to save context budget. Use this tool to discover them, then call ' +
-      'them by name in a subsequent turn. Two query forms: keyword search ' +
-      '(e.g. "dataview query") or explicit selection ("select:foo,bar").',
+    description: [
+      'Load specialized local tools that are omitted from the default tool list.',
+      'Use only when none of the currently available tools fits the task. Search by capability in the user\'s language, or pass exact_names when you know the tool names.',
+      'A successful result makes the returned tools callable on the next assistant step; do not search for the same tool twice.',
+    ].join(' '),
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Keyword phrase OR "select:tool1,tool2" for direct fetch.' },
-        max_results: { type: 'number', description: 'Maximum number of tools to return (default 5).' },
+        query: {
+          type: 'string',
+          minLength: 2,
+          description: 'Capability to find, for example "edit Canvas nodes", "反链", or "Dataview query". Legacy "select:name" is also accepted.',
+        },
+        exact_names: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 8,
+          items: { type: 'string' },
+          description: 'Exact tool names or aliases to load when already known.',
+        },
+        max_results: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 8,
+          description: 'Maximum search matches to load. Default 5; use a small value.',
+        },
       },
-      required: ['query'],
+      additionalProperties: false,
     },
   },
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  searchHint: 'find deferred tools by keyword',
-  describe: a => `tool_search: ${String(a?.query ?? '').slice(0, 40)}`,
-  run: async (_app, args) => {
-    const query = String(args?.query ?? '').trim();
-    if (!query) return 'Error: query is required.';
-    const maxResults = Number.isFinite(args?.max_results) ? Math.max(1, Math.min(20, Number(args.max_results))) : 5;
-
-    // Explicit selection mode: "select:name1,name2,name3".
-    if (query.startsWith('select:')) {
-      const names = query.slice(7).split(',').map(s => s.trim()).filter(Boolean);
-      const out: MatchedTool[] = [];
-      for (const n of names) {
-        const t = TOOLS[n];
-        if (!t) continue;
-        out.push({
-          name: t.spec.name,
-          description: t.spec.description,
-          searchHint: t.searchHint,
-          parameters: t.spec.parameters,
-          score: 100,
-        });
+  searchHint: 'load a specialized tool by capability or exact name',
+  searchTags: ['find tools', 'deferred schema', '工具搜索', '按需工具'],
+  describe: args => `tool_search: ${String(args?.query ?? args?.exact_names ?? '').slice(0, 60)}`,
+  run: async (_app, args): Promise<ToolRunResult | string> => {
+    const exactNames = normalizeExactNames(args?.exact_names, args?.query);
+    if (exactNames.length > 0) {
+      const matched: ToolImpl[] = [];
+      const rejected: string[] = [];
+      for (const requested of exactNames) {
+        const tool = getTool(requested);
+        if (!tool || !isToolAvailableForModel(tool.spec.name, { includeDeferred: true })) {
+          rejected.push(requested);
+          continue;
+        }
+        if (!matched.some(existing => existing.spec.name === tool.spec.name)) matched.push(tool);
       }
-      if (out.length === 0) return `No tool matched any of: ${names.join(', ')}.`;
-      return formatResults(out);
+      if (matched.length === 0) return `Error: no available tool matched: ${rejected.join(', ') || '(empty selection)'}.`;
+      return formatLoadedTools(matched, rejected);
     }
 
-    // Keyword search across ALL deferred tools.
-    const qts = tokens(query);
-    if (qts.length === 0) return 'Error: query has no searchable tokens.';
-    const deferred = Object.values(TOOLS).filter(t => t.shouldDefer);
-    const scored: MatchedTool[] = [];
-    for (const t of deferred) {
-      const score = scoreTool(t, qts);
-      if (score <= 0) continue;
-      scored.push({
-        name: t.spec.name,
-        description: t.spec.description,
-        searchHint: t.searchHint,
-        parameters: t.spec.parameters,
-        score,
-      });
+    const queryCandidate = args?.query as unknown;
+    const query = typeof queryCandidate === 'string' ? queryCandidate.trim() : '';
+    if (!query) return 'Error: pass query or exact_names.';
+    const maxResultsCandidate = args?.max_results as unknown;
+    const maxResults = typeof maxResultsCandidate === 'number' && Number.isInteger(maxResultsCandidate)
+      ? maxResultsCandidate
+      : 5;
+    const matched = searchDeferredTools(query, maxResults);
+    if (matched.length === 0) {
+      return `No specialized tool matched "${query}". Use a concrete capability such as "backlinks", "Canvas nodes", "frontmatter", or "Dataview query".`;
     }
-    scored.sort((a, b) => b.score - a.score);
-    const top = scored.slice(0, maxResults);
-    if (top.length === 0) {
-      const deferredNames = deferred.map(t => t.spec.name).join(', ') || '(none)';
-      return `No deferred tools matched "${query}". Available deferred tools: ${deferredNames}.`;
-    }
-    return formatResults(top);
+    return formatLoadedTools(matched, []);
   },
 });
 
-function formatResults(matches: MatchedTool[]): string {
-  const lines = ['Found ' + matches.length + ' tool(s). Schemas below — invoke by name on the next turn:'];
-  for (const m of matches) {
-    lines.push('');
-    lines.push(`## ${m.name}`);
-    lines.push(m.description);
-    if (m.searchHint) lines.push(`_hint: ${m.searchHint}_`);
-    lines.push('```json');
-    lines.push(JSON.stringify({ name: m.name, parameters: m.parameters }, null, 2));
-    lines.push('```');
+function normalizeExactNames(value: unknown, query: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean);
   }
-  return lines.join('\n');
+  if (typeof query === 'string' && query.trim().toLowerCase().startsWith('select:')) {
+    return query.trim().slice(7).split(',').map(item => item.trim()).filter(Boolean);
+  }
+  return [];
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+
+function formatLoadedTools(tools: readonly ToolImpl[], rejected: readonly string[]): ToolRunResult {
+  const names = tools.map(tool => tool.spec.name);
+  const lines = [
+    `Loaded ${names.length} specialized tool${names.length === 1 ? '' : 's'} for the next step: ${names.join(', ')}.`,
+    'Call the best matching tool directly next; do not repeat tool_search.',
+    ...tools.map(tool => `- ${tool.spec.name}: ${tool.spec.description.replace(/\s+/g, ' ').slice(0, 220)}`),
+  ];
+  if (rejected.length) lines.push(`Unavailable or unknown: ${rejected.join(', ')}.`);
+  return { text: lines.join('\n'), loadedToolNames: names };
+}
+/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

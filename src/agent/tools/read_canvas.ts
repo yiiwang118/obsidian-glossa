@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * read_canvas — parse a .canvas file and return its structured contents.
  *
@@ -37,7 +37,9 @@ export const readCanvas: ToolImpl = buildTool({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   isDestructive: () => false,
+  shouldDefer: true,
   searchHint: 'parse json canvas file nodes edges',
+  searchTags: ['canvas inspect', 'mind map graph', '读取画布', '节点边'],
   backfillObservableInput(input) {
     if (typeof (input as AnyValue).path === 'string') {
       (input as AnyValue).path = ((input as AnyValue).path as string).replace(/^\.\//, '').trim();
@@ -46,11 +48,12 @@ export const readCanvas: ToolImpl = buildTool({
   describe: a => `read canvas ${a.path}`,
   spec: {
     name: 'read_canvas',
-    description: 'Read and parse a .canvas (JSON Canvas 1.0) file. Returns a structured summary: node count by type, edge count, and a JSON dump.',
+    description: 'Parse one JSON Canvas 1.0 file and return node/edge counts plus the complete JSON. Call before patch_canvas so edits use existing IDs and coordinates.',
     parameters: {
       type: 'object',
       properties: { path: { type: 'string', description: 'Vault-relative path to a .canvas file.' } },
       required: ['path'],
+      additionalProperties: false,
     },
   },
   // Demo of the per-tool render hook: instead of a 4000-char <pre> dump, show
@@ -119,4 +122,4 @@ export const readCanvas: ToolImpl = buildTool({
     return summary;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

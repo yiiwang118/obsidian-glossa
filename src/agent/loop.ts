@@ -1,9 +1,8 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App } from 'obsidian';
-import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, isReadOnlyTool, normalizeToolResult, type ToolImpl, type ToolRunResult } from './tools';
+import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, isReadOnlyTool, normalizeToolResult, validateToolInput, type ToolImpl, type ToolRunResult } from './tools';
 import { askApproval, type ApprovalResult } from './approval';
 import { CheckpointManager, pathsTouchedByTool } from './checkpoint';
-import type { McpHub } from './mcp';
 import type { LLMProvider, MessageInput, ToolSpec } from '../providers/types';
 import type { TokenUsage, ToolEvent, PermissionLevel, PermissionRule } from '../types';
 import { matchPermissionRule, modelContextWindow } from '../types';
@@ -13,6 +12,13 @@ import { activateForPath } from './skill_activation';
 import { getSkill } from './skills';
 import { clearSkillScopedAllowedTools, isAllowedForSkill, pushSkillFrame } from './skill_scoped_allow';
 import { persistLargeResult } from './tool_result_store';
+import { ToolFailureGuard, toolResultLooksLikeError } from './tool_failure_guard';
+import {
+  collectRecordedPrunedToolCallIds,
+  filterPrunedToolContext,
+  formatContextPruneOutcome,
+  resolveContextPruneRequest,
+} from '../utils/context_pruning';
 
 /** Pick tools allowed under a given permission level. listToolSpecs() already
  *  excludes deferred tools (those reachable only via tool_search) and bridge
@@ -27,6 +33,10 @@ function toolsForPermission(level: PermissionLevel): ToolSpec[] {
   return visible;
 }
 
+const CODEX_ENVELOPE_EXCLUDED_TOOLS = new Set([
+  'file_edit', 'write_note', 'append_to_note', 'edit_section', 'create_note',
+]);
+
 /** Stable JSON stringify — recursively sorts object keys so two argument
  *  objects with the same content but different key order produce the same
  *  string. Used for repetition-detection signatures so the model can't bypass
@@ -36,6 +46,11 @@ function stableStringify(v: AnyValue): string {
   if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
   const keys = Object.keys(v).sort();
   return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+}
+
+interface McpHubLike {
+  asToolSpecs(): ToolSpec[];
+  findClient(name: string): { client: { callTool(name: string, args: AnyValue): Promise<AnyValue> }; originalName: string } | null;
 }
 
 export interface AgentLoopOptions {
@@ -74,7 +89,7 @@ export interface AgentLoopOptions {
   checkpoint?: CheckpointManager;
   sessionId?: string;
   turnId?: string;
-  mcp?: McpHub;
+  mcp?: McpHubLike;
   /** Approval handler. If not provided, falls back to the floating Modal. The view
    *  passes one that renders an inline ✓/✗ card next to the current assistant message. */
   approver?: (tool: ToolImpl, args: AnyValue) => Promise<ApprovalResult>;
@@ -113,6 +128,13 @@ If the user's request can be answered DIRECTLY from the attached context (the <c
 - Only escape the fast path when the request explicitly needs vault state (e.g. "find every note that…", "edit Foo.md", "add a section to my project plan").
 - A single \`read_note\` to fetch a referenced file is fine. A second tool call is already too many for fast-path tasks.
 
+# Task continuity and target grounding
+
+- If the user says "continue", "retry", "直接获得内容", "这个内容", "这篇", "它", "刚才", "上面", "the content", "that", or similar in a follow-up, resolve that short reference against the most recent explicit unfinished user request.
+- Do NOT replace the prior target with the current/open file or ambient context merely because that content is available.
+- If the prior target was a specific article, PDF, URL, person, title, folder, or filename, preserve that target until the user clearly names a different one.
+- Before writing a file, make sure the title/topic you are about to write matches the user's requested target. If it does not match, stop and ask or fetch/read the correct target; never write unrelated available context.
+
 # Doing tasks (when tools ARE needed)
 
 - In general, do not propose changes to a note you haven't read. Read it first.
@@ -134,13 +156,23 @@ If the user's request can be answered DIRECTLY from the attached context (the <c
 
 - Skip planning for the easiest 25% of tasks (1–2 tool calls).
 - Do not make single-step plans.
-- For tasks with 3+ distinct sub-tasks, call \`todo_write\` ONCE up front with all items {content, activeForm, status: 'pending'}. Then keep exactly ONE in_progress at a time and update statuses as you finish each.
+- For tasks with 3+ distinct sub-tasks, call \`todo_write\` once up front with the complete list and exactly one item already \`in_progress\`. Replace the full list when statuses change.
 
-# Tools (priority order for edits)
+# Tool choice
 
-1. \`file_edit({file_path, old_string, new_string, replace_all?})\` — preferred for single-spot edits. Empty old_string + new_string = create new file. old_string must be unique unless \`replace_all:true\`.
-2. \`apply_patch({patch})\` — codex envelope, for multi-file or multi-hunk. Supports Add / Delete / Update / Move.
-3. \`write_note\` only when rewriting >50% of the file.
+- Use attached/current context before reading. Do not call \`get_active_file\` or \`get_selection\` unless the request actually depends on the active target or an explicit selection.
+- Use a visible tool directly when it fits. Specialized tools are omitted to save context; call \`tool_search\` once by capability or exact name, then call the loaded tool on the next step.
+- Use \`read_note\` line ranges for a known section of a long file. When 2+ explicit paths are already known, load \`read_files\` once and batch the reads instead of making serial calls.
+- After large read/search outputs become stale, use \`context_prune\` with selected call IDs. Keep active evidence; write confirmations, downloads, failures, skill instructions, tool discovery, and the current plan are protected.
+- Skills are workflows, not actions. Invoke at most one best-matching \`skill\` once, follow its instructions, then use tools. Skip skills for routine tasks.
+- Correct invalid arguments from the schema. Do not retry the same malformed call.
+
+# Edit tools
+
+1. \`patch_note\` for one heading body, block, or frontmatter property.
+2. \`file_edit\` for one exact replacement; empty \`old_string\` creates a file and never overwrites.
+3. \`apply_patch\` for multiple hunks/files or coordinated add/delete/move operations.
+4. Load \`write_note\` only for an intentional whole-file replacement.
 
 **Batching rule (CRITICAL — saves dozens of round-trips)**: When the same kind of change
 appears 3+ times in one file (e.g. removing every \`[N]\` citation marker, renaming a symbol
@@ -153,14 +185,13 @@ agent runtime will REFUSE further \`file_edit\` on that file and force you to sw
 \`apply_patch\` (multi-hunk envelope) or \`file_edit\` with \`replace_all:true\`. Don't trigger
 this — plan the edit as a single envelope from the start.
 
-Reads (auto-approved): \`read_note\`, \`grep_vault\`, \`search_vault\`, \`list_files\`, \`semantic_search\`, \`get_active_file\`, \`query_metadata\`.
-
 # Web workflow
 
 - If the user gives a concrete URL and asks what it says, use \`web_fetch({url, prompt, mode})\`.
 - If the URL is unknown or the user asks to find current/public information, prefer \`web_research\` so search, source fetching, and extraction happen in one bounded pipeline.
-- Use \`web_search\` directly only when you need a raw list of candidate sources.
-- If the user asks to save, download, inspect, or archive a web asset, use \`download_file\` after finding the direct asset URL. Then inspect the saved vault file with \`read_pdf\`, \`view_image\`, or \`read_note\` as appropriate.
+- Load \`web_search\` only when you need a raw candidate list instead of the bounded research pipeline.
+- If the user asks to save/download a named paper or asset but no URL is known, call \`download_file({query, save_to, confirm_intent:true})\`; it discovers ranked candidates and validates bytes before writing. Pass a direct \`url\` when one is already known.
+- After a successful download, inspect the saved vault file with \`read_pdf\`, \`view_image\`, or \`read_note\` as appropriate.
 - For papers, GitHub repositories/releases, and official documentation, use \`web_research\` first; its auto provider can query specialized sources before generic web search.
 - Do not invent download links. Preserve source URLs and mention saved vault paths.
 - Avoid broad repeated searches. One good query, optional domain filter, then act.
@@ -173,11 +204,14 @@ Reads (auto-approved): \`read_note\`, \`grep_vault\`, \`search_vault\`, \`list_f
 - Keep claims grounded in the image/crop you actually saw. If a crop excludes context, say so or inspect the full image first.
 - For generated/edited images, use the image generation/editing surface when available; do not pretend \`view_image\` can modify pixels.
 
-Skills: \`discover_skills()\` + \`run_skill(name)\` for vault-authored playbooks at \`.glossa/skills/<name>/SKILL.md\`.
+# Skills
+
+- Available playbooks are listed below. Invoke one with \`skill({skill, args?})\`; do not call the deprecated discovery/run pair.
+- A skill may load specialized tools automatically. After it returns, call those tools directly rather than searching for them again.
 
 # Tone and style
 
-- Default: very concise; friendly coding teammate. Mirror the user's language.
+- Default: very concise; friendly coding teammate. Follow the current turn's \`<response-language>\` block. It outranks the language of selected/attached source material.
 - Before a tool batch, ONE short sentence (8–14 words) saying what you're about to do. Skip preamble for a single trivial read.
 - After tool results: 0–1 sentence ack, then next action. Don't restate args (tool card already shows them).
 - Final answer: plain text. Lead with what changed or the answer. Reference paths inline as \`Path/To/Note.md\`. Skip headers/bullets unless they aid scanning.
@@ -200,8 +234,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     // than on our piecewise `file_edit` / `write_note` tools. Drop the
     // single-spot writers; force codex to emit one envelope per edit batch.
     if (opts.endpointKind === 'codex-cli' && opts.endpointFullAgent) {
-      const codexEnvelopeExclude = new Set(['file_edit', 'write_note', 'append_to_note', 'edit_section', 'create_note']);
-      filtered = filtered.filter(s => !codexEnvelopeExclude.has(s.name));
+      filtered = filtered.filter(s => !CODEX_ENVELOPE_EXCLUDED_TOOLS.has(s.name));
     }
     // Append MCP tools (if any) — namespaced by `<server>__<tool>`
     const mcpSpecs = (opts.permissionLevel === 'read-only' || opts.runMode === 'plan')
@@ -227,6 +260,8 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     ...opts.history,
     { role: 'user', content: opts.userContent },
   ];
+  const prunedToolCallIds = collectRecordedPrunedToolCallIds(messages);
+  const failureGuard = new ToolFailureGuard();
 
   // Reset skill-scoped allow frames at turn boundary. Skills invoked in
   // PRIOR turns of the same session don't propagate to fresh user requests —
@@ -251,6 +286,42 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
    *  fire (it'd create a fresh empty assistant bubble). This flag tells the next
    *  loop iteration to skip the boundary and reuse the current bubble. */
   let skipNextBoundary = false;
+
+  /** Add schemas requested by tool_search or a skill to the NEXT provider
+   *  call. Returning schemas only as tool text is insufficient: function-call
+   *  APIs require every callable tool to be present in `tools` for that exact
+   *  request. */
+  const loadRequestedTools = (requestedNames: readonly string[]): { ready: string[]; blocked: string[] } => {
+    if (!tools || requestedNames.length === 0) return { ready: [], blocked: [...requestedNames] };
+    const current = new Set(tools.map(spec => spec.name));
+    const requested = new Set(requestedNames);
+    const candidates = listToolSpecs({ includeDeferred: true });
+    const ready = new Set<string>();
+    const additions: ToolSpec[] = [];
+
+    for (const name of requested) {
+      if (current.has(name)) ready.add(name);
+    }
+    for (const spec of candidates) {
+      if (!requested.has(spec.name) || current.has(spec.name)) continue;
+      const tool = TOOLS[spec.name];
+      if (!tool) continue;
+      const disallowedByMode = (opts.permissionLevel === 'read-only' || opts.runMode === 'plan')
+        && !isReadOnlyTool(tool, {});
+      const disallowedForCodex = opts.endpointKind === 'codex-cli'
+        && opts.endpointFullAgent
+        && CODEX_ENVELOPE_EXCLUDED_TOOLS.has(spec.name);
+      if (disallowedByMode || disallowedForCodex) continue;
+      additions.push(spec);
+      current.add(spec.name);
+      ready.add(spec.name);
+    }
+    if (additions.length > 0) tools = [...tools, ...additions];
+    return {
+      ready: [...ready],
+      blocked: [...requested].filter(name => !ready.has(name)),
+    };
+  };
 
   // NOTE on `maxSteps`: this is the number of MODEL TURNS (assistant
   // messages), not the number of tool calls. One turn can issue many tools
@@ -284,7 +355,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     try {
       for await (const ch of opts.provider.stream({
         systemPrompt: sysPrompt,
-        messages,
+        messages: filterPrunedToolContext(messages, prunedToolCallIds),
         tools,
         model: opts.model,
         signal: opts.signal,
@@ -403,6 +474,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       if (hasDangerous) {
         for (const c of toolCalls) {
           messages.push({ role: 'tool', toolCallId: c.id,
+            toolName: c.name, toolIsError: true,
             content: 'Refused: attempt_completion cannot be batched with write/edit tools. Call writes first, then in a separate turn call attempt_completion alone.' });
         }
         continue;       // skip this batch entirely, model will see the refusal and retry
@@ -458,6 +530,22 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       if (!tool && !mcpEntry) {
         prepared.push({ call, ev, tool, mcpEntry, effectiveArgs: call.args, rewriteToWriteNote: false,
           resolved: { status: 'error', result: `Unknown tool: ${call.name}` } });
+        continue;
+      }
+      if (tool) {
+        const inputErrors = validateToolInput(tool.spec.parameters, call.args);
+        if (inputErrors.length > 0) {
+          prepared.push({ call, ev, tool, mcpEntry, effectiveArgs: call.args, rewriteToWriteNote: false,
+            resolved: { status: 'error', result:
+              `Invalid arguments for ${tool.spec.name}:\n- ${inputErrors.join('\n- ')}\n` +
+              'Correct the arguments from the tool schema; do not repeat the same invalid call.' } });
+          continue;
+        }
+      }
+      const repeatedFailureBlock = failureGuard.blockReason(call.name);
+      if (repeatedFailureBlock) {
+        prepared.push({ call, ev, tool, mcpEntry, effectiveArgs: call.args, rewriteToWriteNote: false,
+          resolved: { status: 'error', result: repeatedFailureBlock } });
         continue;
       }
       // Repetition guard — same tool with the same args 3 times in the
@@ -646,7 +734,8 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       if (resolved) {
         ev.status = resolved.status; ev.result = resolved.result; ev.endedAt = Date.now();
         opts.onToolEnd(ev);
-        messages.push({ role: 'tool', toolCallId: call.id, content: resolved.result });
+        messages.push({ role: 'tool', toolCallId: call.id, toolName: call.name,
+          toolIsError: true, content: resolved.result });
         return;
       }
       // Snapshot files before running + activate any conditional skill whose
@@ -687,8 +776,8 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
 
         let raw: string | ToolRunResult;
         // Pass the agent loop's signal to every tool invocation so net-bound
-        // tools (web_fetch, semantic_search embedding query, plugin bridges
-        // hitting big indices) can cooperate with the user's Stop button
+        // tools (web_fetch, web_research, plugin bridges) can cooperate
+        // with the user's Stop button
         // instead of running to completion in the background. Tools that
         // don't read the signal are unchanged.
         const toolCtx = { signal: opts.signal };
@@ -736,6 +825,21 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           raw = await mcpEntry.client.callTool(mcpEntry.originalName, effectiveArgs);
         }
         const norm = normalizeToolResult(raw);
+        if (norm.contextPruneRequest) {
+          const visibleMessages = filterPrunedToolContext(messages, prunedToolCallIds);
+          const outcome = resolveContextPruneRequest(visibleMessages, norm.contextPruneRequest, call.id);
+          for (const id of outcome.acceptedToolCallIds) prunedToolCallIds.add(id);
+          norm.text = formatContextPruneOutcome(norm.contextPruneRequest, outcome);
+        }
+        const returnedError = toolResultLooksLikeError(norm.text);
+        if (!returnedError && norm.loadedToolNames?.length) {
+          const loaded = loadRequestedTools(norm.loadedToolNames);
+          if (loaded.blocked.length > 0) {
+            norm.text = loaded.ready.length === 0
+              ? `No requested specialized tools were loaded in the current permission/provider mode: ${loaded.blocked.join(', ')}.`
+              : `${norm.text}\nNot loaded in the current permission/provider mode: ${loaded.blocked.join(', ')}.`;
+          }
+        }
         // Skill-scoped allow: when the `skill` tool runs successfully, push a
         // frame so the skill's `allowed-tools` auto-approve in subsequent
         // tool calls this turn. The frame stays on the stack until session
@@ -743,7 +847,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         // clearSkillScopedAllowedTools elsewhere).
         // At this point we're inside the try-block past tool.run(), so the
         // tool succeeded — no need to check ev.status.
-        if (call.name === 'skill') {
+        if (!returnedError && call.name === 'skill') {
           try {
             const skillName = String((effectiveArgs)?.skill ?? '');
             if (skillName) {
@@ -773,7 +877,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
             modelBoundText = norm.text.slice(0, cap) + `\n\n[truncated at ${cap} chars; persistence failed]`;
           }
         }
-        ev.status = 'success';
+        ev.status = returnedError ? 'error' : 'success';
         ev.result = norm.text;                        // UI gets the full text
         (ev as AnyValue)._modelBoundResult = modelBoundText; // model gets preview
         ev.contentBlocks = norm.contentBlocks;
@@ -784,10 +888,15 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       opts.onToolEnd(ev);
       // Prefer the redacted (size-capped) text for the model when present;
       // fall back to the full result otherwise.
-      const modelBound = (ev as AnyValue)._modelBoundResult ?? String(ev.result ?? '');
+      let modelBound = (ev as AnyValue)._modelBoundResult ?? String(ev.result ?? '');
+      const failureReminder = failureGuard.record(call.name, ev.status === 'error');
+      if (failureReminder) {
+        modelBound += `\n\n<system-reminder>${failureReminder}</system-reminder>`;
+      }
       messages.push({
         role: 'tool',
         toolCallId: call.id,
+        toolName: call.name,
         content: modelBound,
         toolContentBlocks: ev.contentBlocks,
         toolIsError: ev.status === 'error',
@@ -811,4 +920,4 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
   opts.onError(`Max steps (${opts.maxSteps}) reached without final answer.`);
   opts.onFinal(totalUsage);
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

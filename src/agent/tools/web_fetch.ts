@@ -1,8 +1,13 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { buildTool, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects, parseHttpUrl } from '../../utils/safe_web';
-import { decodeUtf8, extractWebMarkdown, fetchBytesWithCap, summarizeMarkdown } from '../../utils/web_content';
-import { clampNumber, webReadPermission } from './web_common';
+import { decodeUtf8, extractWebMarkdown, fetchBytesWithCap, summarizeMarkdown, type WebFetchBytesResult, type WebFetchOptions } from '../../utils/web_content';
+import { clampNumber, httpFallbackUrl, webReadPermission } from './web_common';
+
+interface WebFetchFallbackResult extends WebFetchBytesResult {
+  fallbackFrom?: string;
+  fallbackError?: string;
+}
 
 export const webFetch: ToolImpl = buildTool({
   // Network egress — destructive in the sense of having side effects (logs, billing)
@@ -30,28 +35,24 @@ export const webFetch: ToolImpl = buildTool({
   },
   spec: {
     name: 'web_fetch',
-    description: [
-      'Fetch a public HTTP(S) URL and return structured Markdown/text. Use prompt/mode to extract only the useful content instead of dumping the whole page.',
-      'Modes: extract (default), summary, raw, links, metadata.',
-      'Localhost/private/link-local/CGNAT IPs are blocked at every redirect hop. Network egress requires approval.',
-      'For downloadable files, prefer download_file after finding the target URL.',
-    ].join('\n'),
+    description: 'Fetch one known public HTTP(S) URL and return bounded Markdown/text, links, or metadata. Supply a focused prompt to extract only relevant content. It blocks private-network redirects and never writes files; use download_file for binary resources. Network access requires approval.',
     parameters: {
       type: 'object',
       properties: {
         url: { type: 'string', description: 'Public HTTP(S) URL to fetch.' },
         prompt: { type: 'string', description: 'Optional extraction intent, e.g. "find the install steps" or "extract download links".' },
-        mode: { type: 'string', description: 'Optional mode: extract, summary, raw, links, or metadata. Default extract.' },
-        max_chars: { type: 'number', description: 'Maximum returned content characters. Default 30000.' },
+        mode: { type: 'string', enum: ['extract', 'summary', 'raw', 'links', 'metadata'], description: 'Returned representation. Default extract.' },
+        max_chars: { type: 'integer', minimum: 1000, maximum: 100000, description: 'Maximum returned content characters. Default 30000.' },
       },
       required: ['url'],
+      additionalProperties: false,
     },
   },
   run: async (_app, { url, prompt, mode, max_chars }, ctx) => {
     try {
       parseHttpUrl(url);
       const cap = clampNumber(max_chars, 1_000, 100_000, 30_000);
-      const fetched = await fetchBytesWithCap(fetchWithSafeRedirects, url, {
+      const fetched = await fetchBytesWithHttpFallback(fetchWithSafeRedirects, url, {
         signal: ctx?.signal,
         timeoutMs: 30_000,
         maxBytes: 8 * 1024 * 1024,
@@ -68,6 +69,8 @@ export const webFetch: ToolImpl = buildTool({
       const meta = [
         `URL: ${fetched.finalUrl}`,
         fetched.finalUrl !== url ? `Original URL: ${url}` : '',
+        fetched.fallbackFrom ? `Fallback from URL: ${fetched.fallbackFrom}` : '',
+        fetched.fallbackError ? `Initial fetch error: ${fetched.fallbackError}` : '',
         `Status: ${fetched.status} ${fetched.statusText}`,
         `Content-Type: ${fetched.contentType || 'unknown'}`,
         `Bytes read: ${fetched.bytes.byteLength}${fetched.truncated ? ' (truncated)' : ''}`,
@@ -91,4 +94,31 @@ export const webFetch: ToolImpl = buildTool({
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+
+export async function fetchBytesWithHttpFallback(
+  fetcher: (url: string, signal: AbortSignal) => Promise<Response>,
+  url: string,
+  opts: WebFetchOptions = {},
+): Promise<WebFetchFallbackResult> {
+  try {
+    return await fetchBytesWithCap(fetcher, url, opts);
+  } catch (e) {
+    const fallbackUrl = httpFallbackUrl(url, e, opts.signal);
+    if (!fallbackUrl) throw e;
+    try {
+      const fetched = await fetchBytesWithCap(fetcher, fallbackUrl, opts);
+      return {
+        ...fetched,
+        fallbackFrom: url,
+        fallbackError: errorMessage(e),
+      };
+    } catch (fallbackError) {
+      throw new Error(`initial fetch failed (${errorMessage(e)}); HTTP fallback also failed (${errorMessage(fallbackError)})`);
+    }
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

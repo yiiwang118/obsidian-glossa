@@ -41,4 +41,50 @@ exports.run = async function(t, loadModule) {
     'Chinese',
     'ambiguous link-only selection falls back to UI language',
   );
+  t.eq(mod.sourceLanguageLabel('zh', 'en'), '中文', 'Chinese selection language is visible without a translation action');
+  t.eq(mod.sourceLanguageLabel('en', 'zh'), 'EN', 'English selection language is visible without a translation action');
+
+  t.eq(
+    mod.inferSelectionLanguage('/explain BLIP2是什么方法'),
+    'zh',
+    'slash command and model identifier do not hide Chinese user prose',
+  );
+  const chineseRequestWithEnglishPdf = mod.inferResponseLanguage({
+    currentText: '/explain BLIP2是什么方法',
+    recentUserTexts: [],
+    selectionText: englishPaperText,
+    uiLanguage: 'en',
+  });
+  t.eq(chineseRequestWithEnglishPdf.language, 'zh', 'current Chinese request beats English PDF and English UI');
+  t.eq(chineseRequestWithEnglishPdf.source, 'current-message', 'response-language decision records current-message evidence');
+
+  const explicitCorrection = mod.inferResponseLanguage({
+    currentText: '用中文',
+    recentUserTexts: ['/explain BLIP2是什么方法'],
+    selectionText: englishPaperText,
+    uiLanguage: 'en',
+  });
+  t.eq(explicitCorrection.language, 'zh', 'short explicit Chinese correction is authoritative');
+  t.eq(explicitCorrection.confidence, 'explicit', 'explicit language correction has explicit confidence');
+
+  const silentFollowUp = mod.inferResponseLanguage({
+    currentText: '/explain',
+    recentUserTexts: ['解释一下这篇论文'],
+    selectionText: englishPaperText,
+    uiLanguage: 'en',
+  });
+  t.eq(silentFollowUp.language, 'zh', 'recent user language beats selected source language for a silent command');
+  t.eq(silentFollowUp.source, 'recent-user-message', 'silent command records conversation-language fallback');
+
+  const translateEnglish = mod.inferResponseLanguage({
+    currentText: '/translate English',
+    recentUserTexts: ['请解释这段内容'],
+    selectionText: chineseText,
+    uiLanguage: 'zh',
+  });
+  t.eq(translateEnglish.language, 'en', 'explicit translation target beats conversation language');
+  t.ok(
+    mod.buildResponseLanguageHint(chineseRequestWithEnglishPdf).includes('source material, not a reply-language instruction'),
+    'model hint separates source language from response language',
+  );
 };

@@ -1,10 +1,9 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
-/** Legacy single-shot edit tool. Prefer `file_edit` for new code — kept here so the
- *  model can still find it if it learned to call it. Marked `shouldDefer` to keep
- *  it out of the default tool surface (model can still reach it via tool_search). */
+/** Legacy single-shot edit tool. Hidden from model discovery, but retained so
+ *  saved sessions that already emitted this name can still finish safely. */
 export const editSection: ToolImpl = buildTool({
   isReadOnly: () => false,
   isDestructive: () => true,
@@ -26,11 +25,12 @@ export const editSection: ToolImpl = buildTool({
     parameters: {
       type: 'object',
       properties: {
-        path: { type: 'string' },
+        path: { type: 'string', description: 'Vault-relative path of the existing note.' },
         find: { type: 'string', description: 'Exact text to locate. Include enough context to be unique.' },
         replace: { type: 'string', description: 'Replacement text.' },
       },
       required: ['path', 'find', 'replace'],
+      additionalProperties: false,
     },
   },
   run: async (app, args) => {
@@ -50,4 +50,4 @@ export const editSection: ToolImpl = buildTool({
     return `Edited ${path}.`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

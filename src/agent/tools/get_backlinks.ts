@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * get_backlinks — list every note that links INTO the given path.
  *
@@ -17,7 +17,9 @@ export const getBacklinks: ToolImpl = buildTool({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   isDestructive: () => false,
+  shouldDefer: true,
   searchHint: 'list notes linking to this note',
+  searchTags: ['incoming links', 'linked mentions', '反向链接', '反链'],
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => `backlinks of ${a.path}`,
   // Render: a sources-table (with-context: source/line/snippet rows) when the
@@ -105,15 +107,16 @@ export const getBacklinks: ToolImpl = buildTool({
   },
   spec: {
     name: 'get_backlinks',
-    description: 'List notes containing wikilinks that resolve to the given path. Optionally include a context snippet around each link.',
+    description: 'List notes whose resolved wikilinks point to one target file. Enable context only when the surrounding link text is needed; the default count/path result is faster.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Vault-relative target path.' },
         with_context: { type: 'boolean', description: 'When true, also fetch a 1-line snippet around each backlink. Default false (faster).' },
-        max_results: { type: 'number', description: 'Cap on returned backlinks. Default 50.' },
+        max_results: { type: 'integer', minimum: 1, maximum: 500, description: 'Maximum source notes to return. Default 50.' },
       },
       required: ['path'],
+      additionalProperties: false,
     },
   },
   run: async (app, args) => {
@@ -157,4 +160,4 @@ export const getBacklinks: ToolImpl = buildTool({
     return lines.join('\n');
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { Plugin, WorkspaceLeaf, Notice, addIcon } from 'obsidian';
 import { GlossaView, VIEW_TYPE_GLOSSA } from './ui/view';
 import { GlossaSettingTab } from './settings';
@@ -13,6 +13,9 @@ import { GLOSSA_RIBBON_SVG } from './ui/icons';
 import type { UpdateInfo } from './features/update_check';
 import { OBSIDIAN_PLUGIN_URI, UPDATE_CHECK_INTERVAL_MS, fetchLatestUpdate } from './features/update_check';
 import { compareSemver, normalizeVersion } from './utils/version';
+import { clearMediaCaches } from './utils/media_cache';
+import { clearRenderedPdfPageCache } from './utils/pdf_render';
+import { chatMessagesForStorage, purgeTransientChatPayloads } from './utils/chat_storage';
 
 export default class GlossaPlugin extends Plugin {
   settings: GlossaSettings;
@@ -219,6 +222,10 @@ export default class GlossaPlugin extends Plugin {
       }, SKILL_ACTIVATE_DEBOUNCE_MS);
       pendingTimers.set(path, handle);
     };
+    const invalidateSkillCacheForPath = (path: string) => {
+      if (!path.endsWith('/SKILL.md') && path !== 'SKILL.md') return;
+      void import('./agent/skills').then(m => m.invalidateDiscoverCache()).catch(() => {});
+    };
 
     this.registerEvent(
       this.app.workspace.on('file-open', (file) => { if (file?.path) scheduleActivate(file.path); }),
@@ -229,9 +236,28 @@ export default class GlossaPlugin extends Plugin {
         if (p) scheduleActivate(p);
         // Editing a SKILL.md invalidates the discoverSkills TTL cache so
         // the next disc walk picks up the new frontmatter / body.
-        if (p.endsWith('/SKILL.md') || p === 'SKILL.md') {
-          void import('./agent/skills').then(m => m.invalidateDiscoverCache()).catch(() => {});
-        }
+        invalidateSkillCacheForPath(p);
+      }),
+    );
+    this.registerEvent(
+      this.app.vault.on('create', (file) => {
+        const p: string = (file as AnyValue)?.path ?? '';
+        if (p) scheduleActivate(p);
+        invalidateSkillCacheForPath(p);
+      }),
+    );
+    this.registerEvent(
+      this.app.vault.on('delete', (file) => {
+        const p: string = (file as AnyValue)?.path ?? '';
+        invalidateSkillCacheForPath(p);
+      }),
+    );
+    this.registerEvent(
+      this.app.vault.on('rename', (file, oldPath) => {
+        const p: string = (file as AnyValue)?.path ?? '';
+        if (p) scheduleActivate(p);
+        invalidateSkillCacheForPath(oldPath);
+        invalidateSkillCacheForPath(p);
       }),
     );
 
@@ -241,6 +267,8 @@ export default class GlossaPlugin extends Plugin {
 
   onunload() {
     void this.mcp?.stop();
+    clearMediaCaches();
+    clearRenderedPdfPageCache();
     // Flush any debounced persist timers so the last 750ms of changes
     // (nested skill dirs discovered, etc.) don't get lost when the user
     // disables / reloads the plugin. Fire-and-forget — onunload is
@@ -522,9 +550,9 @@ class ChatStore {
 
   private cloneMessages(messages: ChatSession['messages']): ChatSession['messages'] {
     try {
-      return JSON.parse(JSON.stringify(messages)) as ChatSession['messages'];
+      return JSON.parse(JSON.stringify(chatMessagesForStorage(messages))) as ChatSession['messages'];
     } catch {
-      return messages.map(m => ({ ...m }));
+      return chatMessagesForStorage(messages);
     }
   }
 
@@ -670,6 +698,7 @@ class ChatStore {
     this.sessions = this.normalizeSessions(this.sessions);
     if (this.sessions.length !== beforeFilter) migrated = true;
     for (const s of this.sessions) {
+      if (purgeTransientChatPayloads(s.messages ?? []) > 0) migrated = true;
       for (const m of s.messages ?? []) {
         if (Array.isArray(m.contextSnapshot)) {
           for (const it of m.contextSnapshot) {
@@ -720,7 +749,10 @@ class ChatStore {
       await safeWriteJson(this.plugin.app.vault.adapter, this.path, {
         version: 2,
         updatedAt: Date.now(),
-        sessions: this.sessions,
+        sessions: this.sessions.map(session => ({
+          ...session,
+          messages: chatMessagesForStorage(session.messages ?? []),
+        })),
         deletedSessionIds,
       }, { pretty: true });
       await this.persistDeletedJournal();
@@ -770,4 +802,4 @@ class ChatStore {
     await this.persist();
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

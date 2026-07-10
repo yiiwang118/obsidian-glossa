@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { requestUrl } from 'obsidian';
 import { isDeepSeekEndpoint, mapOpenAIReasoningEffort, type Endpoint } from '../types';
 import { nativeStreamingHttpRequest } from '../utils/native_http';
@@ -135,7 +135,15 @@ export class CustomApiProvider implements LLMProvider {
         ...(this.ep.headers ?? {}),
       };
       const messages: AnyValue[] = [];
-      for (const m of req.messages) {
+      let lastUserIndex = -1;
+      for (let index = req.messages.length - 1; index >= 0; index--) {
+        if (req.messages[index].role === 'user') {
+          lastUserIndex = index;
+          break;
+        }
+      }
+      for (let index = 0; index < req.messages.length; index++) {
+        const m = req.messages[index];
         if (m.role === 'tool') {
           let resultContent: AnyValue = m.content;
           if (m.toolContentBlocks?.length) {
@@ -152,6 +160,13 @@ export class CustomApiProvider implements LLMProvider {
           if (m.content) blocks.push({ type: 'text', text: m.content });
           for (const tc of m.toolCalls) blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.args ?? {} });
           messages.push({ role: 'assistant', content: blocks });
+        } else if (m.role === 'user' && index === lastUserIndex && req.attachedImages?.length) {
+          const blocks: AnyValue[] = [{ type: 'text', text: m.content }];
+          for (const image of req.attachedImages) {
+            const match = /^data:([^;]+);base64,(.+)$/.exec(image.dataUri);
+            if (match) blocks.push({ type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } });
+          }
+          messages.push({ role: 'user', content: blocks });
         } else if (m.role !== 'system') messages.push({ role: m.role, content: m.content });
       }
       const body: AnyValue = { model: req.model ?? this.ep.model, max_tokens: req.maxTokens ?? 4096, messages, stream: false };
@@ -187,27 +202,7 @@ export class CustomApiProvider implements LLMProvider {
       'Authorization': `Bearer ${this.ep.apiKey}`,
       ...(this.ep.headers ?? {}),
     };
-    const messages: AnyValue[] = [];
-    if (req.systemPrompt) messages.push({ role: 'system', content: stripBoundary(req.systemPrompt) });
-    for (const m of req.messages) {
-      if (m.role === 'tool') messages.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content });
-      else if (m.role === 'assistant' && m.toolCalls?.length) {
-        const out: AnyValue = {
-          role: 'assistant',
-          content: m.content || null,
-          tool_calls: m.toolCalls.map(tc => ({
-            id: tc.id,
-            type: 'function',
-            function: { name: tc.name, arguments: JSON.stringify(tc.args ?? {}) },
-          })),
-        };
-        if (m.reasoningContent) out.reasoning_content = m.reasoningContent;
-        messages.push(out);
-      } else if (m.role === 'assistant' && m.reasoningContent) {
-        messages.push({ role: 'assistant', content: m.content, reasoning_content: m.reasoningContent });
-      }
-      else messages.push({ role: m.role, content: m.content });
-    }
+    const messages = buildOpenAICompatibleMessages(req);
     const body: AnyValue = { model: req.model ?? this.ep.model, messages, stream: false, temperature: req.temperature ?? 0.7 };
     this.applyOpenAIReasoning(body);
     try {
@@ -288,45 +283,7 @@ export class CustomApiProvider implements LLMProvider {
       'Authorization': `Bearer ${this.ep.apiKey}`,
       ...(this.ep.headers ?? {}),
     };
-    const messages: AnyValue[] = [];
-    if (req.systemPrompt) messages.push({ role: 'system', content: stripBoundary(req.systemPrompt) });
-    // Identify the index of the last user message so we can attach images there.
-    const lastUserIdx = (() => {
-      for (let i = req.messages.length - 1; i >= 0; i--) if (req.messages[i].role === 'user') return i;
-      return -1;
-    })();
-    for (let i = 0; i < req.messages.length; i++) {
-      const m = req.messages[i];
-      if (m.role === 'tool') { messages.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content }); continue; }
-      if (m.role === 'assistant' && m.toolCalls?.length) {
-        // OpenAI canonical: assistant message with tool_calls array
-        const out: AnyValue = {
-          role: 'assistant',
-          content: m.content || null,
-          tool_calls: m.toolCalls.map(tc => ({
-            id: tc.id,
-            type: 'function',
-            function: { name: tc.name, arguments: JSON.stringify(tc.args ?? {}) },
-          })),
-        };
-        // DeepSeek-reasoner requires reasoning_content echoed back. Pass-through.
-        if (m.reasoningContent) out.reasoning_content = m.reasoningContent;
-        messages.push(out);
-        continue;
-      }
-      // Even without tool_calls, pass reasoning_content if present (some providers want it)
-      if (m.role === 'assistant' && m.reasoningContent) {
-        messages.push({ role: 'assistant', content: m.content, reasoning_content: m.reasoningContent });
-        continue;
-      }
-      if (i === lastUserIdx && req.attachedImages?.length) {
-        const parts: AnyValue[] = [{ type: 'text', text: m.content }];
-        for (const img of req.attachedImages) parts.push({ type: 'image_url', image_url: { url: img.dataUri } });
-        messages.push({ role: m.role, content: parts });
-      } else {
-        messages.push({ role: m.role, content: m.content });
-      }
-    }
+    const messages = buildOpenAICompatibleMessages(req);
     const body: AnyValue = {
       model: req.model ?? this.ep.model,
       messages,
@@ -657,8 +614,83 @@ export class CustomApiProvider implements LLMProvider {
   }
 }
 
+/** Build canonical OpenAI-compatible messages once for streaming and
+ * requestUrl transports. Rich image tool results are hoisted only after the
+ * complete consecutive tool-result group, preserving the required
+ * assistant(tool_calls) -> tool... sequence. */
+export function buildOpenAICompatibleMessages(req: ChatRequest): AnyValue[] {
+  const messages: AnyValue[] = [];
+  if (req.systemPrompt) messages.push({ role: 'system', content: stripBoundary(req.systemPrompt) });
+  let lastUserIndex = -1;
+  for (let index = req.messages.length - 1; index >= 0; index--) {
+    if (req.messages[index].role === 'user') {
+      lastUserIndex = index;
+      break;
+    }
+  }
+
+  let pendingToolImages: AnyValue[] = [];
+  const flushToolImages = () => {
+    if (!pendingToolImages.length) return;
+    messages.push({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Visual content returned by the preceding tool call(s).' },
+        ...pendingToolImages,
+      ],
+    });
+    pendingToolImages = [];
+  };
+
+  for (let index = 0; index < req.messages.length; index++) {
+    const message = req.messages[index];
+    if (message.role === 'tool') {
+      messages.push({ role: 'tool', tool_call_id: message.toolCallId, content: message.content });
+      for (const block of message.toolContentBlocks ?? []) {
+        if (block.type !== 'image') continue;
+        pendingToolImages.push({
+          type: 'image_url',
+          image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` },
+        });
+      }
+      continue;
+    }
+
+    flushToolImages();
+    if (message.role === 'assistant' && message.toolCalls?.length) {
+      const assistant: AnyValue = {
+        role: 'assistant',
+        content: message.content || null,
+        tool_calls: message.toolCalls.map(call => ({
+          id: call.id,
+          type: 'function',
+          function: { name: call.name, arguments: JSON.stringify(call.args ?? {}) },
+        })),
+      };
+      if (message.reasoningContent) assistant.reasoning_content = message.reasoningContent;
+      messages.push(assistant);
+      continue;
+    }
+    if (message.role === 'assistant' && message.reasoningContent) {
+      messages.push({ role: 'assistant', content: message.content, reasoning_content: message.reasoningContent });
+      continue;
+    }
+    if (message.role === 'user' && index === lastUserIndex && req.attachedImages?.length) {
+      const content: AnyValue[] = [{ type: 'text', text: message.content }];
+      for (const image of req.attachedImages) {
+        content.push({ type: 'image_url', image_url: { url: image.dataUri } });
+      }
+      messages.push({ role: 'user', content });
+      continue;
+    }
+    messages.push({ role: message.role, content: message.content });
+  }
+  flushToolImages();
+  return messages;
+}
+
 const ANTHROPIC_KNOWN_MODELS = [
   'claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5',
   'claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest',
 ];
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

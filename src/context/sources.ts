@@ -1,10 +1,12 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, TFile, TFolder, MarkdownView, FileView } from 'obsidian';
 import { estimateTokens } from '../utils/tokens';
 import { uid } from '../utils/dom';
 import { fetchWithSafeRedirects, parseHttpUrl } from '../utils/safe_web';
-import { extractPdfTextFromArrayBuffer, formatPdfDiagnosticMarkdown } from '../utils/pdf';
+import { extractPdfTextFromArrayBuffer, formatPdfDiagnosticMarkdown, type PdfReadTask } from '../utils/pdf';
 import { bytesToBase64 } from '../utils/image';
+import { extractVaultPdfCached, vaultImageDataUriCached } from '../utils/media_cache';
+import { inferSelectionLanguage } from '../utils/translation_target';
 import type { ContextItem } from '../types';
 
 /* ============================================================
@@ -125,18 +127,22 @@ export function getCurrentSelection(app: App): SelectionInfo | null {
  *  route image files into the base64-image attach flow (so multimodal
  *  providers see them) instead of trying cachedRead which would
  *  produce binary garbage. */
-const IMAGE_EXT = /^(png|jpg|jpeg|gif|webp|bmp|svg)$/i;
+const IMAGE_EXT = /^(png|jpg|jpeg|gif|webp)$/i;
 /** Common MIME guesses for image extensions, so the data URI sets a
  *  reasonable Content-Type even when Obsidian doesn't supply one. */
 const IMAGE_MIME: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-  gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml',
+  gif: 'image/gif', webp: 'image/webp',
 };
 const MAX_PDF_BYTES = 50 * 1024 * 1024;
 const PDF_CONTEXT_MAX_PAGES = 80;
 const PDF_CONTEXT_MAX_CHARS = 100_000;
 
-export async function resolveFile(app: App, file: TFile): Promise<ContextItem> {
+export async function resolveFile(
+  app: App,
+  file: TFile,
+  options: { pdfTask?: PdfReadTask; pdfQuery?: string } = {},
+): Promise<ContextItem> {
   const ext = (file.extension || '').toLowerCase();
 
   // Images → attach as inline base64 image so multimodal providers receive
@@ -144,22 +150,21 @@ export async function resolveFile(app: App, file: TFile): Promise<ContextItem> {
   // it would be silently turned into mojibake by cachedRead.
   if (IMAGE_EXT.test(ext)) {
     try {
-      const buf = await app.vault.readBinary(file);
-      if (buf.byteLength > MAX_IMAGE_BYTES) {
+      const size = file.stat?.size ?? 0;
+      if (size > MAX_IMAGE_BYTES) {
         return {
           id: uid(), kind: 'file', label: file.basename + '.' + ext,
           detail: file.path,
-          content: `### Image (skipped): ${file.path} — ${humanSize(buf.byteLength)} exceeds 5 MB cap.`,
+          content: `### Image (skipped): ${file.path} — ${humanSize(size)} exceeds 5 MB cap.`,
           tokens: 0, pinned: false,
         };
       }
-      const bytes = new Uint8Array(buf);
-      const dataUri = `data:${IMAGE_MIME[ext] ?? 'image/png'};base64,${bytesToBase64(bytes)}`;
+      const { value: dataUri } = await vaultImageDataUriCached(app, file, IMAGE_MIME[ext] ?? 'image/png');
       return {
         id: uid(), kind: 'image', label: file.basename + '.' + ext,
         detail: file.path,
         content: dataUri,
-        tokens: Math.ceil(buf.byteLength / 1024),
+        tokens: Math.ceil(size / 1024),
         pinned: false,
       };
     } catch (e) {
@@ -182,6 +187,7 @@ export async function resolveFile(app: App, file: TFile): Promise<ContextItem> {
       detail: file.path,
       content: `### File: ${file.path}\n\n${content}`,
       tokens: estimateTokens(content),
+      language: inferSelectionLanguage(content),
       pinned: false,
     };
   }
@@ -197,11 +203,11 @@ export async function resolveFile(app: App, file: TFile): Promise<ContextItem> {
       };
     }
     try {
-      const buf = await app.vault.readBinary(file);
-      const res = await extractPdfTextFromArrayBuffer(buf, {
+      const { value: res } = await extractVaultPdfCached(app, file, {
         maxPages: PDF_CONTEXT_MAX_PAGES,
         maxChars: PDF_CONTEXT_MAX_CHARS,
-        task: 'auto',
+        task: options.pdfTask ?? 'auto',
+        query: options.pdfQuery,
       });
       const warnings = res.warnings.length ? `\n\nWarnings:\n${res.warnings.map(w => `- ${w}`).join('\n')}` : '';
       const content = `### PDF: ${file.path}\n\n${formatPdfDiagnosticMarkdown(res)}\n\n---\n${res.text}${warnings}`;
@@ -209,9 +215,10 @@ export async function resolveFile(app: App, file: TFile): Promise<ContextItem> {
         id: uid(),
         kind: 'file',
         label: file.basename + '.pdf',
-        detail: `${file.path} · ${res.pageCount} pages · read ${res.pageLabel}`,
+        detail: file.path,
         content,
         tokens: estimateTokens(content),
+        language: inferSelectionLanguage(res.text),
         pinned: false,
       };
     } catch (e) {
@@ -325,6 +332,7 @@ export function makeSelectionItem(sel: SelectionInfo): ContextItem {
     source: sel.source,
     content: `### Selection (from ${sel.source}${sel.file ? `, ${sel.file.path}` : ''}):\n\n${sel.text}`,
     tokens: estimateTokens(sel.text),
+    language: inferSelectionLanguage(sel.text),
     pinned: false,
   };
 }
@@ -332,7 +340,16 @@ export function makeSelectionItem(sel: SelectionInfo): ContextItem {
 const TEXT_EXT = /\.(md|markdown|txt|json|csv|tsv|log|py|js|ts|jsx|tsx|css|html|xml|yaml|yml|toml|ini|sh|bash|zsh|rs|go|java|c|cpp|h|hpp|swift|kt|sql|graphql|env|gitignore|dockerfile|tex|bib|r|jl|lua|vim|asm)$/i;
 
 export async function resolveDroppedFile(f: File): Promise<ContextItem> {
-  if (f.type.startsWith('image/')) return resolveImageFile(f);
+  if (f.type.startsWith('image/') || IMAGE_EXT.test(fileExtension(f.name))) {
+    const mime = supportedImageMime(f);
+    if (mime) return resolveImageFile(f, mime);
+    return {
+      id: uid(), kind: 'file', label: f.name,
+      detail: `${humanSize(f.size)} · unsupported image`,
+      content: `### Image (unsupported): ${f.name}\n\nConvert to PNG, JPEG, GIF, or WebP before attaching.`,
+      tokens: 0, pinned: false,
+    };
+  }
   if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
     if (f.size > MAX_PDF_BYTES) {
       return {
@@ -355,6 +372,7 @@ export async function resolveDroppedFile(f: File): Promise<ContextItem> {
         detail: `${humanSize(f.size)} · PDF · ${res.pageCount} pages · read ${res.pageLabel}`,
         content,
         tokens: estimateTokens(content),
+        language: inferSelectionLanguage(res.text),
         pinned: false,
       };
     } catch (e) {
@@ -374,6 +392,7 @@ export async function resolveDroppedFile(f: File): Promise<ContextItem> {
       detail: `${humanSize(f.size)} · text`,
       content: `### File: ${f.name}\n\n${trimmed}${text.length > trimmed.length ? '\n\n[truncated]' : ''}`,
       tokens: estimateTokens(trimmed),
+      language: inferSelectionLanguage(trimmed),
       pinned: false,
     };
   }
@@ -388,21 +407,35 @@ export async function resolveDroppedFile(f: File): Promise<ContextItem> {
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;     // 5 MB hard cap
 
-export async function resolveImageFile(f: File): Promise<ContextItem> {
+export async function resolveImageFile(f: File, resolvedMime = supportedImageMime(f)): Promise<ContextItem> {
+  if (!resolvedMime) throw new Error('Unsupported image type. Use PNG, JPEG, GIF, or WebP.');
   if (f.size > MAX_IMAGE_BYTES) {
     throw new Error(`Image too large (${(f.size / 1024 / 1024).toFixed(1)} MB > 5 MB cap). Resize and retry.`);
   }
   const buf = await f.arrayBuffer();
   // Convert to base64 (chunked to avoid call-stack overflow on large files)
   const bytes = new Uint8Array(buf);
-  const dataUri = `data:${f.type || 'image/png'};base64,${bytesToBase64(bytes)}`;
+  const dataUri = `data:${resolvedMime};base64,${bytesToBase64(bytes)}`;
   return {
     id: uid(), kind: 'image', label: f.name,
-    detail: `${humanSize(f.size)} · ${f.type || 'image'}`,
+    detail: `${humanSize(f.size)} · ${resolvedMime}`,
     content: dataUri,
     tokens: Math.ceil(f.size / 1024),    // rough — varies by model
     pinned: false,
   };
+}
+
+function supportedImageMime(file: Pick<File, 'name' | 'type'>): string | null {
+  const ext = fileExtension(file.name).toLowerCase();
+  const byExtension = IMAGE_MIME[ext];
+  if (!byExtension) return null;
+  if (!file.type || file.type === 'application/octet-stream') return byExtension;
+  return file.type === byExtension ? byExtension : null;
+}
+
+function fileExtension(name: string): string {
+  const match = /\.([^.]+)$/.exec(name);
+  return match?.[1] ?? '';
 }
 
 function humanSize(b: number): string {
@@ -419,6 +452,7 @@ export function makeCurrentFileItem(file: TFile, content: string): ContextItem {
     detail: file.path,
     content: `### Current file: ${file.path}\n\n${content}`,
     tokens: estimateTokens(content),
+    language: inferSelectionLanguage(content),
     pinned: false,
     isCurrent: true,
   };
@@ -483,4 +517,4 @@ export function listTagsForPicker(_app: App, _query: string, _limit = 20): strin
   void _limit;
   return [];
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Unified `skill` tool — replaces the legacy `discover_skills` + `run_skill`
  * pair. The model now sees a single tool with one input (`skill: string`,
@@ -15,11 +15,11 @@
  * backwards compatibility but are marked deprecated in their descriptions.
  */
 import type { App } from 'obsidian';
-import { discoverSkills, getSkill, type Skill } from '../skills';
+import { discoverSkills, type Skill } from '../skills';
 import { activeSkillNames } from '../skill_activation';
 import { recordSkillUsage } from '../skill_usage';
 import { renderSkillBody } from '../skill_render';
-import { buildTool, type ToolImpl, type PermissionResult } from './_shared';
+import { buildTool, type ToolImpl, type PermissionResult, type ToolRunResult } from './_shared';
 
 /** Allowlist of "safe" skill fields. A skill with ONLY these populated can run
  *  without per-call approval. As soon as a skill carries `allowedTools`,
@@ -27,7 +27,7 @@ import { buildTool, type ToolImpl, type PermissionResult } from './_shared';
  *  approval. Mirrors upstream Claude Code's SAFE_SKILL_PROPERTIES. */
 const SAFE_SKILL_KEYS: ReadonlySet<keyof Skill> = new Set<keyof Skill>([
   'name', 'title', 'description', 'whenToUse', 'triggers',
-  'paths', 'argumentHint', 'userInvocable', 'disableModelInvocation',
+  'paths', 'requiredTools', 'argumentHint', 'userInvocable', 'disableModelInvocation',
   'path', 'source', 'body',
 ]);
 
@@ -57,34 +57,43 @@ export async function listAvailableSkills(app: App): Promise<Skill[]> {
   });
 }
 
+async function resolveAvailableSkill(app: App, requested: string): Promise<Skill | null> {
+  const available = await listAvailableSkills(app);
+  const exact = available.find(skill => skill.name === requested);
+  if (exact) return exact;
+  const normalized = requested.trim().toLowerCase();
+  if (!normalized) return null;
+  const relaxed = available.filter(skill =>
+    skill.name.toLowerCase() === normalized || skill.title.toLowerCase() === normalized);
+  return relaxed.length === 1 ? relaxed[0] : null;
+}
+
 export const skillTool: ToolImpl = buildTool({
   spec: {
     name: 'skill',
     description:
-      'Execute a vault skill (a markdown-authored playbook). Skills are listed in ' +
-      'the system prompt under "Available Skills". When the user request matches ' +
-      'a skill, call this tool with the skill name BEFORE any other action — the ' +
-      'skill body provides domain-specific instructions. Pass `args` for skills ' +
-      'that accept free-form arguments.',
+      'Load one specialized playbook from "Available Skills". Invoke it once when its workflow materially matches the request, before task-specific tool calls. Skip it for direct answers and routine edits. The result supplies instructions and automatically loads any specialized tools declared by that skill.',
     parameters: {
       type: 'object',
       properties: {
-        skill: { type: 'string', description: 'Skill name (kebab-case, e.g. "obsidian-canvas").' },
-        args: { type: 'string', description: 'Optional free-form argument string the skill body can reference via $ARGUMENTS.' },
+        skill: { type: 'string', minLength: 1, maxLength: 120, description: 'Exact skill name from "Available Skills".' },
+        args: { type: 'string', maxLength: 4000, description: 'Optional task-specific arguments referenced by the playbook as $ARGUMENTS.' },
       },
       required: ['skill'],
+      additionalProperties: false,
     },
   },
   describe: a => `skill: ${a.skill}${a.args ? ` (${String(a.args).slice(0, 40)})` : ''}`,
   searchHint: 'invoke a markdown-authored vault playbook',
+  searchTags: ['workflow', 'domain instructions', '技能', '工作流'],
   isReadOnly: () => true,   // injects content; doesn't mutate vault
   isConcurrencySafe: () => false, // skill body might prepare follow-up tool calls — keep sequential
-  maxResultSizeChars: 400_000,    // skill bodies can be long; bump above the default 100k
+  maxResultSizeChars: 80_000,
   async checkPermissions(_app, args): Promise<PermissionResult> {
     const name = String(args?.skill ?? '');
     if (!name) return { behavior: 'deny', message: 'Missing skill name.' };
-    const skill = await getSkill(_app, name);
-    if (!skill) return { behavior: 'deny', message: `Unknown skill "${name}".` };
+    const skill = await resolveAvailableSkill(_app, name);
+    if (!skill) return { behavior: 'deny', message: `Skill "${name}" is not available in the current context.` };
     if (skill.disableModelInvocation) {
       return { behavior: 'deny', message: `Skill "${name}" is user-invocable only.` };
     }
@@ -93,14 +102,14 @@ export const skillTool: ToolImpl = buildTool({
     if (skillHasOnlySafeProperties(skill)) return { behavior: 'allow' };
     return { behavior: 'ask', message: `Run skill: ${name}` };
   },
-  run: async (app, args) => {
+  run: async (app, args): Promise<ToolRunResult | string> => {
     const name = String(args?.skill ?? '');
     if (!name) return 'Error: skill name is required.';
-    const skill = await getSkill(app, name);
+    const skill = await resolveAvailableSkill(app, name);
     if (!skill) {
-      const all = await discoverSkills(app);
-      const known = all.map(s => s.name).slice(0, 12).join(', ') || '(none installed)';
-      return `Error: no skill named "${name}". Available: ${known}.`;
+      const available = await listAvailableSkills(app);
+      const known = available.map(item => item.name).slice(0, 12).join(', ') || '(none available)';
+      return `Error: skill "${name}" is not available in the current context. Available: ${known}.`;
     }
     if (skill.disableModelInvocation) {
       return `Error: skill "${name}" is user-invocable only and cannot be called by the model.`;
@@ -109,15 +118,21 @@ export const skillTool: ToolImpl = buildTool({
     // forked-skill runtime is wired into the loop, this branch is intercepted
     // upstream before run() is called. If we reach here for a fork skill, it
     // means the runtime hasn't been hooked up — fall back to inline.
-    recordSkillUsage(app, name);
-    const body = await renderSkillBody(app, skill, typeof args?.args === 'string' ? args.args : '');
+    const argCandidate = args?.args as unknown;
+    const argText = typeof argCandidate === 'string' ? argCandidate.slice(0, 4000) : '';
+    const body = await renderSkillBody(app, skill, argText);
+    recordSkillUsage(app, skill.name);
     const head = `# Skill: ${skill.title}\n\n_${skill.description}_\n`;
     const meta: string[] = [];
     if (skill.whenToUse) meta.push(`**When to use**: ${skill.whenToUse}`);
-    if (args?.args) meta.push(`**Args**: ${String(args.args)}`);
+    if (argText) meta.push(`**Args**: ${argText}`);
+    if (skill.requiredTools?.length) meta.push(`**Tools loaded for this workflow**: ${skill.requiredTools.join(', ')}`);
     if (skill.allowedTools?.length) meta.push(`**Tools allowed for this skill**: ${skill.allowedTools.join(', ')}`);
     const metaBlock = meta.length ? `\n${meta.join('\n')}\n` : '';
-    return `${head}${metaBlock}\n---\n\n${body}`;
+    return {
+      text: `${head}${metaBlock}\n---\n\n${body}`,
+      loadedToolNames: skill.requiredTools,
+    };
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

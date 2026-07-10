@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+
 import { getCurrentSelection } from '../../context/sources';
 import { buildTool, type ToolImpl } from './_shared';
 
@@ -10,13 +10,14 @@ export const getSelection: ToolImpl = buildTool({
   describe: () => 'get selection',
   spec: {
     name: 'get_selection',
-    description: 'Return the user\'s current text selection from file content or Glossa output. Returns "" when nothing relevant is selected.',
-    parameters: { type: 'object', properties: {} },
+    description: 'Return text the user explicitly selected in file content or Glossa output. Use only when the request refers to a selection; the open file is provided separately as current context. Returns "" when nothing relevant is selected.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
   run: async (app) => {
     const sel = getCurrentSelection(app);
     if (!sel || !sel.text) return '';
-    return `Source: ${sel.source}${sel.file ? `, ${sel.file.path}` : ''}\n\n${sel.text}`;
+    const cap = 50_000;
+    const text = sel.text.length > cap ? `${sel.text.slice(0, cap)}\n\n[selection truncated at ${cap} chars]` : sel.text;
+    return `Source: ${sel.source}${sel.file ? `, ${sel.file.path}` : ''}\n\n${text}`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

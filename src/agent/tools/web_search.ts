@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { requestUrl } from 'obsidian';
 import { buildTool, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects } from '../../utils/safe_web';
@@ -13,6 +13,7 @@ export interface SearchResult {
   source: string;
   score?: number;
   rank_reason?: string;
+  identity_score?: number;
 }
 
 export const webSearch: ToolImpl = buildTool({
@@ -20,8 +21,10 @@ export const webSearch: ToolImpl = buildTool({
   isReadOnly: () => true,
   isDestructive: () => false,
   isConcurrencySafe: () => true,
+  shouldDefer: true,
   checkPermissions: async (app) => webReadPermission(app, 'Web search requires approval.'),
   searchHint: 'search public web current sources',
+  searchTags: ['raw search results', 'source candidates', '网页搜索', '查找来源'],
   describe: a => `search web "${String(a.query ?? '').slice(0, 80)}"`,
   preview: async (a) => {
     const provider = typeof a.provider === 'string' && a.provider.trim() ? a.provider.trim() : 'settings default';
@@ -37,23 +40,19 @@ export const webSearch: ToolImpl = buildTool({
   },
   spec: {
     name: 'web_search',
-    description: [
-      'Search the public web and return structured source candidates. Use this before web_fetch or download_file when the URL is unknown.',
-      'Provider is configured in Settings → Advanced → Web research. Auto uses free vertical sources for papers/GitHub/docs before fallback search; Brave/Tavily/Exa/SerpAPI require API keys.',
-      'Use allowed_domains to restrict sources and blocked_domains to exclude domains.',
-      'Network egress requires approval.',
-    ].join('\n'),
+    description: 'Return a raw ranked list of public web source candidates without fetching page content. Prefer web_research for normal research; use this only when you need to inspect or choose search results yourself. Network access requires approval.',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Search query.' },
+        query: { type: 'string', minLength: 2, description: 'Focused public web search query.' },
         allowed_domains: { type: 'array', items: { type: 'string' }, description: 'Optional domains to include, e.g. ["github.com"].' },
         blocked_domains: { type: 'array', items: { type: 'string' }, description: 'Optional domains to exclude.' },
-        max_results: { type: 'number', description: 'Maximum results to return. Default 8, max 20.' },
-        provider: { type: 'string', description: 'Optional override: auto, duckduckgo, brave, tavily, exa, or serpapi. Defaults to settings.' },
+        max_results: { type: 'integer', minimum: 1, maximum: 20, description: 'Maximum results to return. Default 8.' },
+        provider: { type: 'string', enum: ['auto', 'duckduckgo', 'brave', 'tavily', 'exa', 'serpapi'], description: 'Optional provider override. Defaults to plugin settings.' },
         api_key: { type: 'string', description: 'Optional provider API key override for this call. Prefer settings.' },
       },
       required: ['query'],
+      additionalProperties: false,
     },
   },
   run: async (_app, args, ctx) => {
@@ -122,16 +121,15 @@ export async function runWebSearchProvider(provider: WebSearchProvider, query: s
 
 async function autoSearch(query: string, maxResults: number, signal?: AbortSignal): Promise<SearchResult[]> {
   const tasks: Array<Promise<SearchResult[]>> = [];
-  if (looksAcademicQuery(query)) tasks.push(academicFallbackSearch(query, maxResults, signal));
+  const academic = looksAcademicQuery(query);
+  if (academic) tasks.push(academicFallbackSearch(query, maxResults, signal));
   if (looksGithubQuery(query)) tasks.push(githubFallbackSearch(query, maxResults, signal));
   const docs = docsFallbackSearch(query);
   if (docs.length) tasks.push(Promise.resolve(docs));
-
-  if (!tasks.length) {
-    tasks.push(duckDuckGoSearch(query, signal).catch(() => []));
-  } else if (!looksAcademicQuery(query)) {
-    tasks.push(duckDuckGoSearch(query, signal).catch(() => []));
-  }
+  // A vertical index can miss author-hosted PDFs and niche project pages.
+  // Academic fallback already includes one exact-title SERP pass; avoid issuing
+  // duplicate DuckDuckGo requests that can trigger throttling.
+  if (!academic) tasks.push(duckDuckGoSearch(query, signal).catch(() => []));
 
   const settled = await Promise.allSettled(tasks);
   const merged = settled.flatMap(r => r.status === 'fulfilled' ? r.value : []);
@@ -160,6 +158,8 @@ export function rankSearchResults(
 }
 
 async function duckDuckGoSearch(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
+  const htmlResults = await duckDuckGoHtmlSearch(query, signal).catch(() => []);
+  if (htmlResults.length) return htmlResults;
   const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
   const json = await fetchJson(url, { method: 'GET' }, signal, true, 8_000);
   return parseDuckDuckGoResults(json);
@@ -167,11 +167,13 @@ async function duckDuckGoSearch(query: string, signal?: AbortSignal): Promise<Se
 
 async function academicFallbackSearch(query: string, maxResults: number, signal?: AbortSignal): Promise<SearchResult[]> {
   const academicQuery = cleanAcademicQuery(query);
-  const [openAlex, arxiv] = await Promise.all([
+  const [openAlex, arxiv, duckDuckGo, yahoo] = await Promise.all([
     openAlexSearch(academicQuery, maxResults, signal).catch(() => []),
     arxivSearch(academicQuery, maxResults, signal).catch(() => []),
+    duckDuckGoHtmlSearch(`"${academicQuery}" filetype:pdf`, signal).catch(() => []),
+    yahooHtmlSearch(`"${academicQuery}" filetype:pdf`, signal).catch(() => []),
   ]);
-  return rankSearchResults(academicQuery, [...openAlex, ...arxiv], { preferDownloads: true }).slice(0, maxResults);
+  return rankSearchResults(academicQuery, [...openAlex, ...arxiv, ...duckDuckGo, ...yahoo], { preferDownloads: true }).slice(0, maxResults);
 }
 
 async function openAlexSearch(query: string, maxResults: number, signal?: AbortSignal): Promise<SearchResult[]> {
@@ -181,23 +183,99 @@ async function openAlexSearch(query: string, maxResults: number, signal?: AbortS
   const out: SearchResult[] = [];
   for (const row of rows) {
     const title = cleanText(String(row?.title ?? ''));
-    const pdf = stringOrEmpty(row?.primary_location?.pdf_url) || stringOrEmpty(row?.open_access?.oa_url);
-    const landing = stringOrEmpty(row?.primary_location?.landing_page_url) || stringOrEmpty(row?.doi);
-    const url = pdf || landing;
-    if (!title || !url) continue;
-    const result = makeResult(
-      title,
-      url,
-      [
-        row?.publication_year ? String(row.publication_year) : '',
-        row?.doi ? `DOI ${String(row.doi).replace(/^https?:\/\/doi\.org\//, '')}` : '',
-        row?.open_access?.is_oa ? 'open access' : '',
-      ].filter(Boolean).join(' · '),
-      'openalex',
-    );
+    if (!title) continue;
+    const candidates = openAlexLocationCandidates(row);
+    const snippet = [
+      row?.publication_year ? String(row.publication_year) : '',
+      row?.doi ? `DOI ${String(row.doi).replace(/^https?:\/\/doi\.org\//, '')}` : '',
+      row?.open_access?.is_oa ? 'open access' : '',
+    ].filter(Boolean).join(' · ');
+    for (const candidate of candidates.slice(0, 5)) {
+      const result = makeResult(title, candidate.url, [snippet, candidate.label].filter(Boolean).join(' · '), candidate.source);
+      if (result) out.push(result);
+    }
+  }
+  return out;
+}
+
+export async function findDownloadCandidates(
+  query: string,
+  maxResults: number,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const cleaned = cleanAcademicQuery(query);
+  const merged = looksAcademicQuery(query)
+    ? await academicFallbackSearch(query, maxResults * 2, signal).catch(() => [])
+    : await autoSearch(query, maxResults * 2, signal).catch(() => []);
+  const ranked = rankSearchResults(cleaned, merged, { preferDownloads: true });
+  const titleTerms = normalizedTitleTerms(cleaned);
+  if (looksAcademicQuery(query) && titleTerms.length >= 4 && !/10\.\d{4,9}\//.test(query)) {
+    return ranked
+      .map(result => ({ ...result, identity_score: titleIdentityScore(cleaned, result.title) }))
+      .filter(result => (result.identity_score ?? 0) >= 0.72)
+      .sort((a, b) => (b.identity_score ?? 0) - (a.identity_score ?? 0) || (b.score ?? 0) - (a.score ?? 0))
+      .slice(0, maxResults);
+  }
+  return ranked.slice(0, maxResults);
+}
+
+export function titleIdentityScore(query: string, title: string): number {
+  const queryTerms = normalizedTitleTerms(query);
+  const titleTerms = normalizedTitleTerms(title);
+  if (!queryTerms.length || !titleTerms.length) return 0;
+  const titleSet = new Set(titleTerms);
+  const overlap = queryTerms.filter(term => titleSet.has(term)).length;
+  const coverage = overlap / queryTerms.length;
+  const precision = overlap / titleTerms.length;
+  return Math.round((coverage * 0.8 + precision * 0.2) * 1000) / 1000;
+}
+
+export function parseDuckDuckGoHtml(html: string): SearchResult[] {
+  const blocks = html.match(/<div\b[^>]*class="[^"]*\bresult\b[^"]*"[^>]*>[\s\S]*?<div\b[^>]*class="clear"[^>]*><\/div>[\s\S]*?<\/div>/gi) ?? [];
+  const out: SearchResult[] = [];
+  for (const block of blocks) {
+    const anchor = /<a\b[^>]*class="[^"]*\bresult__a\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+    if (!anchor) continue;
+    const url = unwrapDuckDuckGoUrl(decodeHtmlAttribute(anchor[1]));
+    const title = cleanText(decodeXml(stripHtml(anchor[2])));
+    const snippetMatch = /<a\b[^>]*class="[^"]*\bresult__snippet\b[^"]*"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+    const snippet = snippetMatch ? cleanText(decodeXml(stripHtml(snippetMatch[1]))) : '';
+    const result = makeResult(title, url, snippet, 'duckduckgo-html');
     if (result) out.push(result);
   }
   return out;
+}
+
+async function duckDuckGoHtmlSearch(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const html = await fetchText(url, {
+    method: 'GET',
+    headers: { Accept: 'text/html', 'User-Agent': 'Mozilla/5.0' },
+  }, signal, 12_000);
+  return parseDuckDuckGoHtml(html);
+}
+
+export function parseYahooHtml(html: string): SearchResult[] {
+  const anchors = html.matchAll(/<a\b[^>]*href="([^"]*r\.search\.yahoo\.com\/[^"]*\/RU=[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi);
+  const out: SearchResult[] = [];
+  for (const anchor of anchors) {
+    const heading = /<h3\b[^>]*>([\s\S]*?)<\/h3>/i.exec(anchor[2]);
+    if (!heading) continue;
+    const url = unwrapYahooUrl(decodeHtmlAttribute(anchor[1]));
+    const title = cleanText(decodeXml(stripHtml(heading[1])));
+    const result = makeResult(title, url, '', 'yahoo-html');
+    if (result) out.push(result);
+  }
+  return out;
+}
+
+async function yahooHtmlSearch(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
+  const url = `https://search.yahoo.com/search?p=${encodeURIComponent(query)}`;
+  const html = await fetchText(url, {
+    method: 'GET',
+    headers: { Accept: 'text/html', 'User-Agent': 'Mozilla/5.0' },
+  }, signal, 12_000);
+  return parseYahooHtml(html);
 }
 
 async function arxivSearch(query: string, maxResults: number, signal?: AbortSignal): Promise<SearchResult[]> {
@@ -453,6 +531,16 @@ function tokenize(query: string): string[] {
   return [...new Set(query.toLowerCase().split(/[^a-z0-9\u4e00-\u9fff]+/i).filter(t => t.length >= 2))].slice(0, 12);
 }
 
+function normalizedTitleTerms(value: string): string[] {
+  const stop = new Set(['a', 'an', 'and', 'for', 'from', 'in', 'into', 'of', 'on', 'the', 'to', 'with', 'pdf', 'paper', 'download']);
+  return [...new Set(value
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ')
+    .split(/\s+/)
+    .map(term => term.trim())
+    .filter(term => term.length >= 2 && !stop.has(term)))];
+}
+
 function normalizedUrlKey(raw: string): string {
   try {
     const u = new URL(raw);
@@ -479,8 +567,70 @@ function cleanText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+function openAlexLocationCandidates(row: AnyValue): Array<{ url: string; label: string; source: string }> {
+  const out: Array<{ url: string; label: string; source: string }> = [];
+  const seen = new Set<string>();
+  const add = (value: unknown, label: string, source: string) => {
+    const url = stringOrEmpty(value);
+    if (!url) return;
+    const key = normalizedUrlKey(url);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push({ url, label, source });
+  };
+  add(row?.best_oa_location?.pdf_url, 'best open-access PDF', 'openalex-pdf');
+  add(row?.primary_location?.pdf_url, 'primary PDF', 'openalex-pdf');
+  add(row?.open_access?.oa_url, 'open-access location', 'openalex-oa');
+  const locations = Array.isArray(row?.locations) ? row.locations : [];
+  for (const location of locations) {
+    add(location?.pdf_url, `${String(location?.source?.display_name ?? 'repository')} PDF`, 'openalex-location');
+  }
+  for (const location of locations) {
+    add(location?.landing_page_url, `${String(location?.source?.display_name ?? 'repository')} landing page`, 'openalex-location');
+  }
+  add(row?.primary_location?.landing_page_url, 'primary landing page', 'openalex');
+  add(row?.doi, 'DOI landing page', 'openalex');
+  return out;
+}
+
 function stringOrEmpty(value: unknown): string {
-  return typeof value === 'string' && /^https?:\/\//i.test(value) ? value : '';
+  if (typeof value !== 'string') return '';
+  const cleaned = value.trim().replace(/>+$/, '');
+  return /^https?:\/\//i.test(cleaned) ? cleaned : '';
+}
+
+function unwrapDuckDuckGoUrl(raw: string): string {
+  try {
+    const absolute = raw.startsWith('//') ? `https:${raw}` : raw;
+    const parsed = new URL(absolute, 'https://html.duckduckgo.com/');
+    if (parsed.hostname.endsWith('duckduckgo.com') && parsed.pathname === '/l/') {
+      return parsed.searchParams.get('uddg') ?? absolute;
+    }
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+function unwrapYahooUrl(raw: string): string {
+  const match = /\/RU=([^/]+)\/RK=/i.exec(raw);
+  if (!match) return '';
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return '';
+  }
+}
+
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]+>/g, ' ');
+}
+
+function decodeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_match, decimal) => String.fromCodePoint(Number.parseInt(decimal, 10)));
 }
 
 function looksAcademicQuery(query: string): boolean {
@@ -549,4 +699,4 @@ function decodeXml(text: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'");
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

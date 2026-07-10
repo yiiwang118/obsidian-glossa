@@ -1,339 +1,69 @@
-# tool_search 集成测试方案设计
+# Tool Search 与按需工具契约
 
-> 实装文件留待用户统一测试时再写代码。此文档约定**测什么 / 怎么测 / 断言哪里**。
+本文记录当前已经实现并由自动化测试约束的行为。可执行断言位于
+`tests/tool_contracts.test.cjs`。
 
-## 范围
+## 目标
 
-`tool_search` 工具的核心契约（来自 `src/agent/tools/tool_search.ts`）：
+- 默认只向模型发送高频核心工具，降低每轮 schema 和提示缓存开销。
+- 专用工具必须能够被真正加载，而不是仅把 schema 作为普通文本返回。
+- 搜索支持英文、常见中文能力词和精确工具名。
+- 动态加载不得绕过只读模式、Plan 模式、Provider 限制或插件桥可用性。
+- 已弃用工具继续兼容历史调用，但不再向模型展示或推荐。
+- 核心上下文控制保持常驻；批量读取和 Skill 校验按需加载。
 
-1. **关键词搜索模式**：query 字符串 → 在所有 `shouldDefer:true` 的工具中，按
-   `name×3 + searchHint×2 + description×1` 计分，返回 top-N 匹配 + 完整 schema
-2. **显式选择模式**：`select:foo,bar` → 直接返回这些工具的 schema（不限于 deferred）
-3. **deferred 工具过滤**：默认 spec 列表必须排除 `shouldDefer:true` 的工具
-4. **错误路径**：空 query / 无 token / 无命中 → 各自的错误信息
+## 调用流程
 
-外加：`tools.ts` 的 `listToolSpecs()` 过滤逻辑（deferred 排除 + bridge 排除）
-
----
-
-## 测试文件布局
-
-新建 `tests/tool_search.test.cjs`，遵循现有测试范式（每个 `.test.cjs` 导出
-`async function run(t, loadModule)`，使用 esbuild 内联打包）。
-
-依赖：
-- `src/agent/tools.ts`（导出 TOOLS, listToolSpecs, getTool）
-- `src/agent/tools/tool_search.ts`（被测）
-- `src/agent/plugin_bridges.ts`（probeBridges / isBridgeActive — 桥过滤）
-- `src/agent/tools/_shared.ts`（buildTool — 用来在测试中构造 mock 工具）
-
----
-
-## 测试场景清单
-
-每个场景标注 **预期断言点**（assertion targets）。
-
-### 场景 1: deferred 工具不出现在默认 spec 列表
-
-```
-setup: 加载 tools.ts 模块；记录 listToolSpecs() 返回的 name 集合
-expect:
-  - 不包含 'edit_section'        (shouldDefer:true)
-  - 不包含 'append_to_note'      (shouldDefer:true)
-  - 不包含 'discover_skills'     (shouldDefer:true)
-  - 不包含 'run_skill'           (shouldDefer:true)
-  - 包含 'patch_note'             (默认可见)
-  - 包含 'read_note'              (默认可见)
-  - 包含 'tool_search'            (自己也不被 defer)
+```text
+首轮 provider 请求
+  -> 仅包含核心工具
+  -> 模型调用 tool_search({query}) 或 tool_search({exact_names})
+  -> tool_search 返回 loadedToolNames
+  -> agent loop 按权限和桥状态过滤
+  -> 下一轮 provider 请求加入通过过滤的完整 ToolSpec
+  -> 模型直接调用已加载工具
 ```
 
-### 场景 2: 桥工具在 plugin 未检测到时被过滤
-
-```
-setup: 默认状态下 probeBridges 没运行（或 app mock 没装这些 plugin）
-expect:
-  - listToolSpecs() 不包含 'dataview_query'
-  - listToolSpecs() 不包含 'templater_render'
-  - listToolSpecs() 不包含 'tasks_query'
-  - listToolSpecs() 不包含 'bases_query'
-note: 此场景需要确保 plugin_bridges 模块的 activeBridges 是空集
-```
-
-### 场景 3: 桥工具在 plugin 检测到后出现
-
-```
-setup:
-  mockApp = { plugins: { plugins: { dataview: { api: {} } } } }
-  调用 probeBridges(mockApp)
-expect:
-  - listToolSpecs() 包含 'dataview_query'
-  - listToolSpecs() 仍不包含 'templater_render' (其 plugin 未 mock)
-```
-
-### 场景 4: 关键词搜索 — 命中 deferred 工具
-
-```
-setup: query = "section edit"
-call: toolSearchTool.run(_app, {query})
-expect:
-  - 结果字符串包含 'edit_section'   (因 searchHint 含 'edit')
-  - 结果字符串包含 '## edit_section' (markdown header 格式)
-  - 结果字符串包含 '"parameters"'    (schema 已嵌入)
-  - 返回 1 条 (max_results 默认 5，但只有 edit_section 命中)
-```
-
-### 场景 5: 关键词搜索 — name×3 weight
-
-```
-setup: 假设 query = "skill"
-expect:
-  - 'run_skill' 和 'discover_skills' 都命中
-  - 'run_skill' 的 name 含 'skill' (3 分)
-  - 'discover_skills' 的 name 含 'skill' (3 分)
-  - 两者并列, 在 top-N 内
-```
-
-### 场景 6: 关键词搜索 — searchHint×2 weight
-
-```
-setup: query = "deprecated legacy"   (这些词只在 deprecated 工具的 searchHint 出现)
-expect:
-  - 命中 edit_section / append_to_note (deprecated, searchHint 含 'legacy')
-  - score 高于仅 description 命中的工具
-```
-
-### 场景 7: 显式 select 模式
-
-```
-setup: query = "select:edit_section,run_skill"
-expect:
-  - 结果含 'edit_section' (完整 schema)
-  - 结果含 'run_skill' (完整 schema)
-  - 不含其他工具
-  - 即使被 select 的工具是 deferred,也能取
-```
-
-### 场景 8: 显式 select 模式 — 非 deferred 工具也能取
-
-```
-setup: query = "select:read_note,patch_note"
-expect:
-  - 返回这两个工具的 schema
-note: select 模式不限于 deferred (per tool_search.ts 实现)
-```
-
-### 场景 9: 显式 select — 未知工具静默跳过
-
-```
-setup: query = "select:edit_section,does_not_exist,run_skill"
-expect:
-  - 返回 edit_section + run_skill (2 个)
-  - 不报错; does_not_exist 被跳过
-```
-
-### 场景 10: 显式 select — 全部未知
-
-```
-setup: query = "select:nope1,nope2"
-expect:
-  - 返回错误字符串包含 "No tool matched"
-```
-
-### 场景 11: 空 query 拒绝
-
-```
-setup: query = "" / "   "
-expect:
-  - 返回 'Error: query is required.'
-```
-
-### 场景 12: 无 token query 拒绝
-
-```
-setup: query = "!!! @@@"      (无字母数字 token)
-expect:
-  - 返回 'Error: query has no searchable tokens.'
-```
-
-### 场景 13: 无命中
-
-```
-setup: query = "asdfqwertyzxcv"
-expect:
-  - 返回字符串包含 "No deferred tools matched"
-  - 列出可用 deferred 工具的 name 列表
-```
-
-### 场景 14: max_results 截断
-
-```
-setup: query = "edit"  (会命中 file_edit / edit_section / append_to_note 等)
-        max_results = 1
-expect:
-  - 返回字符串只含 1 个 "## " header
-  - 最高分的那个 (file_edit 因 name 含 'edit', 但它非 deferred — 只考虑 deferred)
-  - 实际命中 edit_section (deferred, name 含 'edit')
-```
-
-### 场景 15: max_results 上限钳制
-
-```
-setup: max_results = 999
-expect:
-  - 最多返回 20 (tool_search.ts 钳制到 [1, 20])
-```
-
-### 场景 16: 结果格式合约
-
-```
-setup: 任意命中场景
-expect:
-  - 每个工具块以 '## <name>' 开头
-  - 紧跟 description
-  - 含 '```json' 代码围栏
-  - JSON 含 {name, parameters}
-```
-
-### 场景 17: tool_search 自己不被过滤
-
-```
-expect:
-  - listToolSpecs() 包含 'tool_search'
-  - tool_search 自己 shouldDefer 是 falsy (undefined)
-```
-
----
-
-## Mock 策略
-
-测试需要 mock `app` 对象。最小 mock：
-
-```js
-const mockApp = {
-  plugins: {
-    plugins: {
-      // 控制 detect-then-register 状态
-      dataview: { api: { query: async () => ({ successful: true, value: '' }) } },
-      // 不放 templater-obsidian / tasks-plugin → 这两个桥保持 inactive
-    },
-  },
-  vault: { /* 大多数测试用不到 */ },
-};
-```
-
-注意：`plugin_bridges.ts` 的 `probeBridges()` 函数是模块级状态（`activeBridges`
-Set）。**测试之间需要 reset**——可以在每个测试 case 开头：
-
-```js
-const bridges = await loadModule('.../plugin_bridges.ts');
-bridges.probeBridges({ plugins: { plugins: {} } });   // 清空
-```
-
-或者扩展 `plugin_bridges.ts` 暴露一个 `__resetForTests()`（建议加，方便测试）。
-
----
-
-## 边界情况清单
-
-| 边界 | 期望行为 |
-|---|---|
-| query 含 Unicode / emoji | tokenize 跳过非 `[a-z0-9_]+`，但 ASCII 部分仍参与匹配 |
-| 多个工具同分 | 顺序按 `Object.keys(TOOLS)` 插入序（稳定） |
-| `select:` 后空字符串 | 等同于无命中：`"No tool matched any of: "` 后面跟空 |
-| query 含 SQL/HTML 注入字符 | 仅做 token 提取；不会被解释 |
-| TOOLS 在测试期间被 mutate | tool_search 内部 `Object.values(TOOLS)` 读时态值 — 测试要注意状态隔离 |
-| alias 命中 | 当前实现 score 函数只看 `tool.spec.name`，不看 aliases；如果未来要支持，加测 case |
-
----
-
-## 测试代码骨架
-
-文件位置：`tests/tool_search.test.cjs`
-
-```js
-const path = require('path');
-
-exports.run = async (t, loadModule) => {
-  const tools = await loadModule(path.resolve(__dirname, '../src/agent/tools.ts'));
-  const bridges = await loadModule(path.resolve(__dirname, '../src/agent/plugin_bridges.ts'));
-
-  // --- 场景 1: deferred 不出现在默认 spec ---
-  const specs = tools.listToolSpecs();
-  const names = new Set(specs.map(s => s.name));
-  t.ok(!names.has('edit_section'),    'deferred edit_section excluded from default');
-  t.ok(!names.has('run_skill'),       'deferred run_skill excluded from default');
-  t.ok(names.has('patch_note'),       'patch_note in default');
-  t.ok(names.has('tool_search'),      'tool_search itself visible');
-
-  // --- 场景 2/3: 桥过滤 ---
-  bridges.probeBridges({ plugins: { plugins: {} } });
-  t.ok(!new Set(tools.listToolSpecs().map(s => s.name)).has('dataview_query'),
-       'dataview bridge hidden when plugin absent');
-
-  bridges.probeBridges({ plugins: { plugins: { 'dataview': { api: {} } } } });
-  t.ok(new Set(tools.listToolSpecs().map(s => s.name)).has('dataview_query'),
-       'dataview bridge surfaces when plugin present');
-
-  // --- 场景 4: 关键词搜索命中 ---
-  const ts = tools.getTool('tool_search');
-  const r4 = await ts.run({}, { query: 'section edit' });
-  t.ok(r4.includes('edit_section'),   'keyword search hits deferred tool by hint');
-  t.ok(r4.includes('"parameters"'),   'result includes schema JSON');
-
-  // --- 场景 7: select 模式 ---
-  const r7 = await ts.run({}, { query: 'select:edit_section,run_skill' });
-  t.ok(r7.includes('## edit_section'), 'select mode returns edit_section');
-  t.ok(r7.includes('## run_skill'),    'select mode returns run_skill');
-  t.ok(!r7.includes('## patch_note'),  'select mode does not return non-selected');
-
-  // --- 场景 11: 空 query ---
-  const r11 = await ts.run({}, { query: '' });
-  t.ok(r11.startsWith('Error'),       'empty query rejected');
-
-  // --- 场景 13: 无命中 ---
-  const r13 = await ts.run({}, { query: 'asdfqwertyzxcv' });
-  t.ok(r13.includes('No deferred tools matched'), 'no-match returns clear error');
-
-  // --- 场景 14: max_results 截断 ---
-  const r14 = await ts.run({}, { query: 'skill', max_results: 1 });
-  const headers = (r14.match(/^## /gm) ?? []).length;
-  t.eq(headers, 1, 'max_results=1 returns exactly one tool');
-
-  // ... 其余场景按上表展开
-};
-```
-
----
-
-## 推荐对 `plugin_bridges.ts` 加的测试辅助
-
-```ts
-// src/agent/plugin_bridges.ts
-/** Test-only: clear active set + listeners. Production code never calls this. */
-export function __resetForTests(): void {
-  activeBridges.clear();
-  listeners.clear();
-}
-```
-
-加这一行 export 后，每个 case 都能干净启动。
-
----
-
-## 不在本次测试范围的事
-
-- `tool_search` 是否真的被 LLM 在多轮会话里正确调用 → 端到端测试，需要真实
-  provider 模拟，本套件不覆盖
-- view.ts 渲染 tool_search 卡片 → UI 集成测试，独立于这套
-- 性能（10k 工具下的搜索延迟）→ 当前规模不需要
-
----
-
-## 运行命令
-
-```bash
-cd obsidian-glossa
-npm test
-```
-
-测试通过条件：`npm test` 全部通过，0 failed。
+Skill 可以通过 `required-tools` 声明工作流所需的专用工具。调用统一的
+`skill` 工具后，agent loop 使用同一条动态加载路径，因此不需要再调用一次
+`tool_search`。
+
+`context_prune` 不删除聊天或审计记录。它只在下一次 provider 请求前移除
+已完成且不再需要的成功工具调用，并同时移除 assistant tool call 与对应 tool
+result，保持协议配对完整。Skill、工具披露、计划、写入、下载和裁剪工具自身
+不可裁剪；失败结果也会保留，避免丢失诊断证据或重复执行副作用。
+
+`read_note` 支持 1-based 行区间和继续读取元数据。多个明确路径已经给出时，
+模型可以按需加载 `read_files`，一次读取最多 8 个文本文件；PDF 与图片仍分别
+交给 `read_pdf` 和 `view_image`，不把二进制内容误当文本。
+
+## 搜索规则
+
+- 精确名称优先，旧式 `select:name1,name2` 继续兼容。
+- 能力搜索综合工具名、别名、`searchTags`、`searchHint`、描述和参数名。
+- 常见中文能力词会确定性展开，例如“反链”映射到 backlinks，“画布”映射到
+  canvas/node/edge。热路径不依赖 embedding 或网络。
+- 排序先按匹配分数，再按工具名稳定排序；默认最多返回 5 个、上限 8 个。
+- 返回文本只包含已加载名称和短说明。完整 schema 会在下一轮正式进入
+  provider 的 `tools` 字段，避免在聊天历史中重复一份大 JSON。
+
+## 安全边界
+
+- `listToolSpecs()` 统一执行模型隐藏、deferred 和插件桥过滤。
+- 只读或 Plan 模式不会加载写工具；Codex envelope-only 模式不会重新引入
+  被该模式排除的单点写工具。
+- 所有本地工具调用在审批和执行前经过 JSON Schema 子集校验，包括 required、
+  类型、enum、数值/长度范围、数组范围和未知顶层参数。
+- 注册表审计要求名称、描述、必填字段、每个参数说明、搜索元数据和
+  `additionalProperties: false` 保持一致。
+
+## 回归覆盖
+
+- 核心工具数量和总 schema 字符预算。
+- deferred 与已弃用工具可见性。
+- 中文反链、Canvas、批量读取、Skill 校验搜索，精确名称和旧 `select:` 兼容。
+- enum、数值边界和未知参数拒绝。
+- `tool_search` 后下一轮 provider 请求实际出现新 ToolSpec。
+- 只读模式拒绝动态写工具，并把原因返回给模型。
+- 行区间边界、批量请求嵌套参数、上下文裁剪配对和跨轮恢复。
+- `Error:` 工具结果的失败状态，以及连续失败后的收敛保护。

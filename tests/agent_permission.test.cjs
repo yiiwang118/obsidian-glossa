@@ -1,9 +1,6 @@
 const path = require('path');
 
 exports.run = async (t, loadModule) => {
-  const execMod = await loadModule(path.resolve(__dirname, '../src/agent/tools/execute_command.ts'));
-  const tool = execMod.executeCommand;
-
   let executed = false;
   const app = {
     commands: {
@@ -11,13 +8,6 @@ exports.run = async (t, loadModule) => {
       executeCommandById: async () => { executed = true; return true; },
     },
   };
-
-  const perm = await tool.checkPermissions(app, { command_id: 'app:reload-app' });
-  t.eq(perm.behavior, 'deny', 'execute_command checkPermissions hard-denies reload');
-
-  const direct = await tool.run(app, { command_id: 'app:reload-app' });
-  t.ok(/^Error: Command "app:reload-app" is hard-denied/.test(direct), 'execute_command run has defensive hard deny');
-  t.ok(!executed, 'execute_command hard deny prevents direct dispatch');
 
   const loopMod = await loadModule(path.resolve(__dirname, '../src/agent/loop.ts'));
   executed = false;
@@ -60,10 +50,10 @@ exports.run = async (t, loadModule) => {
     onError: e => { error = e; },
   });
 
-  t.ok(final, 'agent loop completes after denied tool result');
-  t.eq(error, '', 'agent loop reports no top-level error for denied tool');
-  t.ok(!executed, 'agent loop checkPermissions deny beats auto-approve');
-  const denied = ended.find(ev => ev.name === 'execute_command' && ev.status === 'denied');
-  t.ok(!!denied, 'agent loop emits denied tool event');
-  t.ok(/hard-denied/.test(denied.result), 'agent loop denied result includes hard-deny reason');
+  t.ok(final, 'agent loop completes after removed tool result');
+  t.eq(error, '', 'agent loop reports no top-level error for removed tool');
+  t.ok(!executed, 'removed execute_command never dispatches an Obsidian command');
+  const blocked = ended.find(ev => ev.name === 'execute_command' && ev.status === 'error');
+  t.ok(!!blocked, 'agent loop emits an error tool event for removed command dispatch');
+  t.ok(/Unknown tool: execute_command/.test(blocked.result), 'removed command dispatch reports unknown tool');
 };

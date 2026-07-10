@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * tasks_query — bridge to the Tasks plugin\'s query DSL.
  *
@@ -55,28 +55,21 @@ export const tasksQuery: ToolImpl = buildTool({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   isDestructive: () => false,
+  shouldDefer: true,
   searchHint: 'query tasks plugin filter due tags status',
+  searchTags: ['task filter', 'due date checklist', '任务查询', '待办筛选'],
   describe: a => `tasks: ${String(a.query ?? '').replace(/\n/g, ' ').slice(0, 60)}`,
   spec: {
     name: 'tasks_query',
-    description: [
-      'Run a Tasks-plugin query against the vault. Requires the Tasks plugin enabled.',
-      '',
-      'Query is the Tasks DSL (one filter per line). Examples:',
-      '  not done',
-      '  due before today',
-      '  tags include #project',
-      '  path includes Daily/',
-      '',
-      'Returns a markdown checklist the model can drop into a note or report.',
-    ].join('\n'),
+    description: 'Run a read-only Tasks-plugin DSL query, with one filter per line, and return matching tasks as Markdown. Use for due/status/tag/path task filters when the Tasks plugin is enabled.',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string' },
-        max_results: { type: 'number', description: 'Default 200.' },
+        query: { type: 'string', minLength: 1, description: 'Tasks DSL filters separated by newlines, for example "not done\ndue before today".' },
+        max_results: { type: 'integer', minimum: 1, maximum: 2000, description: 'Maximum tasks to return. Default 200.' },
       },
       required: ['query'],
+      additionalProperties: false,
     },
   },
   run: async (app, args, ctx) => {
@@ -112,4 +105,4 @@ export const tasksQuery: ToolImpl = buildTool({
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Re-enable review lint rules after dynamic boundary module. */

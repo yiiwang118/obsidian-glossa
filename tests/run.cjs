@@ -96,7 +96,16 @@ async function loadModule(srcPath) {
 
 async function main() {
   const testsDir = path.resolve(__dirname);
-  const files = fs.readdirSync(testsDir).filter(f => f.endsWith('.test.cjs')).sort();
+  const requested = process.argv.slice(2).map(f => path.basename(f)).filter(Boolean);
+  const requestedSet = new Set(requested);
+  const files = fs.readdirSync(testsDir)
+    .filter(f => f.endsWith('.test.cjs'))
+    .filter(f => requestedSet.size === 0 || requestedSet.has(f))
+    .sort();
+  if (requestedSet.size > 0 && files.length === 0) {
+    console.error(`No matching test files: ${requested.join(', ')}`);
+    process.exit(1);
+  }
   console.log(`Running ${files.length} test file${files.length === 1 ? '' : 's'}…\n`);
   for (const f of files) {
     const mod = require(path.join(testsDir, f));

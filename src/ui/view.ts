@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import {
   ItemView, WorkspaceLeaf, MarkdownView, TFile, Notice, Menu,
 } from 'obsidian';
@@ -36,7 +36,29 @@ import type { ApprovalResult } from '../agent/approval';
 import { renderDiffInto } from '../utils/diff';
 import { renderInto, decorateCodeBlocks, trimIncompleteMath } from '../utils/markdown';
 import { t, bi, currentLanguage, onLanguageChange } from '../utils/i18n';
-import { inferSelectionTranslationTarget } from '../utils/translation_target';
+import {
+  buildResponseLanguageHint,
+  inferResponseLanguage,
+  inferSelectionLanguage,
+  inferSelectionTranslationTarget,
+  sourceLanguageLabel,
+} from '../utils/translation_target';
+import { buildTaskContinuityHint } from '../utils/task_continuity';
+import { compactHistoricalToolArgs, compactHistoricalToolResult } from '../utils/tool_context';
+import {
+  earlierHistoryWindow,
+  latestHistoryWindow,
+  newerHistoryWindow,
+  selectChatHistory,
+  type ChatHistoryWindow,
+} from '../utils/chat_history_window';
+import { captureUserPromptSnapshot, visibleUserContent } from '../utils/prompt_snapshot';
+import {
+  buildContextSourceReference,
+  buildCurrentContextPolicyHint,
+  pdfReadTaskForPrompt,
+} from '../utils/context_policy';
+import { shouldReuseRecentVisualContext, visualContinuityHint } from '../utils/visual_context';
 import { loadProjectContext } from '../context/project_context';
 
 export const VIEW_TYPE_GLOSSA = 'glossa-view';
@@ -80,6 +102,13 @@ interface MsgUI {
   actionsEl?: HTMLElement;
   reasoningCard?: HTMLElement;
   reasoningBody?: HTMLElement;
+}
+
+interface PromptExpansion {
+  text: string;
+  expanded: boolean;
+  embeddedSelection: boolean;
+  embeddedCurrentFile: boolean;
 }
 
 interface ThreadRailItem {
@@ -131,18 +160,15 @@ export class GlossaView extends ItemView {
   /** Snapshot of textarea contents when history nav started, so ↓-all-the-way-down
    *  restores what the user was actually typing. */
   private historyDraft = '';
+  private pendingRegeneratePrompt: string | null = null;
+  private recentVisualContext: { images: { dataUri: string; name?: string }[] } | null = null;
   private abortCtl: AbortController | null = null;
   private popup = new Popup();
   private inputTriggerSig = '';
   private msgUIs = new Map<string, MsgUI>();
+  private historyWindow: ChatHistoryWindow = { startTurn: 0, endTurn: -1 };
   private streamingMsgUI: MsgUI | null = null;
   private currentAsstMsg: ChatMessage | null = null;
-  /** LRU cache of rendered message HTML, keyed by `${role}\x00${content}`.
-   *  Populated lazily after the FIRST markdown render of each message;
-   *  consulted on re-renders (loadSession / compact undo / history modal
-   *  preview). Capped at 200 entries — older ones evict on insert. Reset
-   *  is not needed across sessions because the key is content-addressed:
-   *  identical content from any session reuses the same HTML. */
   /** Bumped on every session boundary (newSession / loadSession). Submit()
    *  captures the value at start; every async callback (onText, onTool*,
    *  finalizeAsstRender) checks it before mutating UI / messages. A
@@ -173,6 +199,7 @@ export class GlossaView extends ItemView {
    *  the × click would appear to do nothing. Cleared when the active file
    *  changes to a different path. */
   private dismissedCurrentPath: string | null = null;
+  private autoContextRefreshSeq = 0;
   private sessionCostUSD = 0;
   private sessionInputTokens = 0;
   private sessionOutputTokens = 0;
@@ -698,6 +725,7 @@ export class GlossaView extends ItemView {
      Context bar / selection preview (inline above input)
      ============================================================ */
   private async refreshAutoContext() {
+    const refreshSeq = ++this.autoContextRefreshSeq;
     if (!this.plugin.settings.autoAttachCurrentFile) {
       this.ctx.updateCurrent(null);
     } else {
@@ -713,13 +741,14 @@ export class GlossaView extends ItemView {
         this.ctx.updateCurrent(null);
       } else if (af && af.extension === 'md') {
         const content = await this.app.vault.cachedRead(af);
+        if (refreshSeq !== this.autoContextRefreshSeq || this.app.workspace.getActiveFile()?.path !== af.path) return;
         this.ctx.updateCurrent(makeCurrentFileItem(af, content));
       } else if (af) {
         this.ctx.updateCurrent({
           id: 'current-' + af.path, kind: 'file',
           label: af.basename + '.' + af.extension,
           detail: af.path,
-          content: `### Current file: ${af.path}\n(non-markdown; select text to attach content.)`,
+          content: `### Current file: ${af.path}\n(content loads at send time according to the requested task.)`,
           tokens: 0, pinned: false, isCurrent: true,
         });
       } else {
@@ -727,6 +756,51 @@ export class GlossaView extends ItemView {
       }
     }
     this.refreshSelection();
+  }
+
+  /** Refresh the open source at send time. Markdown picks up the latest edit;
+   * PDF/image resolution stays lazy, and the prompt determines whether a PDF
+   * needs summary sampling, title inspection, or a broader read. */
+  private async hydrateCurrentContextForPrompt(userText: string, sourceAlreadyEmbedded: boolean): Promise<void> {
+    if (!this.plugin.settings.autoAttachCurrentFile) return;
+    const file = this.currentContextFile();
+    if (!file || file.path === this.dismissedCurrentPath || sourceAlreadyEmbedded) return;
+    const expectedPath = file.path;
+    let item: ContextItem;
+    try {
+      item = file.extension === 'md'
+        ? makeCurrentFileItem(file, await this.app.vault.cachedRead(file))
+        : await resolveFile(this.app, file, { pdfTask: pdfReadTaskForPrompt(userText) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      item = {
+        id: `current-${expectedPath}`,
+        kind: 'file',
+        label: file.name,
+        detail: expectedPath,
+        content: `### Current file read failed: ${expectedPath}\n\n${message}`,
+        tokens: 0,
+        pinned: false,
+        isCurrent: true,
+      };
+      quickNotice(`Could not read current file: ${message}`);
+    }
+    if (this.currentContextFile()?.path !== expectedPath || expectedPath === this.dismissedCurrentPath) return;
+    this.ctx.updateCurrent({
+      ...item,
+      id: `current-${expectedPath}`,
+      pinned: false,
+      isCurrent: true,
+    });
+  }
+
+  private currentContextFile(): TFile | null {
+    const active = this.app.workspace.getActiveFile();
+    if (active) return active;
+    const path = this.ctx.list().find(item => item.isCurrent)?.detail;
+    if (!path) return null;
+    const file = this.app.vault.getAbstractFileByPath(path);
+    return file instanceof TFile ? file : null;
   }
 
   private refreshSelection() {
@@ -776,13 +850,16 @@ export class GlossaView extends ItemView {
     const preview = this.compactSelectionPreview(text, isLarge ? 140 : 220);
     setStyle(this.selectionPreviewEl, { display: '' });
     this.selectionPreviewEl.classList.toggle('is-large', isLarge);
-    const ic = el('span', { className: 'nc-selection-preview-icon', parent: this.selectionPreviewEl });
-    setTrustedSvg(ic, ICON.quote);
     const body = el('div', { className: 'nc-selection-preview-body', parent: this.selectionPreviewEl });
     const head = el('div', { className: 'nc-selection-preview-head', parent: body });
     el('span', { className: 'nc-selection-preview-title', text: title, parent: head });
     const meta = el('div', { className: 'nc-selection-preview-meta', parent: body });
     el('span', { className: 'nc-selection-preview-source', text: source, parent: meta });
+    el('span', {
+      className: 'nc-selection-preview-language',
+      text: sourceLanguageLabel(inferSelectionLanguage(text), currentLanguage()),
+      parent: meta,
+    });
     if (sel.file) {
       el('span', { className: 'nc-selection-preview-file', text: sel.file.basename, title: sel.file.path, parent: meta });
     }
@@ -798,7 +875,7 @@ export class GlossaView extends ItemView {
     const hasSelection = !!this.currentSelection?.text.trim();
     const hasDraft = !!this.inputEl.value.trim();
     this.inputEl.placeholder = hasSelection && !hasDraft
-      ? bi('Ask about selection · Enter twice to translate', '询问选区 · 连按 Enter 翻译')
+      ? bi('Ask about the selected content', '询问选中内容')
       : t('placeholder_input');
   }
 
@@ -839,22 +916,6 @@ export class GlossaView extends ItemView {
     const limit = 1600;
     if (text.length <= limit) return text;
     return text.slice(0, limit).trimEnd() + `\n...[truncated ${text.length.toLocaleString()} chars]`;
-  }
-
-  private contextPriorityHint(items: ContextItemRef[], hasExplicitAttachments: boolean) {
-    if (!hasExplicitAttachments) return '';
-    const attached = items.filter(it => !it.isCurrent).map(it => it.detail || it.label).filter(Boolean);
-    const current = items.filter(it => it.isCurrent).map(it => it.detail || it.label).filter(Boolean);
-    return [
-      '<context-priority>',
-      'User-attached files/items are the primary target for phrases like "this file", "this PDF", "uploaded file", or "this image".',
-      current.length
-        ? 'Current/open file context is ambient background only. Do not treat it as the target unless the user explicitly says current/open file.'
-        : '',
-      attached.length ? `Primary attached item(s): ${attached.join('; ')}` : '',
-      current.length ? `Ambient current item(s): ${current.join('; ')}` : '',
-      '</context-priority>',
-    ].filter(Boolean).join('\n');
   }
 
   private contextBarSig = '';
@@ -999,6 +1060,62 @@ export class GlossaView extends ItemView {
   /* ============================================================
      Messages rendering
      ============================================================ */
+  private renderSessionHistory(options: { anchorMessageId?: string; scrollToBottom?: boolean } = {}) {
+    const selected = selectChatHistory(this.session.messages, this.historyWindow);
+    this.historyWindow = selected.window;
+    this.msgUIs.clear();
+    clear(this.messagesEl);
+    this.resetThreadRail();
+    if (!selected.messages.length) {
+      this.renderEmpty();
+      return;
+    }
+
+    this.messagesEl.classList.add('no-anim');
+    if (selected.hasEarlier) this.renderHistoryNavigation('earlier', selected.window, selected.totalTurns);
+    for (const message of selected.messages) this.renderMessage(message);
+    if (selected.hasNewer) this.renderHistoryNavigation('newer', selected.window, selected.totalTurns);
+    this.compactAllProcessGroups();
+
+    window.requestAnimationFrame(() => {
+      this.messagesEl.classList.remove('no-anim');
+      if (options.anchorMessageId) {
+        const anchor = this.msgUIs.get(options.anchorMessageId)?.wrap;
+        if (anchor) this.messagesEl.scrollTop = Math.max(0, anchor.offsetTop - this.messagesEl.offsetTop - 16);
+      } else if (options.scrollToBottom || !selected.hasNewer) {
+        this.scrollToBottom(true);
+      }
+    });
+  }
+
+  private renderHistoryNavigation(kind: 'earlier' | 'newer', window: ChatHistoryWindow, totalTurns: number) {
+    const button = el('button', {
+      className: `nc-history-window-nav ${kind}`,
+      parent: this.messagesEl,
+      type: 'button',
+      attrs: { 'aria-label': kind === 'earlier' ? 'Load earlier conversation turns' : 'Load newer conversation turns' },
+    });
+    const icon = el('span', { className: 'nc-history-window-nav-icon', parent: button });
+    setTrustedSvg(icon, ICON.arrowDown);
+    el('span', {
+      parent: button,
+      text: kind === 'earlier'
+        ? `Earlier turns · showing ${window.startTurn + 1}-${window.endTurn + 1} of ${totalTurns}`
+        : `Newer turns · showing ${window.startTurn + 1}-${window.endTurn + 1} of ${totalTurns}`,
+    });
+    button.onclick = () => {
+      const firstVisibleId = selectChatHistory(this.session.messages, this.historyWindow).messages[0]?.id;
+      this.historyWindow = kind === 'earlier'
+        ? earlierHistoryWindow(this.session.messages, this.historyWindow)
+        : newerHistoryWindow(this.session.messages, this.historyWindow);
+      const next = selectChatHistory(this.session.messages, this.historyWindow);
+      this.renderSessionHistory({
+        anchorMessageId: kind === 'earlier' ? firstVisibleId : next.messages[0]?.id,
+        scrollToBottom: kind === 'newer' && !next.hasNewer,
+      });
+    };
+  }
+
   private renderMessage(m: ChatMessage): MsgUI {
     if (this.emptyEl?.isConnected) { this.emptyEl.remove(); this.emptyEl = null; }
     this.rootEl.classList.add('has-messages');
@@ -1904,7 +2021,9 @@ export class GlossaView extends ItemView {
       // markdown renderer + MathJax typeset and just set textContent. For
       // pure-prose streaming (the common case during a long answer) this
       // turns each tick from ~10-30ms into <1ms.
-      const hasMarkdown = /[`$]|^\s*[#>\-*\d]|\[\[/m.test(tailText);
+      const hasMarkdown = /[`$]|^\s*[#>\-*\d]|\[\[/m.test(tailText)
+        || tailText.includes('\\(')
+        || tailText.includes('\\[');
       if (!hasMarkdown) {
         if (ui._tailPlain !== tailText) {
           ui._tailEl.textContent = tailText;
@@ -2793,7 +2912,7 @@ export class GlossaView extends ItemView {
         return true;
       }
     }
-    const text = userMsgs[this.historyCursor].content ?? '';
+    const text = visibleUserContent(userMsgs[this.historyCursor]);
     this.inputEl.value = text;
     this.recomputeInputHeight();
     // Park caret at end so the user can keep typing forward immediately.
@@ -2822,40 +2941,68 @@ export class GlossaView extends ItemView {
   /** If the input starts with a known slash trigger like `/translate Chinese`, expand
    *  that to the full template at submit time. Anything after the first line is appended
    *  as user supplement to the expanded prompt. */
-  private async expandSlashTrigger(text: string): Promise<string> {
+  private async expandSlashTrigger(text: string): Promise<PromptExpansion> {
     const newlineIdx = text.indexOf('\n');
     const firstLine = (newlineIdx >= 0 ? text.slice(0, newlineIdx) : text).trim();
     const supplement = newlineIdx >= 0 ? text.slice(newlineIdx + 1).trim() : '';
     const m = firstLine.match(/^(\/[A-Za-z][\w-]*)(?:\s+(.*))?$/);
-    if (!m) return text;
+    if (!m) return { text, expanded: false, embeddedSelection: false, embeddedCurrentFile: false };
     const trigger = m[1];
     const argStr = (m[2] ?? '').trim();
     const all = [...BUILTIN_SLASH_COMMANDS, ...this.plugin.settings.customSlashCommands];
     const cmd = all.find(c => c.trigger === trigger);
-    if (!cmd) return text;        // unknown trigger → leave text as-is
+    if (!cmd) return { text, expanded: false, embeddedSelection: false, embeddedCurrentFile: false };
 
-    const af = this.app.workspace.getActiveFile();
+    const af = this.currentContextFile();
     const sel = this.currentSelection?.text ?? '';
-    const fileContent = af && af.extension === 'md' ? await this.app.vault.cachedRead(af) : '';
+    const explicitItems = this.ctx.list().filter(item => !item.isCurrent);
+    const markdownFileContent = explicitItems.length === 0 && af && af.extension === 'md'
+      ? await this.app.vault.cachedRead(af)
+      : '';
+    const fileContent = markdownFileContent || buildContextSourceReference(af, explicitItems);
     const expanded = applySlashTemplate({
       template: cmd.template, selection: sel, fileContent,
       fileName: af?.basename ?? '', vaultName: this.app.vault.getName(),
       args: argStr,
     });
-    return supplement ? `${expanded}\n\n${supplement}` : expanded;
+    const selectionOrFile = cmd.template.includes('${selection-or-file}');
+    const embeddedSelection = !!sel && (cmd.template.includes('${selection}') || selectionOrFile);
+    const embeddedCurrentFile = !!markdownFileContent && (
+      cmd.template.includes('${file}') || (selectionOrFile && !sel)
+    );
+    return {
+      text: supplement ? `${expanded}\n\n${supplement}` : expanded,
+      expanded: true,
+      embeddedSelection,
+      embeddedCurrentFile,
+    };
   }
 
   /** Legacy compact-marker resolver — still honoured for any `{{...}}` left in by
    *  callers that didn't go through the slash-trigger path (e.g. workflows). */
-  private async resolveSlashMarkers(text: string): Promise<string> {
-    if (!/\{\{(context|selection|file)\}\}/.test(text)) return text;
+  private async resolveSlashMarkers(text: string): Promise<PromptExpansion> {
+    if (!/\{\{(context|selection|file)\}\}/.test(text)) {
+      return { text, expanded: false, embeddedSelection: false, embeddedCurrentFile: false };
+    }
     const sel = this.currentSelection?.text ?? '';
-    const af = this.app.workspace.getActiveFile();
-    const fileContent = af && af.extension === 'md' ? await this.app.vault.cachedRead(af) : '';
-    return text
-      .replace(/\{\{context\}\}/g,   sel || fileContent || '')
-      .replace(/\{\{selection\}\}/g, sel || '')
-      .replace(/\{\{file\}\}/g,      fileContent || '');
+    const af = this.currentContextFile();
+    const explicitItems = this.ctx.list().filter(item => !item.isCurrent);
+    const markdownFileContent = explicitItems.length === 0 && af && af.extension === 'md'
+      ? await this.app.vault.cachedRead(af)
+      : '';
+    const fileContent = markdownFileContent || buildContextSourceReference(af, explicitItems);
+    const hasContext = text.includes('{{context}}');
+    const hasSelection = text.includes('{{selection}}');
+    const hasFile = text.includes('{{file}}');
+    return {
+      text: text
+        .replace(/\{\{context\}\}/g,   sel || fileContent || '')
+        .replace(/\{\{selection\}\}/g, sel || '')
+        .replace(/\{\{file\}\}/g,      fileContent || ''),
+      expanded: true,
+      embeddedSelection: !!sel && (hasContext || hasSelection),
+      embeddedCurrentFile: !!markdownFileContent && (hasFile || (hasContext && !sel)),
+    };
   }
 
   /** Expand the session's ChatMessage[] into model-facing MessageInput[] for the agent
@@ -2892,15 +3039,36 @@ export class GlossaView extends ItemView {
   private buildModelHistory(currentUserId: string, currentAsstId: string | undefined): MessageInput[] {
     const passReasoning = this.modelRequiresReasoningPassthrough();
     const out: MessageInput[] = [];
+    const recentToolMessageIds = new Set(this.session.messages
+      .filter(m => m.role === 'assistant' && (m.toolEvents?.length ?? 0) > 0)
+      .slice(-2)
+      .map(m => m.id));
     for (const m of this.session.messages) {
       if (m.id === currentUserId) continue;
       if (currentAsstId && m.id === currentAsstId) continue;
       // Bare role:'tool' messages on a ChatMessage are legacy / accidental — the loop
       // expects them to be reconstructed from toolEvents below. Skip.
       if (m.role === 'tool') continue;
+      if (m.compactSummary) {
+        out.push({
+          role: 'user',
+          content: [
+            '<context-compaction>',
+            'This is an authoritative summary of earlier conversation turns. Continue the same task from it; do not treat it as a new user request.',
+            m.content ?? '',
+            '</context-compaction>',
+          ].join('\n'),
+        });
+        continue;
+      }
       if (m.role === 'assistant' && m.toolEvents && m.toolEvents.length > 0) {
+        const keepFullToolContext = recentToolMessageIds.has(m.id);
         // First push the assistant turn with its tool_use blocks
-        const toolCalls = m.toolEvents.map(ev => ({ id: ev.id, name: ev.name, args: ev.args ?? {} }));
+        const toolCalls = m.toolEvents.map(ev => ({
+          id: ev.id,
+          name: ev.name,
+          args: compactHistoricalToolArgs(ev.args ?? {}, keepFullToolContext),
+        }));
         out.push({
           role: 'assistant',
           content: m.content ?? '',
@@ -2914,8 +3082,13 @@ export class GlossaView extends ItemView {
             role: 'tool',
             toolCallId: ev.id,
             toolName: ev.name,
-            content: String(ev.result ?? ''),
-            toolContentBlocks: ev.contentBlocks,
+            content: compactHistoricalToolResult({
+              toolName: ev.name,
+              result: String(ev.result ?? ''),
+              status: ev.status,
+              isRecent: keepFullToolContext,
+            }),
+            toolContentBlocks: keepFullToolContext ? ev.contentBlocks : undefined,
             toolIsError: ev.status === 'error' || ev.status === 'denied',
           });
         }
@@ -2957,14 +3130,8 @@ export class GlossaView extends ItemView {
       loading.remove();
       if (!result) { if (reason === 'manual') quickNotice('Nothing to compact.'); return; }
       applyCompact(this.session, result, keepRecent);
-      this.msgUIs.clear();
-      clear(this.messagesEl);
-      this.resetThreadRail();
-      this.messagesEl.classList.add('no-anim');
-      for (const m of this.session.messages) this.renderMessage(m);
-      this.compactAllProcessGroups();
-      this.scrollToBottom(true);
-      window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
+      this.historyWindow = latestHistoryWindow(this.session.messages);
+      this.renderSessionHistory({ scrollToBottom: true });
       await this.flushPersistNow();
       quickNotice(`Compacted ${result.summarisedCount} msgs → 1 summary (~${formatTokenCount(result.tokensSaved)} tok saved)`);
     } catch (e) {
@@ -2977,14 +3144,8 @@ export class GlossaView extends ItemView {
   private async undoCompact(summaryId: string) {
     const ok = undoCompactInSession(this.session, summaryId);
     if (!ok) { quickNotice('No snapshot for this summary.'); return; }
-    this.msgUIs.clear();
-    clear(this.messagesEl);
-    this.resetThreadRail();
-    this.messagesEl.classList.add('no-anim');
-    for (const m of this.session.messages) this.renderMessage(m);
-    this.compactAllProcessGroups();
-    this.scrollToBottom(true);
-    window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
+    this.historyWindow = latestHistoryWindow(this.session.messages);
+    this.renderSessionHistory({ scrollToBottom: true });
     await this.flushPersistNow();
     quickNotice('Restored pre-compact history.');
   }
@@ -3018,8 +3179,9 @@ export class GlossaView extends ItemView {
     // 1) If the line starts with a known `/<trigger> [arg]`, expand to its full template
     // 2) Then resolve any legacy {{...}} markers
     // Both happen at submit time so the textarea itself never grew.
-    const triggered = await this.expandSlashTrigger(raw);
-    const text = await this.resolveSlashMarkers(triggered);
+    const slashExpansion = await this.expandSlashTrigger(raw);
+    const markerExpansion = await this.resolveSlashMarkers(slashExpansion.text);
+    const text = markerExpansion.text;
     const ep = this.activeEndpoint();
     if (!ep) { restoreInput(); quickNotice('No endpoint configured. Open settings.'); return; }
 
@@ -3027,14 +3189,6 @@ export class GlossaView extends ItemView {
     // an empty assistant bubble + cursor on the screen.
     const epReady = await this.plugin.getDecryptedEndpoint(ep);
     if (!epReady) { restoreInput(); quickNotice('Endpoint key locked or invalid. Unlock encryption or re-enter the API key.'); return; }
-
-    // Warn user when Use-Obsidian-fetch is on (tools / images are silently disabled).
-    if (epReady.kind === 'custom-api' && epReady.useObsidianFetch) {
-      if (this.ctx.imagesForAPI().length) {
-        quickNotice('Images are ignored in "Use Obsidian requestUrl" mode.');
-      }
-      // Block tools downstream — agent loop checks this via canSendTools below.
-    }
 
     // Auto-compact: if the existing session is approaching the context budget, summarise
     // the older messages into a single recap before adding the new user turn.
@@ -3066,7 +3220,25 @@ export class GlossaView extends ItemView {
     const selectionContextBlock = this.currentSelection
       ? `### Selection (from ${this.currentSelection.source}${this.currentSelection.file ? `, ${this.currentSelection.file.path}` : ''}):\n\n${this.currentSelection.text}`
       : '';
+    const recentUserTexts = this.session.messages
+      .filter(message => message.role === 'user')
+      .slice(-6)
+      .reverse()
+      .map(message => message.displayContent ?? message.content ?? '');
+    const responseLanguage = inferResponseLanguage({
+      currentText: raw,
+      recentUserTexts,
+      selectionText: this.currentSelection?.text,
+      uiLanguage: currentLanguage(),
+    });
+    const responseLanguageHint = buildResponseLanguageHint(responseLanguage);
+    const embeddedSelection = slashExpansion.embeddedSelection || markerExpansion.embeddedSelection;
+    const embeddedCurrentFile = slashExpansion.embeddedCurrentFile || markerExpansion.embeddedCurrentFile;
 
+    // Refresh the open source at send time. This picks up current Markdown
+    // edits and lazily resolves non-Markdown files using the requested task
+    // (for example front + ending pages for /summarize).
+    await this.hydrateCurrentContextForPrompt(raw, embeddedSelection || embeddedCurrentFile);
     const turnContextItems = this.ctx.list();
     const hasExplicitAttachments = turnContextItems.some(it => !it.isCurrent);
 
@@ -3074,13 +3246,16 @@ export class GlossaView extends ItemView {
     const ctxSnap: ContextItemRef[] = turnContextItems.map(it => ({
       kind: it.kind, label: it.label, detail: it.detail, tokens: it.tokens, pinned: it.pinned, isCurrent: it.isCurrent,
     }));
-    // If the user typed a slash trigger and we expanded it (text !== raw),
-    // remember the raw form for display. The bubble shows "/summarize" while
-    // the model receives the full expanded template via `content`.
-    const wasExpanded = text !== raw;
+    // `displayContent` always keeps the user-authored form. `content` becomes
+    // the exact model-facing prompt snapshot after context assembly below.
+    const wasExpanded = slashExpansion.expanded || markerExpansion.expanded;
     const userMsg: ChatMessage = {
       id: uid(), role: 'user', content: text, timestamp: Date.now(), contextSnapshot: ctxSnap,
-      displayContent: wasExpanded ? raw : undefined,
+      // Keep the compact user-authored text for UI/compaction while `content`
+      // is replaced below with the exact model-facing prompt snapshot. This is
+      // what lets later turns retain attached PDF/file text without persisting
+      // image data URIs in chat storage.
+      displayContent: raw,
       selectionEcho: this.currentSelection ? {
         text: this.currentSelection.text,
         source: this.currentSelection.source,
@@ -3088,7 +3263,8 @@ export class GlossaView extends ItemView {
       } : undefined,
     };
     this.session.messages.push(userMsg);
-    this.renderMessage(userMsg);
+    this.historyWindow = latestHistoryWindow(this.session.messages);
+    this.renderSessionHistory({ scrollToBottom: true });
     this.ctx.resetUnpinned();
 
     // Input + history cursor were already cleared at the top of submit() so the
@@ -3132,7 +3308,14 @@ export class GlossaView extends ItemView {
     const responseReserve = Math.min(16_000, Math.max(4_000, Math.floor(effectiveWindow.maxCtx * 0.06)));
     const softCap = Math.max(1, Math.floor(effectiveWindow.maxCtx * 0.92) - historyBudgetTokens - responseReserve);
     const hardCap = Math.max(1, Math.floor(effectiveWindow.maxCtx * 0.98) - historyBudgetTokens - responseReserve);
-    const { text: ctxBlock, dropped, forcedDrops } = this.ctx.asPromptBlock(softCap, hardCap, { suppressAutoCurrent: hasExplicitAttachments, items: turnContextItems });
+    // Slash templates for Markdown may already contain the selection/current
+    // file verbatim. Suppress only that duplicate copy; otherwise the open
+    // file is always present and its policy role decides how it is used.
+    const suppressEmbeddedCurrent = embeddedSelection || embeddedCurrentFile;
+    const { text: ctxBlock, dropped, forcedDrops } = this.ctx.asPromptBlock(softCap, hardCap, {
+      suppressAutoCurrent: suppressEmbeddedCurrent,
+      items: turnContextItems,
+    });
     if (dropped.length > 0) {
       quickNotice(`Context budget: dropped ${dropped.length} unpinned item(s) (${dropped.map(d => d.label).join(', ').slice(0, 80)}) to fit ${formatTokenCount(softCap)} tokens. Pin to keep.`);
     }
@@ -3142,16 +3325,37 @@ export class GlossaView extends ItemView {
       new Notice(`⚠ HARD context cap exceeded: had to drop ${forcedDrops.length} pinned/current item(s): ${forcedDrops.map(d => d.label).join(', ')}. Compress or remove items to keep them.`, 10000);
     }
     const sysPrompt = await this.buildSystemPrompt();
-    // When the user fired a slash command and we expanded its template, the
-    // template body ALREADY includes the selection / file content via the
-    // ${selection-or-file} marker. Re-injecting ctxBlock + selectionContextBlock
-    // on top of that produces a prompt with the same file pasted 2-3 times,
-    // which (a) wastes context budget and (b) confuses models into echoing
-    // the original instead of summarising. So for expanded slash commands we
-    // skip the auto-attached context — the template is canonical.
-    const finalUserContent = wasExpanded
-      ? text
-      : [this.contextPriorityHint(ctxSnap, hasExplicitAttachments), ctxBlock, selectionContextBlock, text].filter(Boolean).join('\n\n');
+    // Slash commands are self-contained task instructions, so they do not need
+    // a prior-turn continuity hint. Their attached/open source context still
+    // participates unless it was embedded verbatim above.
+    const taskContinuityHint = wasExpanded ? '' : buildTaskContinuityHint(text, userMsg.id, this.session.messages, ctxSnap, { hasExplicitSelection: !!selectionContextBlock });
+    const currentContextHint = buildCurrentContextPolicyHint(raw, ctxSnap, hasExplicitAttachments);
+    const explicitTurnImages = this.ctx.imagesForAPI({ suppressAutoCurrent: suppressEmbeddedCurrent, items: turnContextItems });
+    const reuseRecentVisual = explicitTurnImages.length === 0
+      && !!this.recentVisualContext
+      && shouldReuseRecentVisualContext(raw, !!taskContinuityHint);
+    const requestImages = explicitTurnImages.length
+      ? explicitTurnImages
+      : reuseRecentVisual ? this.recentVisualContext?.images ?? [] : [];
+    const inheritedVisualHint = reuseRecentVisual
+      ? visualContinuityHint(requestImages.map(image => image.name ?? 'image'))
+      : '';
+    const finalUserContent = this.pendingRegeneratePrompt ?? [
+      responseLanguageHint,
+      taskContinuityHint,
+      inheritedVisualHint,
+      currentContextHint,
+      ctxBlock,
+      embeddedSelection ? '' : selectionContextBlock,
+      text,
+    ].filter(Boolean).join('\n\n');
+    this.pendingRegeneratePrompt = null;
+    captureUserPromptSnapshot(userMsg, raw, finalUserContent);
+    if (explicitTurnImages.length) {
+      this.recentVisualContext = { images: explicitTurnImages.slice(0, 3) };
+    } else if (!reuseRecentVisual) {
+      this.recentVisualContext = null;
+    }
 
     // Build a FULL model-facing history that PRESERVES tool calls + tool results from
     // prior turns. Without this, the model loses everything it ever read/wrote and can
@@ -3218,7 +3422,7 @@ export class GlossaView extends ItemView {
       },
       model: ep.model,
       signal: this.abortCtl.signal,
-      attachedImages: this.ctx.imagesForAPI({ suppressAutoCurrent: hasExplicitAttachments, items: turnContextItems }),
+      attachedImages: requestImages,
       checkpoint: this.plugin.checkpoint,
       sessionId: this.session.id,
       turnId: this.currentAsstMsg?.id,
@@ -3491,7 +3695,9 @@ export class GlossaView extends ItemView {
     const staticHead = folderOverride?.systemPrompt ||
       `You are Glossa, an AI assistant embedded in the user's Obsidian vault. ` +
       `Be precise and concise. When the user has attached <context>...</context>, treat it as authoritative. ` +
-      `Preserve markdown structure. Keep formulas, code, and proper nouns intact when translating.`;
+      `Preserve markdown structure. Keep formulas, code, and proper nouns intact when translating. ` +
+      `Follow each turn's <response-language> instruction; source-document language alone never decides reply language. ` +
+      `Write math with Obsidian-compatible $...$ and $$...$$ delimiters, not \\(...\\) or \\[...\\].`;
 
     // ----- DYNAMIC tail -----
     const dyn: string[] = [];
@@ -3606,6 +3812,9 @@ export class GlossaView extends ItemView {
     // dropped by the gates in submit() / on* callbacks.
     this.sessionToken++;
     this.session = this.newSession();
+    this.historyWindow = latestHistoryWindow(this.session.messages);
+    this.pendingRegeneratePrompt = null;
+    this.recentVisualContext = null;
     this.sessionCostUSD = 0; this.sessionInputTokens = 0; this.sessionOutputTokens = 0;
     this.msgUIs.clear();
     clear(this.messagesEl);
@@ -3630,21 +3839,16 @@ export class GlossaView extends ItemView {
     // next line and corrupt the loaded session.)
     this.sessionToken++;
     this.session = s;
-    this.msgUIs.clear();
-    clear(this.messagesEl);
-    this.resetThreadRail();
+    this.historyWindow = latestHistoryWindow(this.session.messages);
+    this.pendingRegeneratePrompt = null;
+    this.recentVisualContext = null;
     if (this.session.messages.length === 0) {
+      this.msgUIs.clear();
+      clear(this.messagesEl);
+      this.resetThreadRail();
       this.renderEmpty();
     } else {
-      // Batch load: suppress per-message arrival animation (N simultaneous
-      // fade-ins reads as a chaotic ripple AND spikes CPU). Removed on the
-      // next animation frame so subsequent live-stream additions animate
-      // normally again.
-      this.messagesEl.classList.add('no-anim');
-      for (const m of this.session.messages) this.renderMessage(m);
-      this.compactAllProcessGroups();
-      this.scrollToBottom(true);
-      window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
+      this.renderSessionHistory({ scrollToBottom: true });
     }
     this.rebuildPlanFromSession();
   }
@@ -3683,6 +3887,9 @@ export class GlossaView extends ItemView {
     this.clearPendingPersist();
     this.sessionToken++;
     this.session = this.newSession();
+    this.historyWindow = latestHistoryWindow(this.session.messages);
+    this.pendingRegeneratePrompt = null;
+    this.recentVisualContext = null;
     this.sessionCostUSD = 0;
     this.sessionInputTokens = 0;
     this.sessionOutputTokens = 0;
@@ -3738,8 +3945,9 @@ export class GlossaView extends ItemView {
         for (const line of m.reasoningContent.split('\n')) parts.push('> ' + line);
         parts.push('');
       }
-      if (m.content && m.content.trim()) {
-        parts.push(m.content.trim(), '');
+      const visibleContent = m.role === 'user' ? visibleUserContent(m) : m.content;
+      if (visibleContent && visibleContent.trim()) {
+        parts.push(visibleContent.trim(), '');
       }
       // Tool calls + their results
       if (m.toolEvents?.length) {
@@ -3817,22 +4025,14 @@ export class GlossaView extends ItemView {
     }
     const lastUser = this.session.messages.pop();
     if (!lastUser) return;
-    this.msgUIs.clear();
-    clear(this.messagesEl);
-    this.resetThreadRail();
-    if (this.session.messages.length === 0) this.renderEmpty();
-    else {
-      this.messagesEl.classList.add('no-anim');
-      for (const m of this.session.messages) this.renderMessage(m);
-      this.compactAllProcessGroups();
-      this.scrollToBottom(true);
-      window.requestAnimationFrame(() => this.messagesEl.classList.remove('no-anim'));
-    }
+    this.historyWindow = latestHistoryWindow(this.session.messages);
+    this.renderSessionHistory({ scrollToBottom: true });
     // Persist the trimmed history before re-submit. Without this, an Obsidian
     // crash / quick reload between "regenerate" and the new turn finishing
     // leaves the on-disk session out of sync with what's in the bubble.
     await this.flushPersistNow();
-    this.inputEl.value = lastUser.content;
+    this.pendingRegeneratePrompt = lastUser.content;
+    this.inputEl.value = visibleUserContent(lastUser);
     this.recomputeInputHeight();
     void this.submit();
   }
@@ -3864,4 +4064,4 @@ function pillIcon(it: ContextItem): string {
     default:           return ICON.file;
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

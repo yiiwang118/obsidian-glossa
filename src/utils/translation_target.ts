@@ -1,8 +1,24 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+
 export type TranslationTarget = 'Chinese' | 'English';
 export type UiLanguage = 'en' | 'zh';
 
-type SourceLanguage = 'en' | 'zh' | 'unknown';
+export type SourceLanguage = 'en' | 'zh' | 'unknown';
+export type ResponseLanguage = Exclude<SourceLanguage, 'unknown'>;
+
+export interface ResponseLanguageDecision {
+  language: ResponseLanguage;
+  source: 'explicit-instruction' | 'current-message' | 'recent-user-message' | 'ui-fallback';
+  confidence: 'explicit' | 'high' | 'medium' | 'fallback';
+  currentLanguage: SourceLanguage;
+  selectionLanguage: SourceLanguage;
+}
+
+export interface ResponseLanguageOptions {
+  currentText: string;
+  recentUserTexts?: readonly string[];
+  selectionText?: string;
+  uiLanguage: UiLanguage;
+}
 
 const EN_STOPWORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'but', 'by', 'can', 'for',
@@ -75,6 +91,85 @@ export function inferSelectionLanguage(text: string): SourceLanguage {
   return 'unknown';
 }
 
+/** Resolve the language of assistant prose without letting an English source
+ * attachment override a Chinese request (or vice versa). */
+export function inferResponseLanguage(options: ResponseLanguageOptions): ResponseLanguageDecision {
+  const currentLanguage = inferSelectionLanguage(options.currentText);
+  const selectionLanguage = inferSelectionLanguage(options.selectionText ?? '');
+  const explicit = explicitRequestedLanguage(options.currentText);
+  if (explicit) {
+    return {
+      language: explicit,
+      source: 'explicit-instruction',
+      confidence: 'explicit',
+      currentLanguage,
+      selectionLanguage,
+    };
+  }
+  if (currentLanguage !== 'unknown') {
+    return {
+      language: currentLanguage,
+      source: 'current-message',
+      confidence: 'high',
+      currentLanguage,
+      selectionLanguage,
+    };
+  }
+  for (const text of options.recentUserTexts ?? []) {
+    const priorExplicit = explicitRequestedLanguage(text);
+    const priorLanguage = priorExplicit ?? inferSelectionLanguage(text);
+    if (priorLanguage === 'unknown') continue;
+    return {
+      language: priorLanguage,
+      source: 'recent-user-message',
+      confidence: priorExplicit ? 'high' : 'medium',
+      currentLanguage,
+      selectionLanguage,
+    };
+  }
+  return {
+    language: options.uiLanguage,
+    source: 'ui-fallback',
+    confidence: 'fallback',
+    currentLanguage,
+    selectionLanguage,
+  };
+}
+
+export function buildResponseLanguageHint(decision: ResponseLanguageDecision): string {
+  const languageName = decision.language === 'zh' ? 'Chinese' : 'English';
+  const sourceLanguage = decision.selectionLanguage === 'unknown'
+    ? 'unknown'
+    : decision.selectionLanguage === 'zh' ? 'Chinese' : 'English';
+  return [
+    `<response-language target="${decision.language}" confidence="${decision.confidence}">`,
+    `Write the answer and explanatory prose in ${languageName}.`,
+    `The selected/attached source language is ${sourceLanguage}; it is source material, not a reply-language instruction.`,
+    'Keep code, formulas, file paths, quotations, and proper nouns in their original form unless the user explicitly asks to translate them.',
+    '</response-language>',
+  ].join('\n');
+}
+
+export function sourceLanguageLabel(language: SourceLanguage, uiLanguage: UiLanguage): string {
+  if (language === 'zh') return '中文';
+  if (language === 'en') return 'EN';
+  return uiLanguage === 'zh' ? '语言未定' : 'Language unclear';
+}
+
+function explicitRequestedLanguage(text: string): ResponseLanguage | null {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return null;
+  if (/(?:请?用|以|改成|换成|回答用|回复用|输出为|翻译成|翻译为|译成)\s*(?:简体|繁体)?中文|中文\s*(?:回答|回复|解释|输出)|(?:reply|respond|answer|write|translate)(?:\s+this)?\s+(?:in|into|to)\s+(?:simplified\s+|traditional\s+)?chinese\b|\bin\s+chinese\b/i.test(normalized)) {
+    return 'zh';
+  }
+  if (/(?:请?用|以|改成|换成|回答用|回复用|输出为|翻译成|翻译为|译成)\s*(?:英文|英语)|(?:英文|英语)\s*(?:回答|回复|解释|输出)|(?:reply|respond|answer|write|translate)(?:\s+this)?\s+(?:in|into|to)\s+english\b|\bin\s+english\b/i.test(normalized)) {
+    return 'en';
+  }
+  if (/^\/translate\s+(?:chinese|中文)\b/i.test(normalized)) return 'zh';
+  if (/^\/translate\s+(?:english|英文|英语)\b/i.test(normalized)) return 'en';
+  return null;
+}
+
 function normalizeLanguageSample(text: string): string {
   return text
     .replace(/```[\s\S]*?```/g, ' ')
@@ -83,6 +178,7 @@ function normalizeLanguageSample(text: string): string {
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1 ')
     .replace(/https?:\/\/\S+/gi, ' ')
     .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, ' ')
+    .replace(/^\s*\/[a-z][\w-]*(?=\s|$)/gim, ' ')
     .replace(/^\s*[-*+]\s+/gm, ' ')
     .replace(/[#>*_~|()[\]{}]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -92,4 +188,3 @@ function normalizeLanguageSample(text: string): string {
 function countMatches(text: string, pattern: RegExp): number {
   return (text.match(pattern) ?? []).length;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

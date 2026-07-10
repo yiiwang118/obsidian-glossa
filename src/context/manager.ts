@@ -1,5 +1,6 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+
 import type { ContextItem } from '../types';
+import { inferSelectionLanguage } from '../utils/translation_target';
 
 export type ContextListener = (items: ContextItem[]) => void;
 
@@ -88,7 +89,27 @@ export class ContextManager {
     }
 
     if (kept.length === 0) return { text: '', dropped, forcedDrops, remaining: total };
-    return { text: `<context>\n${kept.map(x => x.content).join('\n\n')}\n</context>`, dropped, forcedDrops, remaining: total };
+    const manifest = kept.map((item, index) => {
+      const role = item.isCurrent ? 'ambient-current' : 'user-attached';
+      const language = item.language ?? inferSelectionLanguage(item.content);
+      const detail = (item.detail || item.label).replace(/\s+/g, ' ').trim();
+      return `${index + 1}. role=${role}; kind=${item.kind}; language=${language}; source=${detail}`;
+    }).join('\n');
+    return {
+      text: [
+        '<context-manifest>',
+        manifest,
+        'User-attached items are explicit task context. Ambient-current items are the open file and remain available; follow <current-context-policy> to decide whether they are the target or background.',
+        'The language of a context item does not determine the language of the reply.',
+        '</context-manifest>',
+        '<context>',
+        kept.map(x => x.content).join('\n\n'),
+        '</context>',
+      ].join('\n'),
+      dropped,
+      forcedDrops,
+      remaining: total,
+    };
   }
 
   /** Return images attached as context (for multimodal providers). */
@@ -102,4 +123,3 @@ export class ContextManager {
   on(l: ContextListener) { this.listeners.add(l); return () => this.listeners.delete(l); }
   private emit() { for (const l of this.listeners) l(this.list()); }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+
 /**
  * Render a skill's body for injection into the conversation.
  *
@@ -22,6 +22,15 @@ function bundledSkillDir(name: string): string {
   return `.glossa/bundled-skills/${name}`;
 }
 
+function safeSkillRelativePath(input: string): string | null {
+  const raw = input.trim();
+  if (!raw || raw.includes('\0') || raw.startsWith('/') || raw.startsWith('\\') || /^[A-Za-z]:[\\/]/.test(raw)) return null;
+  const normalized = raw.replace(/\\/g, '/');
+  const segments = normalized.split('/');
+  if (segments.some(segment => !segment || segment === '.' || segment === '..')) return null;
+  return normalized;
+}
+
 /** Extract a bundled skill's `files{}` to disk under the bundled-skill dir.
  *  Idempotent — skips files that already exist. Returns the dir path. */
 async function ensureBundledFilesExtracted(app: App, skill: Skill): Promise<string> {
@@ -29,22 +38,16 @@ async function ensureBundledFilesExtracted(app: App, skill: Skill): Promise<stri
   const files = skill.files;
   if (!files || Object.keys(files).length === 0) return dir;
   const adapter = app.vault.adapter;
-  // Ensure dir + parent chain.
-  if (!(await adapter.exists('.glossa'))) await adapter.mkdir('.glossa');
-  if (!(await adapter.exists('.glossa/bundled-skills'))) await adapter.mkdir('.glossa/bundled-skills');
-  if (!(await adapter.exists(dir))) await adapter.mkdir(dir);
+  await ensureAdapterDir(adapter, dir);
   for (const [rel, content] of Object.entries(files)) {
-    // Reject traversal-bearing relative paths.
-    const normalized = rel.replace(/^\/+/, '');
-    if (normalized.split('/').includes('..')) {
+    const normalized = safeSkillRelativePath(rel);
+    if (!normalized) {
       console.warn(`[skill_render] refusing to write traversal path: ${rel}`);
       continue;
     }
     const target = `${dir}/${normalized}`;
     const parent = target.substring(0, target.lastIndexOf('/'));
-    if (parent && !(await adapter.exists(parent))) {
-      await adapter.mkdir(parent);
-    }
+    if (parent) await ensureAdapterDir(adapter, parent);
     if (await adapter.exists(target)) continue; // idempotent
     try {
       await adapter.write(target, content);
@@ -53,6 +56,15 @@ async function ensureBundledFilesExtracted(app: App, skill: Skill): Promise<stri
     }
   }
   return dir;
+}
+
+async function ensureAdapterDir(adapter: App['vault']['adapter'], path: string): Promise<void> {
+  const parts = path.split('/').filter(Boolean);
+  let current = '';
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    if (!(await adapter.exists(current))) await adapter.mkdir(current);
+  }
 }
 
 /** Compute the directory path the skill's `${SKILL_DIR}` should resolve to. */
@@ -73,7 +85,12 @@ export async function renderSkillBody(app: App, skill: Skill, args: string): Pro
 
   // Substitution table. Order: SKILL_DIR first (likely to be referenced as
   // part of file paths in template strings), then args.
-  let body = skill.body;
+  const needsDirectoryHint = Boolean(skill.files && Object.keys(skill.files).length > 0)
+    || /\$(?:\{(?:CLAUDE_)?SKILL_DIR\}|(?:CLAUDE_)?SKILL_DIR\b)/.test(skill.body);
+  let body = skill.body.slice(0, 80_000);
+  if (skill.body.length > body.length) {
+    body += '\n\n[Skill body truncated at 80,000 characters. Keep SKILL.md focused.]';
+  }
   // ${SKILL_DIR}, $SKILL_DIR
   body = body.replace(/\$\{SKILL_DIR\}/g, skillDir);
   body = body.replace(/\$SKILL_DIR\b/g, skillDir);
@@ -85,7 +102,5 @@ export async function renderSkillBody(app: App, skill: Skill, args: string): Pro
 
   // Prepend a "Base directory" hint so the model knows where to look for
   // sibling files referenced by the body.
-  const prefix = `Base directory for this skill: ${skillDir}\n\n`;
-  return prefix + body;
+  return needsDirectoryHint ? `Base directory for this skill: ${skillDir}\n\n${body}` : body;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */

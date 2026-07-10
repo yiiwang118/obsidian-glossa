@@ -1,12 +1,10 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { getSkill } from '../skills';
 import { renderSkillBody } from '../skill_render';
 import { recordSkillUsage } from '../skill_usage';
 import { buildTool, type ToolImpl } from './_shared';
 
-/** [deprecated] Use the unified `skill` tool instead. Kept registered (deferred
- *  so it doesn't bloat the default tool list) so older skill scripts / models
- *  trained on this name keep working. */
+/** [deprecated] Hidden from discovery but retained for saved tool calls. */
 export const runSkill: ToolImpl = buildTool({
   spec: {
     name: 'run_skill',
@@ -20,10 +18,11 @@ export const runSkill: ToolImpl = buildTool({
         args: { type: 'string', description: 'Optional free-form arg the skill body can reference.' },
       },
       required: ['name'],
+      additionalProperties: false,
     },
   },
   isReadOnly: () => true,
-  shouldDefer: true,            // hide from initial prompt; available via tool_search
+  shouldDefer: true,
   searchHint: 'load vault skill body (deprecated, use skill tool)',
   describe: a => `run skill: ${a.name}`,
   run: async (app, { name, args }) => {
@@ -39,4 +38,4 @@ export const runSkill: ToolImpl = buildTool({
     return header + body;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

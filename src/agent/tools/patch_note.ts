@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * patch_note — section / block / frontmatter-anchored append-prepend-replace.
  *
@@ -99,37 +99,26 @@ export const patchNote: ToolImpl = buildTool({
   },
   spec: {
     name: 'patch_note',
-    description: [
-      'Surgically modify a note at a specific anchor. Three target shapes:',
-      '',
-      '  target.heading        — match by exact heading text (e.g. "## Methods" or just "Methods")',
-      '  target.block_ref      — match by block reference (e.g. "abc123" for ^abc123)',
-      '  target.frontmatter_key — operate on a single YAML property',
-      '',
-      'Three ops:',
-      '  append   — for sections: insert at end of section body; for frontmatter arrays: push',
-      '  prepend  — for sections: insert at start of body; for frontmatter arrays: unshift',
-      '  replace  — overwrite the section body / block paragraph / property value',
-      '',
-      'REQUIRES USER APPROVAL.'
-    ].join('\n'),
+    description: 'Modify one anchored note region without rewriting the full file. Target exactly one heading, block reference, or frontmatter key; then append, prepend, or replace its body/value. Prefer this for section and property edits. Requires user approval.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Vault-relative note path.' },
-        op: { type: 'string', enum: ['append', 'prepend', 'replace'] },
+        op: { type: 'string', enum: ['append', 'prepend', 'replace'], description: 'How content is applied at the target.' },
         target: {
           type: 'object',
           description: 'Exactly ONE of heading / block_ref / frontmatter_key.',
           properties: {
-            heading: { type: 'string' },
-            block_ref: { type: 'string' },
-            frontmatter_key: { type: 'string' },
+            heading: { type: 'string', description: 'Exact heading text, with or without Markdown # prefix.' },
+            block_ref: { type: 'string', description: 'Block ID, with or without the leading ^.' },
+            frontmatter_key: { type: 'string', description: 'Single top-level YAML property name.' },
           },
+          additionalProperties: false,
         },
         content: { type: 'string', description: 'The text / value to insert.' },
       },
       required: ['path', 'op', 'target', 'content'],
+      additionalProperties: false,
     },
   },
   preview: async (app, a: AnyValue) => {
@@ -240,4 +229,4 @@ export const patchNote: ToolImpl = buildTool({
     return `Patched ${path} @ ${targetDesc} (${op}, ${insert.length} line${insert.length === 1 ? '' : 's'}).`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

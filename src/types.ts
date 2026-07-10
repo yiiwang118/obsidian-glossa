@@ -1,4 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+import type { SourceLanguage } from './utils/translation_target';
 // Mode type kept for backwards-compat with persisted sessions, but the active
 // runtime now uses RunMode ('plan' / 'act') everywhere. MODE_LABELS /
 // MODE_DESCRIPTIONS were dead — referenced nowhere — and have been removed.
@@ -82,6 +83,9 @@ export interface ContextItem {
   label: string;
   detail?: string;
   source?: 'markdown' | 'pdf' | 'html' | 'glossa' | 'unknown';
+  /** Precomputed once when content is resolved; avoids rescanning large PDF or
+   * note bodies every time the prompt manifest is rebuilt. */
+  language?: SourceLanguage;
   content: string;
   preview?: string;          // short preview for UI (selection text)
   tokens: number;
@@ -415,7 +419,7 @@ export const DEFAULT_SETTINGS: GlossaSettings = {
   maxContextTokens: 1_000_000,
   warnTokenThreshold: 500_000,
   agentMaxSteps: 20,
-  agentAlwaysApproveTools: ['search_vault', 'grep_vault', 'semantic_search', 'read_note', 'list_files', 'get_active_file', 'get_selection', 'query_metadata', 'search_by_tag', 'todo_write', 'view_image', 'discover_skills', 'run_skill'],
+  agentAlwaysApproveTools: ['read_note', 'get_active_file', 'get_selection', 'query_metadata', 'todo_write', 'view_image', 'discover_skills', 'run_skill'],
   agentNeverApproveTools: ['delete_note'],
   permissionLevel: 'read-only',
   runMode: 'plan',
@@ -559,4 +563,4 @@ export function modelContextWindow(model: string | undefined | null): number | n
   if (/llama|mistral|mixtral/.test(m)) return 32_000;
   return null;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

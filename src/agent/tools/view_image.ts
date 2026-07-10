@@ -1,6 +1,7 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
-import { formatImageInspectionMarkdown, inspectImageArrayBuffer } from '../../utils/image';
+import { formatImageInspectionMarkdown } from '../../utils/image';
+import { inspectVaultImageCached } from '../../utils/media_cache';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl, type ToolRunResult } from './_shared';
 
 export const viewImage: ToolImpl = buildTool({
@@ -15,40 +16,42 @@ export const viewImage: ToolImpl = buildTool({
   backfillObservableInput: normalizePathFields(['path']),
   spec: {
     name: 'view_image',
-    description: [
-      'Read an image file from the vault (png/jpeg/gif/webp) and return its visual content to you as an image block.',
-      'Use this when you need to actually SEE an image. Choose mode by task: describe for ordinary understanding, ocr for reading text, ui for screenshots/layout bugs, chart for plots/figures, detail for local crop/zoom, color for pixel checks.',
-      'For precision, pass region {x,y,width,height} in source image pixels to crop before viewing. For exact colors, pass sample_points [{x,y,label?}].',
-    ].join('\n'),
+    description: 'Inspect one vault image as visual model input. Choose describe, ocr, ui, chart, detail, or color according to the question. Start with the full image when layout matters; use a source-pixel region for small details and sample_points only for exact colors.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Vault-relative path to an image file.' },
-        mode: { type: 'string', description: 'Optional mode: auto, describe, ocr, ui, chart, detail, or color.' },
+        mode: { type: 'string', enum: ['auto', 'describe', 'ocr', 'ui', 'chart', 'detail', 'color'], description: 'Inspection intent. Default auto.' },
         region: {
           type: 'object',
           description: 'Optional crop rectangle in source image pixels. Use for small text, crowded UI, chart details, or local visual defects.',
           properties: {
-            x: { type: 'number' },
-            y: { type: 'number' },
-            width: { type: 'number' },
-            height: { type: 'number' },
+            x: { type: 'number', minimum: 0, description: 'Left coordinate in source pixels.' },
+            y: { type: 'number', minimum: 0, description: 'Top coordinate in source pixels.' },
+            width: { type: 'number', minimum: 1, description: 'Crop width in source pixels.' },
+            height: { type: 'number', minimum: 1, description: 'Crop height in source pixels.' },
           },
+          required: ['x', 'y', 'width', 'height'],
+          additionalProperties: false,
         },
         sample_points: {
           type: 'array',
+          maxItems: 32,
           description: 'Optional pixel points in source image coordinates for exact color checks.',
           items: {
             type: 'object',
             properties: {
-              x: { type: 'number' },
-              y: { type: 'number' },
-              label: { type: 'string' },
+              x: { type: 'number', minimum: 0, description: 'Horizontal source-pixel coordinate.' },
+              y: { type: 'number', minimum: 0, description: 'Vertical source-pixel coordinate.' },
+              label: { type: 'string', description: 'Optional human-readable name for this sample.' },
             },
+            required: ['x', 'y'],
+            additionalProperties: false,
           },
         },
       },
       required: ['path'],
+      additionalProperties: false,
     },
   },
   run: async (app, args): Promise<ToolRunResult> => {
@@ -70,8 +73,7 @@ export const viewImage: ToolImpl = buildTool({
     const mime = extToMime[(f.extension || '').toLowerCase()];
     if (!mime) return { text: `Error: unsupported image type ".${f.extension}" — supported: png, jpg, jpeg, gif, webp.` };
     try {
-      const bin = await app.vault.readBinary(f);
-      const inspection = await inspectImageArrayBuffer(bin, mime, {
+      const { value: inspection } = await inspectVaultImageCached(app, f, mime, {
         mode: args.mode,
         region: args.region,
         samplePoints: args.sample_points,
@@ -94,4 +96,4 @@ export const viewImage: ToolImpl = buildTool({
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

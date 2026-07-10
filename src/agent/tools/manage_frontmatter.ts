@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * manage_frontmatter — atomic CRUD over a single note's YAML properties.
  *
@@ -21,7 +21,9 @@ export const manageFrontmatter: ToolImpl = buildTool({
   isReadOnly: a => a?.op === 'get' || a?.op === 'list',
   isDestructive: a => a?.op === 'set' || a?.op === 'delete',
   isConcurrencySafe: a => a?.op === 'get' || a?.op === 'list',
+  shouldDefer: true,
   searchHint: 'note frontmatter get set delete list',
+  searchTags: ['yaml property', 'metadata field', '属性', '元数据', 'frontmatter'],
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => {
     const op = a.op ?? 'get';
@@ -30,16 +32,17 @@ export const manageFrontmatter: ToolImpl = buildTool({
   },
   spec: {
     name: 'manage_frontmatter',
-    description: 'Atomic CRUD on a note\'s YAML frontmatter. Use this instead of read+write_note when only adjusting a single property.',
+    description: 'Get, list, set, or delete one YAML frontmatter property through the vault property API. Prefer this over rewriting note text when only metadata changes. Set/delete operations require approval.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Vault-relative note path.' },
-        op: { type: 'string', enum: ['get', 'set', 'delete', 'list'] },
+        op: { type: 'string', enum: ['get', 'set', 'delete', 'list'], description: 'Operation to perform. get/list are read-only; set/delete modify the note.' },
         key: { type: 'string', description: 'Frontmatter property name. Required for get/set/delete; omitted for list.' },
         value: { type: 'string', description: 'New value for set op. Parsed as JSON when possible (true/false, numbers, [arrays], {objects}); otherwise stored as a string.' },
       },
       required: ['path', 'op'],
+      additionalProperties: false,
     },
   },
   preview: async (a) => {
@@ -88,4 +91,4 @@ export const manageFrontmatter: ToolImpl = buildTool({
     return result;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Re-enable review lint rules after dynamic boundary module. */

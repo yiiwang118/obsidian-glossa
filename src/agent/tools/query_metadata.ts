@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile, getAllTags } from 'obsidian';
 import { buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
@@ -11,8 +11,13 @@ export const queryMetadata: ToolImpl = buildTool({
   backfillObservableInput: normalizePathFields(['path']),
   spec: {
     name: 'query_metadata',
-    description: 'Return frontmatter + headings + tags for a note.',
-    parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+    description: 'Return cached frontmatter, headings, tags, and outgoing link targets for one note without reading its full body. Use read_note when prose content is needed.',
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string', description: 'Vault-relative path of the note to inspect.' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
   },
   run: async (app, { path }) => {
     const f = app.vault.getAbstractFileByPath(path);
@@ -26,4 +31,4 @@ export const queryMetadata: ToolImpl = buildTool({
     }, null, 2);
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

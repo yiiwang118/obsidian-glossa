@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * resolve_wikilink — figure out what `[[name]]` actually resolves to in this vault.
  *
@@ -13,11 +13,13 @@ export const resolveWikilink: ToolImpl = buildTool({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   isDestructive: () => false,
+  shouldDefer: true,
   searchHint: 'find target path of wikilink reference',
+  searchTags: ['resolve internal link', 'dangling link', '解析双链', '链接目标'],
   describe: a => `resolve [[${a.link}]]`,
   spec: {
     name: 'resolve_wikilink',
-    description: 'Resolve a wikilink reference `[[name]]` (or `name#heading`, `name^block`, `name|alias`) to the actual vault file path. Returns the resolved path + a boolean indicating whether the file exists.',
+    description: 'Resolve the file portion of a wikilink against vault aliases and shortest-path rules. Use to verify a target or diagnose a dangling link; it does not validate the referenced heading or block.',
     parameters: {
       type: 'object',
       properties: {
@@ -25,6 +27,7 @@ export const resolveWikilink: ToolImpl = buildTool({
         from: { type: 'string', description: 'Optional vault path of the file CONTAINING the link — used by Obsidian when shortest-path resolution depends on the source location.' },
       },
       required: ['link'],
+      additionalProperties: false,
     },
   },
   run: async (app, args) => {
@@ -43,4 +46,4 @@ export const resolveWikilink: ToolImpl = buildTool({
     return `Resolved: (none)\nExists: false\nLinkpath: ${head}\n\n[[${link}]] is a dangling / unresolved wikilink in the current vault.`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

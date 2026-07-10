@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Minimal sub-agent harness for forked skill execution.
  *
@@ -20,15 +20,19 @@
  * Mirrors upstream Claude Code's `executeForkedSkill` shape, scaled down.
  */
 import type { App } from 'obsidian';
-import type { LLMProvider } from '../providers/types';
+import type { LLMProvider, ToolSpec } from '../providers/types';
 import type { PermissionLevel, PermissionRule, TokenUsage } from '../types';
 import type { CheckpointManager } from './checkpoint';
-import type { McpHub } from './mcp';
 import type { Skill } from './skills';
 import { renderSkillBody } from './skill_render';
 
 const MAX_FORK_DEPTH = 5;
 let activeForkDepth = 0;
+
+interface McpHubLike {
+  asToolSpecs(): ToolSpec[];
+  findClient(name: string): { client: { callTool(name: string, args: AnyValue): Promise<AnyValue> }; originalName: string } | null;
+}
 
 export interface ForkOptions {
   app: App;
@@ -47,7 +51,7 @@ export interface ForkOptions {
   endpointKind?: 'custom-api' | 'codex-cli' | 'claude-code-cli';
   endpointFullAgent?: boolean;
   checkpoint?: CheckpointManager;
-  mcp?: McpHub;
+  mcp?: McpHubLike;
   /** Skill-specific token budget (default: 4096). */
   maxSteps?: number;
   signal?: AbortSignal;
@@ -134,4 +138,4 @@ export async function forkSkill(opts: ForkOptions): Promise<ForkResult> {
   }
   return { ok: true, result: collectedText, usage: collectedUsage };
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * get_outgoing_links — list every wikilink the note emits.
  *
@@ -12,19 +12,22 @@ export const getOutgoingLinks: ToolImpl = buildTool({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   isDestructive: () => false,
+  shouldDefer: true,
   searchHint: 'enumerate outgoing wikilinks from note',
+  searchTags: ['outbound links', 'dangling links', '出链', '未解析链接'],
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => `outgoing links from ${a.path}`,
   spec: {
     name: 'get_outgoing_links',
-    description: 'List wikilinks emitted from a note, including unresolved ones (those would be "dangling" red links in the UI).',
+    description: 'List wikilinks and embeds emitted by one note, with resolved paths and optional dangling targets. Use for link audits rather than reading prose.',
     parameters: {
       type: 'object',
       properties: {
-        path: { type: 'string' },
+        path: { type: 'string', description: 'Vault-relative path of the source note.' },
         include_unresolved: { type: 'boolean', description: 'Default true. Set false to filter to resolved links only.' },
       },
       required: ['path'],
+      additionalProperties: false,
     },
   },
   run: async (app, args) => {
@@ -51,4 +54,4 @@ export const getOutgoingLinks: ToolImpl = buildTool({
     return `${lines.length} link${lines.length === 1 ? '' : 's'} from ${path}:\n${lines.join('\n')}`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

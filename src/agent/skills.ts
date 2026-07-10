@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Skills system — vault-stored prompt skills the model can discover and invoke.
  * Mirrors upstream Claude Code's SkillTool. Each skill lives at
@@ -34,6 +34,9 @@ export interface Skill {
   /** Tool names allowlisted to run without per-call approval WHILE this skill
    *  is active. From frontmatter `allowed-tools:` / `allowedTools:`. */
   allowedTools?: string[];
+  /** Specialized tool schemas to load when the skill is invoked. Loading a
+   *  schema does not execute or approve the tool. From `required-tools:`. */
+  requiredTools?: string[];
   /** Execution mode: 'inline' (default) injects body into the active context;
    *  'fork' runs the skill in an isolated sub-agent with its own token budget.
    *  From frontmatter `context:`. */
@@ -117,9 +120,9 @@ function parseScalar(raw: string): AnyValue {
 /** Coerce a frontmatter value (which might be a string OR an inline array) to a
  *  string[]. Returns undefined when the field is absent or empty. */
 function asStringArray(v: unknown): string[] | undefined {
-  if (Array.isArray(v)) return v.map(String).filter(s => s.length > 0);
-  if (typeof v === 'string' && v.length > 0) return [v];
-  return undefined;
+  const values = Array.isArray(v) ? v.map(String) : typeof v === 'string' ? [v] : [];
+  const cleaned = [...new Set(values.map(value => value.trim()).filter(Boolean))].slice(0, 64);
+  return cleaned.length > 0 ? cleaned : undefined;
 }
 
 /** Coerce to boolean — accepts boolean literal, "true"/"false"/"yes"/"no", etc. */
@@ -187,6 +190,7 @@ export function parseSkillFrontmatter(meta: Record<string,AnyValue>, fallbackNam
   whenToUse?: string;
   paths?: string[];
   allowedTools?: string[];
+  requiredTools?: string[];
   context?: 'inline' | 'fork';
   model?: string;
   argumentHint?: string;
@@ -197,14 +201,15 @@ export function parseSkillFrontmatter(meta: Record<string,AnyValue>, fallbackNam
   const ctxRaw = meta.context;
   const context = ctxRaw === 'fork' ? 'fork' : ctxRaw === 'inline' ? 'inline' : undefined;
   return {
-    title: String(meta.title ?? fallbackName),
-    description: String(meta.description ?? '(no description)'),
+    title: String(meta.title ?? fallbackName).trim().slice(0, 120),
+    description: String(meta.description ?? '(no description)').trim().replace(/\s+/g, ' ').slice(0, 280),
     triggers: asStringArray(meta.triggers),
     whenToUse: typeof meta.when_to_use === 'string' ? meta.when_to_use
               : typeof meta.whenToUse === 'string' ? meta.whenToUse
               : undefined,
     paths: asStringArray(meta.paths),
     allowedTools: asStringArray(meta['allowed-tools'] ?? meta.allowedTools),
+    requiredTools: asStringArray(meta['required-tools'] ?? meta.requiredTools ?? meta.tools),
     context,
     model: typeof meta.model === 'string' ? meta.model : undefined,
     argumentHint: typeof meta['argument-hint'] === 'string' ? meta['argument-hint']
@@ -226,6 +231,7 @@ export interface BundledSkillDef {
   triggers?: string[];
   paths?: string[];
   allowedTools?: string[];
+  requiredTools?: string[];
   context?: 'inline' | 'fork';
   model?: string;
   argumentHint?: string;
@@ -250,6 +256,7 @@ export function registerBundledSkill(def: BundledSkillDef): void {
     triggers: def.triggers,
     paths: def.paths,
     allowedTools: def.allowedTools,
+    requiredTools: def.requiredTools,
     context: def.context,
     model: def.model,
     argumentHint: def.argumentHint,
@@ -538,4 +545,4 @@ export async function getSkill(app: App, name: string): Promise<Skill | null> {
   const all = await discoverSkills(app);
   return all.find(s => s.name === name) ?? null;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
+/* eslint-enable @typescript-eslint/no-unsafe-assignment -- Re-enable review lint rules after dynamic boundary module. */

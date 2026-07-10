@@ -1,14 +1,13 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+
 /**
  * Budget-aware skill listing for system-prompt injection.
  *
- * Mirrors upstream Claude Code's `formatCommandsWithinBudget`. Allocates 1% of
+ * Mirrors upstream Claude Code's `formatCommandsWithinBudget`. Allocates 0.5% of
  * the context window (in characters) to skill listing. When the full listing
  * fits, we emit it verbatim. When it doesn't:
- *   1. Bundled skills always keep full descriptions (we ship them, we trust them).
- *   2. Other skills get description truncated to fit.
- *   3. If even names+truncated wouldn't fit, fall back to names-only for
- *      non-bundled, full descriptions for bundled.
+ *   1. Keep every skill name when possible.
+ *   2. Allocate description space fairly, with bundled skills first.
+ *   3. Enforce the hard budget even with hundreds of skills.
  *
  * Skill order priority within the budget:
  *   - frequency (most-used first) when usage data available
@@ -20,14 +19,19 @@ import { listAvailableSkills } from './tools/skill';
 import { getSkillUsage, sortByFrequency } from './skill_usage';
 
 const CHARS_PER_TOKEN = 4;
-const SKILL_BUDGET_PCT = 0.01;
-const DEFAULT_BUDGET_CHARS = 8_000;       // 1% of 200k × 4 = 8000
+const SKILL_BUDGET_PCT = 0.005;
+const DEFAULT_BUDGET_CHARS = 4_000;
+const MIN_BUDGET_CHARS = 512;
+const MAX_BUDGET_CHARS = 6_000;
 const PER_ENTRY_DESC_CAP = 250;            // hard per-entry cap
 const MIN_DESC_LEN = 20;                   // minimum useful description length
 
 function getCharBudget(contextWindowTokens?: number): number {
   if (contextWindowTokens && contextWindowTokens > 0) {
-    return Math.floor(contextWindowTokens * CHARS_PER_TOKEN * SKILL_BUDGET_PCT);
+    return Math.max(MIN_BUDGET_CHARS, Math.min(
+      MAX_BUDGET_CHARS,
+      Math.floor(contextWindowTokens * CHARS_PER_TOKEN * SKILL_BUDGET_PCT),
+    ));
   }
   return DEFAULT_BUDGET_CHARS;
 }
@@ -44,13 +48,6 @@ function formatFull(s: Skill): string {
   return `- ${s.name}: ${getEntryDescription(s)}`;
 }
 
-/** Truncate `s` to fit in `maxLen` chars (including ellipsis). */
-function truncate(s: string, maxLen: number): string {
-  if (s.length <= maxLen) return s;
-  if (maxLen <= 1) return '…';
-  return s.slice(0, maxLen - 1) + '…';
-}
-
 /** Render the skill list into a single markdown block ready to splice into
  *  the system prompt. Returns the empty string when there are no skills. */
 export function formatSkillListing(skills: Skill[], contextWindowTokens?: number): string {
@@ -64,35 +61,67 @@ export function formatSkillListing(skills: Skill[], contextWindowTokens?: number
     return fullEntries.map(e => e.line).join('\n');
   }
 
-  // 2. Partition bundled vs rest. Bundled keeps full description always.
-  const bundledLines: string[] = [];
-  const restSkills: Skill[] = [];
-  let bundledChars = 0;
-  for (const e of fullEntries) {
-    if (e.s.source === 'bundled') {
-      bundledLines.push(e.line);
-      bundledChars += e.line.length + 1;
-    } else {
-      restSkills.push(e.s);
+  // 2. Reserve names first so a long description cannot hide later skills.
+  const nameLines = skills.map(skill => `- ${skill.name}`);
+  const namesTotal = nameLines.reduce((sum, line) => sum + line.length + 1, -1);
+  if (namesTotal > budget) return fitNamesWithinBudget(nameLines, budget);
+
+  // 3. Give each entry a useful minimum description, then distribute the
+  // remaining budget in small round-robin chunks. Bundled entries go first,
+  // but cannot consume the entire budget in one pass.
+  const descriptions = skills.map(getEntryDescription);
+  const allocations = skills.map(() => 0);
+  const priority = skills
+    .map((skill, index) => ({ skill, index }))
+    .sort((a, b) => Number(b.skill.source === 'bundled') - Number(a.skill.source === 'bundled'))
+    .map(entry => entry.index);
+  let remaining = budget - namesTotal;
+  for (const index of priority) {
+    const initial = Math.min(MIN_DESC_LEN, descriptions[index].length);
+    if (initial === 0 || remaining < initial + 2) continue;
+    allocations[index] = initial;
+    remaining -= initial + 2;
+  }
+  while (remaining > 0) {
+    let progressed = false;
+    for (const index of priority) {
+      if (allocations[index] === 0) continue;
+      const available = descriptions[index].length - allocations[index];
+      if (available <= 0) continue;
+      const chunk = Math.min(16, available, remaining);
+      allocations[index] += chunk;
+      remaining -= chunk;
+      progressed = true;
+      if (remaining === 0) break;
     }
-  }
-  const remaining = budget - bundledChars;
-  if (restSkills.length === 0) return bundledLines.join('\n');
-
-  // 3. Compute per-rest-skill name overhead and divvy the remainder.
-  const restNameOverhead = restSkills.reduce((sum, s) => sum + `- ${s.name}: `.length, 0) + (restSkills.length - 1);
-  const availableForDescs = remaining - restNameOverhead;
-  const maxDescLen = Math.floor(availableForDescs / restSkills.length);
-
-  if (maxDescLen < MIN_DESC_LEN) {
-    // 4. Names-only fallback for non-bundled.
-    const restNames = restSkills.map(s => `- ${s.name}`);
-    return [...bundledLines, ...restNames].join('\n');
+    if (!progressed) break;
   }
 
-  // 5. Truncate non-bundled descriptions.
-  const restLines = restSkills.map(s => `- ${s.name}: ${truncate(getEntryDescription(s), maxDescLen)}`);
-  return [...bundledLines, ...restLines].join('\n');
+  return nameLines.map((line, index) => {
+    const length = allocations[index];
+    if (length === 0) return line;
+    const description = descriptions[index];
+    const rendered = length < description.length && length > 1
+      ? description.slice(0, length - 1) + '…'
+      : description.slice(0, length);
+    return `${line}: ${rendered}`;
+  }).join('\n');
+}
+
+function fitNamesWithinBudget(lines: readonly string[], budget: number): string {
+  const out: string[] = [];
+  for (const line of lines) {
+    const candidate = [...out, line].join('\n');
+    if (candidate.length > budget) break;
+    out.push(line);
+  }
+  const hidden = lines.length - out.length;
+  if (hidden > 0) {
+    const marker = `- … ${hidden} more`;
+    while (out.length > 0 && [...out, marker].join('\n').length > budget) out.pop();
+    if (marker.length <= budget) out.push(marker);
+  }
+  return out.join('\n');
 }
 
 /** Produce the full "Available Skills" block (with header) for the system
@@ -111,10 +140,9 @@ export async function buildSkillSystemBlock(
     '',
     '## Available Skills',
     '',
-    'You can invoke any of the following skills via the `skill` tool (pass the name as `skill`). Each provides specialized guidance. When the user request matches a skill, invoke it BEFORE other actions.',
+    'Use `skill` only when one playbook materially improves the task. Invoke the single best match once before task-specific tools; skip skills for direct answers and routine edits.',
     '',
     body,
     '',
   ].join('\n');
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-duplicate-type-constituents, @typescript-eslint/only-throw-error, @typescript-eslint/no-unused-vars -- Re-enable review lint rules after dynamic boundary module. */
