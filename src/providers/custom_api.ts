@@ -31,8 +31,9 @@ function redactErrorBody(s: string): string {
 }
 
 function withReasoningEffortHint(ep: Endpoint, message: string): string {
-  if (ep.reasoningEffort !== 'xhigh') return message;
-  return `${message}\nReasoning xhigh was sent without fallback. If this endpoint rejects it, switch Reasoning to high or lower.`;
+  const effort = ep.reasoningEffort;
+  if (!effort || effort === 'off') return message;
+  return `${message}\nReasoning effort "${effort}" was sent unchanged. The selected model or gateway may not support this value.`;
 }
 
 /** OpenAI-compatible + Anthropic-style endpoints. */
@@ -72,7 +73,15 @@ export class CustomApiProvider implements LLMProvider {
 
   private applyAnthropicThinking(body: AnyValue): void {
     if (!this.ep.reasoningEffort || this.ep.reasoningEffort === 'off') return;
-    const budgets: Record<string, number> = { low: 4_000, medium: 16_000, high: 32_000, xhigh: 64_000 };
+    const budgets: Record<string, number> = {
+      minimal: 1_024,
+      low: 4_000,
+      medium: 16_000,
+      high: 32_000,
+      xhigh: 64_000,
+      max: 96_000,
+      ultra: 128_000,
+    };
     const budget = budgets[this.ep.reasoningEffort] ?? 0;
     if (budget > 0) {
       body.thinking = { type: 'enabled', budget_tokens: budget };

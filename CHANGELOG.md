@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file. Format adhe
 
 ## [Unreleased]
 
+## [0.6.8] — 2026-07-12
+
+### Added
+- Added a searchable Tools & Skills catalog that exposes default and on-demand tools, approval boundaries, Skill triggers, required tools, sources, and validation status.
+- Added `off`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and `ultra` reasoning choices for compatible endpoints.
+
+### Changed
+- Reorganized settings into five task-focused areas with a compact status header and an always-available Auto, English, and Chinese language control.
+- Replaced native settings dropdowns with one keyboard-accessible popup selector so labels, checkmarks, arrows, and row geometry stay consistent.
+- Moved Export chat and Settings into dedicated header actions and removed the generic overflow menu.
+- Sent OpenAI-compatible reasoning values unchanged, omitted the field only for `off`, and surfaced provider rejection details instead of silently lowering the selected effort.
+- Extended Anthropic-style thinking budgets for the expanded reasoning range.
+
+### Fixed
+- Fixed misaligned checks and labels in endpoint, model, language, reasoning, permission, and approval selectors.
+- Fixed approval diff checkbox geometry so its checked state remains centered and stable.
+
+### Checks
+- Added regression coverage for reasoning pass-through, unsupported-level errors, settings capability copy, custom selector behavior, and native-dropdown removal.
+
 ## [0.6.7] — 2026-07-10
 
 ### Added

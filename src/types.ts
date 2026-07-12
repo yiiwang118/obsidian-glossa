@@ -104,12 +104,33 @@ export interface SlashCommand {
 
 /** Unified reasoning-effort knob mapped per provider:
  *   - Anthropic API: thinking { type:'enabled', budget_tokens: N }
- *   - OpenAI-compatible API: expose xhigh in Glossa, map to provider max when
- *     known; otherwise send 'xhigh' and let the endpoint decide
- *   - DeepSeek V4 API: reasoning_effort: 'high'|'max' (xhigh maps to max)
- *   - Codex CLI: `-c model_reasoning_effort="<value>"` — supports low/medium/high/xhigh
+ *   - OpenAI-compatible API: every non-off value is sent unchanged as
+ *     reasoning_effort; unsupported models return the provider's API error
+ *   - `ultra` is retained as a passthrough extension for compatible gateways
+ *   - Codex CLI: `-c model_reasoning_effort="<value>"`
  *   - Claude Code CLI: `--thinking <value>` */
-export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort =
+  | 'off'
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max'
+  | 'ultra';
+
+export const REASONING_EFFORT_OPTIONS: readonly ReasoningEffort[] = [
+  'off',
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+  'ultra',
+];
 
 export interface Endpoint {
   id: string;
@@ -172,20 +193,12 @@ export function isDeepSeekEndpoint(ep: Partial<Pick<Endpoint, 'label' | 'baseUrl
 
 export function reasoningOptionsForEndpoint(ep?: Endpoint | null): ReasoningEffort[] {
   if (!ep) return [];
-  if (ep.kind === 'codex-cli') return ['off', 'low', 'medium', 'high', 'xhigh'];
-  if (ep.kind === 'claude-code-cli') return ['off', 'low', 'medium', 'high'];
-  if (ep.apiStyle === 'anthropic') return ['off', 'low', 'medium', 'high', 'xhigh'];
-  if (isDeepSeekEndpoint(ep)) return ['off', 'high', 'xhigh'];
-  return ['off', 'low', 'medium', 'high', 'xhigh'];
+  return [...REASONING_EFFORT_OPTIONS];
 }
 
 export function mapOpenAIReasoningEffort(ep: Endpoint, effort?: ReasoningEffort): string | null {
+  void ep;
   if (!effort || effort === 'off') return null;
-  if (isDeepSeekEndpoint(ep)) {
-    if (effort === 'xhigh') return 'max';
-    if (effort === 'low' || effort === 'medium') return 'high';
-    return effort;
-  }
   return effort;
 }
 

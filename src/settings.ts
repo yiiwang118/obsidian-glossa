@@ -3,17 +3,25 @@ import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
 import type GlossaPlugin from './main';
 import type { Endpoint, CustomPrompt, SlashCommand } from './types';
 import { reasoningOptionsForEndpoint } from './types';
-import { uid, setStyle } from './utils/dom';
+import { uid, setStyle, setTrustedSvg } from './utils/dom';
 import { CustomApiProvider } from './providers/custom_api';
 import { buildProvider } from './providers/registry';
-import { TOOLS } from './agent/tools';
-import { metaFor } from './agent/tool_meta';
+import { discoverSkills, type Skill } from './agent/skills';
+import { validateSkillDefinition } from './agent/skill_validation';
 import { t, bi } from './utils/i18n';
+import { ICON } from './ui/icons';
+import { Popup } from './ui/popup';
+import {
+  BUNDLED_SKILL_ZH,
+  TOOL_CATEGORY_COPY,
+  TOOL_CATEGORY_ORDER,
+  buildToolCapabilities,
+  type ToolCapability,
+} from './ui/capability_catalog';
 
 const HTTP_PROXY_PLACEHOLDER = ['http', '://127.0.0.1:7890'].join('');
 const HTTPS_API_PLACEHOLDER = ['https', '://api.example.com/v1'].join('');
 const API_KEY_PLACEHOLDER = 'sk-' + '...';
-const DETECT_BUTTON_LABEL = '↻ ' + 'Detect';
 
 function normalizeModelList(models: string[]): string[] {
   return [...new Set(models.map(m => String(m).trim()).filter(Boolean))]
@@ -41,6 +49,68 @@ function parseNonNegativeFloat(value: string, fallback = 0): number {
   const parsed = Number.parseFloat(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(0, parsed);
+}
+
+interface AlignedSelectOption<T extends string> {
+  value: T;
+  label: string;
+  hint?: string;
+}
+
+function createAlignedSelect<T extends string>(
+  parent: HTMLElement,
+  popup: Popup,
+  options: readonly AlignedSelectOption<T>[],
+  value: T,
+  onChange: (value: T) => void | Promise<void>,
+  ariaLabel: string,
+): HTMLButtonElement {
+  let current = value;
+  const button = parent.createEl('button', {
+    cls: 'nc-aligned-select',
+    attr: {
+      type: 'button',
+      'aria-label': ariaLabel,
+      'aria-haspopup': 'listbox',
+      'aria-expanded': 'false',
+    },
+  });
+
+  const renderValue = () => {
+    button.empty();
+    const selected = options.find(option => option.value === current) ?? options[0];
+    button.createEl('span', {
+      cls: 'nc-aligned-select-label',
+      text: selected?.label ?? current,
+    });
+    const icon = button.createEl('span', { cls: 'nc-aligned-select-chevron' });
+    setTrustedSvg(icon, ICON.chevronDown);
+  };
+  const open = () => {
+    if (popup.isOpen() && popup.currentAnchor() === button) {
+      popup.hide();
+      return;
+    }
+    popup.show(button, options.map(option => ({
+      label: option.label,
+      hint: option.hint,
+      checked: option.value === current,
+      onSelect: async () => {
+        if (option.value === current) return;
+        current = option.value;
+        renderValue();
+        await onChange(option.value);
+      },
+    })));
+  };
+  button.onclick = open;
+  button.onkeydown = (event) => {
+    if (event.key !== 'ArrowDown' || popup.isOpen()) return;
+    event.preventDefault();
+    open();
+  };
+  renderValue();
+  return button;
 }
 
 /* ============================================================
@@ -74,13 +144,9 @@ const PRESETS: Preset[] = [
   { name: 'SiliconFlow', color: '#00b96b', baseUrl: 'https://api.siliconflow.cn/v1',                       defaultModel: 'deepseek-ai/DeepSeek-V2.5', apiStyle: 'openai' },
 ];
 
-const KIND_CARDS = [
-  { kind: 'custom-api' as const,      title: 'Custom API',     badge: 'HTTP',  desc: 'Any OpenAI / Anthropic-compatible endpoint. DeepSeek, Qwen, GLM, MiniMax, Ollama, etc.' },
-];
-
 function renderWarningHint(parent: HTMLElement, text: string) {
   const hint = parent.createEl('div', { cls: 'nc-info-hint nc-warning-hint' });
-  hint.createEl('strong', { text: 'Warning' });
+  hint.createEl('strong', { text: bi('Warning', '警告') });
   hint.appendText(` — ${text}`);
   return hint;
 }
@@ -133,55 +199,166 @@ function localCliWarning(kind: Endpoint['kind']): string | null {
    Settings tab
    ============================================================ */
 
-type SettingsTab = 'general' | 'providers' | 'agent' | 'security' | 'rag' | 'mcp' | 'workflows' | 'advanced';
+type SettingsTab = 'general' | 'providers' | 'agent' | 'capabilities' | 'advanced';
+
+const SETTINGS_TABS: Array<{
+  id: SettingsTab;
+  label: () => string;
+  title: () => string;
+  description: () => string;
+}> = [
+  {
+    id: 'general',
+    label: () => bi('General', '常规'),
+    title: () => bi('Everyday behavior', '日常使用'),
+    description: () => bi(
+      'Language, appearance, context attachment, exports, and update checks.',
+      '设置语言、显示、上下文附加、导出位置与版本检查。',
+    ),
+  },
+  {
+    id: 'providers',
+    label: () => bi('Models & web', '模型与网络'),
+    title: () => bi('Models and network access', '模型与网络访问'),
+    description: () => bi(
+      'Connect a model endpoint, test it, and configure web research or proxy behavior.',
+      '连接并测试模型端点，同时配置网页研究与代理行为。',
+    ),
+  },
+  {
+    id: 'agent',
+    label: () => 'Agent',
+    title: () => bi('Agent behavior', 'Agent 行为'),
+    description: () => bi(
+      'Choose the default mode, write boundary, step budget, approvals, and context compaction.',
+      '设置默认模式、写入边界、步数预算、审批规则与上下文压缩。',
+    ),
+  },
+  {
+    id: 'capabilities',
+    label: () => bi('Tools & skills', '工具与 Skills'),
+    title: () => bi('Agent capabilities', 'Agent 能力'),
+    description: () => bi(
+      'See what the agent can do, which tools load on demand, and when each Skill activates.',
+      '查看 Agent 能做什么、哪些工具按需加载，以及每个 Skill 何时触发。',
+    ),
+  },
+  {
+    id: 'advanced',
+    label: () => bi('Data & advanced', '数据与高级'),
+    title: () => bi('Data, retrieval, and advanced controls', '数据、检索与高级控制'),
+    description: () => bi(
+      'Encryption, checkpoints, semantic search, custom commands, and maintenance.',
+      '管理加密、检查点、语义搜索、自定义命令与维护操作。',
+    ),
+  },
+];
 
 export class GlossaSettingTab extends PluginSettingTab {
   private activeTab: SettingsTab = 'general';
+  private renderGeneration = 0;
+  private readonly selectPopup = new Popup();
 
   constructor(app: App, public plugin: GlossaPlugin) { super(app, plugin); }
 
   display(): void {
+    this.selectPopup.hide();
+    const generation = ++this.renderGeneration;
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass('nc-settings');
 
-    this.renderHeading(containerEl, 'Glossa', undefined, true);
-    const intro = containerEl.createEl('p', {
-      text: 'AI sidekick for your Obsidian vault — chat, agent mode, retrieval, and tool integrations.',
-      cls: 'setting-item-description',
+    const header = containerEl.createEl('div', { cls: 'nc-settings-header' });
+    header.dataset.glossaAlways = 'true';
+    const headerMain = header.createEl('div', { cls: 'nc-settings-header-main' });
+    const headerCopy = headerMain.createEl('div', { cls: 'nc-settings-header-copy' });
+    headerCopy.createEl('h2', { text: 'Glossa' });
+    headerCopy.createEl('p', {
+      text: bi(
+        'Configure models, Agent behavior, tools, and data without digging through unrelated options.',
+        '集中配置模型、Agent 行为、工具与数据，不必在无关选项之间来回查找。',
+      ),
     });
-    intro.dataset.glossaAlways = 'true';
+    const status = headerCopy.createEl('div', { cls: 'nc-settings-status' });
+    const endpoint = this.plugin.settings.endpoints.find(ep => ep.id === this.plugin.settings.activeEndpointId);
+    status.createEl('span', {
+      text: endpoint
+        ? bi(`Model: ${endpoint.label}`, `模型：${endpoint.label}`)
+        : bi('Model not configured', '尚未配置模型'),
+      cls: 'nc-settings-status-chip',
+    });
+    status.createEl('span', {
+      text: this.plugin.settings.runMode === 'act' ? 'Act' : 'Plan',
+      cls: `nc-settings-status-chip ${this.plugin.settings.runMode === 'act' ? 'is-act' : ''}`,
+    });
+    this.renderLanguageControl(headerMain);
 
-    // ---- Tab bar ----
-    const tabs: { id: SettingsTab; label: string }[] = [
-      { id: 'general',   label: 'General' },
-      { id: 'providers', label: 'Providers' },
-      { id: 'agent',     label: 'Agent' },
-      { id: 'security',  label: 'Security' },
-      { id: 'rag',       label: 'RAG' },
-      { id: 'mcp',       label: 'MCP' },
-      { id: 'workflows', label: 'Workflows' },
-      { id: 'advanced',  label: 'Advanced' },
-    ];
     const bar = containerEl.createEl('div', { cls: 'nc-settings-tabs' });
     bar.setAttribute('role', 'tablist');
-    for (const t of tabs) {
-      const tabEl = bar.createEl('div', { cls: 'nc-settings-tab' + (this.activeTab === t.id ? ' active' : ''), text: t.label });
+    for (const [index, tab] of SETTINGS_TABS.entries()) {
+      const tabEl = bar.createEl('button', {
+        cls: `nc-settings-tab${this.activeTab === tab.id ? ' active' : ''}`,
+        text: tab.label(),
+        attr: { type: 'button' },
+      });
       tabEl.setAttribute('role', 'tab');
-      tabEl.setAttribute('aria-selected', String(this.activeTab === t.id));
-      tabEl.tabIndex = this.activeTab === t.id ? 0 : -1;
-      tabEl.onclick = () => { this.activeTab = t.id; this.display(); };
-      tabEl.onkeydown = (evt) => {
-        if (evt.key !== 'Enter' && evt.key !== ' ') return;
-        evt.preventDefault();
-        tabEl.click();
+      tabEl.setAttribute('aria-selected', String(this.activeTab === tab.id));
+      tabEl.tabIndex = this.activeTab === tab.id ? 0 : -1;
+      tabEl.onclick = () => { this.activeTab = tab.id; this.display(); };
+      tabEl.onkeydown = (event) => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        event.preventDefault();
+        const offset = event.key === 'ArrowRight' ? 1 : -1;
+        const next = SETTINGS_TABS[(index + offset + SETTINGS_TABS.length) % SETTINGS_TABS.length];
+        this.activeTab = next.id;
+        this.display();
+        window.requestAnimationFrame(() => {
+          this.containerEl.querySelector<HTMLButtonElement>('.nc-settings-tab.active')?.focus();
+        });
       };
     }
+    bar.dataset.glossaAlways = 'true';
 
-    // Render all the sections into a single document, then hide everything not matching activeTab.
-    // (Keeps code simple — full-page rebuild is fine at human speed.)
-    this.renderAll(containerEl);
+    const activeCopy = SETTINGS_TABS.find(tab => tab.id === this.activeTab) ?? SETTINGS_TABS[0];
+    const pageIntro = containerEl.createEl('div', { cls: 'nc-settings-page-intro' });
+    pageIntro.dataset.glossaAlways = 'true';
+    pageIntro.createEl('h3', { text: activeCopy.title() });
+    pageIntro.createEl('p', { text: activeCopy.description() });
+
+    this.renderAll(containerEl, generation);
     this.applyTabFilter(containerEl);
+  }
+
+  hide(): void {
+    this.selectPopup.hide();
+    super.hide();
+  }
+
+  private renderLanguageControl(parent: HTMLElement): void {
+    const wrap = parent.createEl('div', { cls: 'nc-settings-language' });
+    wrap.createEl('span', { text: bi('Interface language', '界面语言'), cls: 'nc-settings-language-label' });
+    const control = wrap.createEl('div', { cls: 'nc-settings-language-options' });
+    control.setAttribute('role', 'group');
+    control.setAttribute('aria-label', bi('Interface language', '界面语言'));
+    const options: Array<{ value: 'auto' | 'en' | 'zh'; label: string }> = [
+      { value: 'auto', label: bi('Auto', '自动') },
+      { value: 'en', label: 'EN' },
+      { value: 'zh', label: '中文' },
+    ];
+    for (const option of options) {
+      const button = control.createEl('button', {
+        text: option.label,
+        cls: this.plugin.settings.uiLanguage === option.value ? 'is-active' : '',
+        attr: { type: 'button' },
+      });
+      button.setAttribute('aria-pressed', String(this.plugin.settings.uiLanguage === option.value));
+      button.onclick = async () => {
+        if (this.plugin.settings.uiLanguage === option.value) return;
+        this.plugin.settings.uiLanguage = option.value;
+        await this.plugin.saveSettings();
+        this.display();
+      };
+    }
   }
 
   private applyTabFilter(container: HTMLElement) {
@@ -193,8 +370,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     const children = Array.from(container.children) as HTMLElement[];
     let currentTab: SettingsTab = 'general';
     for (const child of children) {
-      // Top-of-page items: title, opening description, tab bar — always visible.
-      if (child.dataset.glossaAlways === 'true' || child.classList.contains('nc-settings-tabs')) {
+      if (child.dataset.glossaAlways === 'true') {
         setStyle(child, { display: '' });
         continue;
       }
@@ -202,8 +378,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       // Explicit data-tab attribute on h3 / setting block.
       const explicit = child.dataset?.tab as SettingsTab | undefined;
       if (explicit) { currentTab = explicit; }
-      // Legacy: nc-security-banner used to drift state; keep for safety.
-      else if (child.classList.contains('nc-security-banner')) { currentTab = 'security'; }
+      else if (child.classList.contains('nc-security-banner')) { currentTab = 'advanced'; }
 
       setStyle(child, { display: (currentTab === this.activeTab) ? '' : 'none' });
     }
@@ -216,8 +391,9 @@ export class GlossaSettingTab extends PluginSettingTab {
     return heading;
   }
 
-  private createSettingsGroup(parent: HTMLElement, title: string, desc?: string, open = false): HTMLElement {
+  private createSettingsGroup(parent: HTMLElement, title: string, desc?: string, open = false, tab?: SettingsTab): HTMLElement {
     const details = parent.createEl('details', { cls: 'nc-settings-group' });
+    if (tab) details.dataset.tab = tab;
     details.open = open;
     const summary = details.createEl('summary', { cls: 'nc-settings-group-summary' });
     summary.createEl('span', { cls: 'nc-settings-group-title', text: title });
@@ -225,7 +401,186 @@ export class GlossaSettingTab extends PluginSettingTab {
     return details.createEl('div', { cls: 'nc-settings-group-body' });
   }
 
-  private renderAll(containerEl: HTMLElement): void {
+  private renderCapabilities(containerEl: HTMLElement, generation: number): void {
+    this.renderHeading(containerEl, bi('Tools & Skills', '工具与 Skills'), 'capabilities');
+    const catalog = buildToolCapabilities(this.plugin.settings.agentAlwaysApproveTools);
+    const initialCount = catalog.filter(tool => !tool.deferred).length;
+    const deferredCount = catalog.length - initialCount;
+
+    const overview = containerEl.createEl('div', { cls: 'nc-capability-overview' });
+    const intro = overview.createEl('div', { cls: 'nc-capability-overview-copy' });
+    intro.createEl('strong', { text: bi('Progressive capability loading', '渐进式能力加载') });
+    intro.createEl('p', {
+      text: bi(
+        'Core tool schemas are ready immediately. Specialized tools and full Skill instructions load only when the task matches, keeping the model context focused.',
+        '核心工具会立即可用；专业工具与完整 Skill 指令只在任务匹配时加载，让模型上下文保持专注。',
+      ),
+    });
+    const stats = overview.createEl('div', { cls: 'nc-capability-stats' });
+    this.renderCapabilityStat(stats, String(catalog.length), bi('Available tools', '可用工具'));
+    this.renderCapabilityStat(stats, String(initialCount), bi('Ready by default', '默认加载'));
+    this.renderCapabilityStat(stats, String(deferredCount), bi('On demand', '按需加载'));
+    const skillCount = this.renderCapabilityStat(stats, '…', 'Skills');
+
+    const searchWrap = containerEl.createEl('div', { cls: 'nc-capability-search' });
+    const searchIcon = searchWrap.createEl('span', { cls: 'nc-capability-search-icon' });
+    setTrustedSvg(searchIcon, ICON.search);
+    const search = searchWrap.createEl('input', {
+      type: 'search',
+      placeholder: bi('Search tools and Skills', '搜索工具与 Skills'),
+      attr: { 'aria-label': bi('Search tools and Skills', '搜索工具与 Skills') },
+    });
+
+    const toolSection = containerEl.createEl('section', { cls: 'nc-capability-section' });
+    const toolHeader = toolSection.createEl('div', { cls: 'nc-capability-section-head' });
+    toolHeader.createEl('h4', { text: bi('Tools', '工具') });
+    toolHeader.createEl('span', { text: String(catalog.length) });
+    const toolGroups = toolSection.createEl('div', { cls: 'nc-capability-groups' });
+    for (const category of TOOL_CATEGORY_ORDER) {
+      const tools = catalog.filter(tool => tool.category === category);
+      if (tools.length === 0) continue;
+      const group = toolGroups.createEl('div', { cls: 'nc-capability-group' });
+      group.createEl('h5', { text: bi(TOOL_CATEGORY_COPY[category].en, TOOL_CATEGORY_COPY[category].zh) });
+      const rows = group.createEl('div', { cls: 'nc-capability-list' });
+      for (const tool of tools) this.renderToolCapability(rows, tool);
+    }
+
+    const skillSection = containerEl.createEl('section', { cls: 'nc-capability-section nc-skill-section' });
+    const skillHeader = skillSection.createEl('div', { cls: 'nc-capability-section-head' });
+    skillHeader.createEl('h4', { text: 'Skills' });
+    skillHeader.createEl('span', { text: bi('Loading…', '加载中…'), cls: 'nc-skill-count' });
+    const skillList = skillSection.createEl('div', { cls: 'nc-capability-list' });
+    skillList.createEl('div', { cls: 'nc-capability-loading', text: bi('Discovering available Skills…', '正在发现可用 Skills…') });
+
+    const empty = containerEl.createEl('div', {
+      cls: 'nc-capability-empty',
+      text: bi('No matching tools or Skills.', '没有匹配的工具或 Skill。'),
+    });
+    setStyle(empty, { display: 'none' });
+
+    const applySearch = () => {
+      const query = search.value.trim().toLocaleLowerCase();
+      let visible = 0;
+      for (const row of Array.from(containerEl.querySelectorAll<HTMLElement>('.nc-capability-row'))) {
+        const match = !query || (row.dataset.filterText ?? '').includes(query);
+        row.toggleClass('is-filtered', !match);
+        if (match) visible += 1;
+      }
+      for (const group of Array.from(toolGroups.querySelectorAll<HTMLElement>('.nc-capability-group'))) {
+        group.toggleClass('is-filtered', !group.querySelector('.nc-capability-row:not(.is-filtered)'));
+      }
+      toolSection.toggleClass('is-filtered', !toolSection.querySelector('.nc-capability-row:not(.is-filtered)'));
+      skillSection.toggleClass('is-filtered', !skillSection.querySelector('.nc-capability-row:not(.is-filtered)'));
+      setStyle(empty, { display: visible === 0 ? '' : 'none' });
+    };
+    search.oninput = applySearch;
+
+    if (this.activeTab !== 'capabilities') return;
+    void discoverSkills(this.app).then(skills => {
+      if (generation !== this.renderGeneration || !skillList.isConnected) return;
+      skillList.empty();
+      const availableTools = new Set(catalog.map(tool => tool.name));
+      for (const skill of skills) this.renderSkillCapability(skillList, skill, availableTools);
+      skillHeader.querySelector('.nc-skill-count')?.setText(String(skills.length));
+      skillCount.setText(String(skills.length));
+      if (skills.length === 0) {
+        skillList.createEl('div', {
+          cls: 'nc-capability-loading',
+          text: bi('No Skills are available.', '当前没有可用 Skill。'),
+        });
+      }
+      applySearch();
+    }).catch(() => {
+      if (generation !== this.renderGeneration || !skillList.isConnected) return;
+      skillList.empty();
+      skillList.createEl('div', {
+        cls: 'nc-capability-loading',
+        text: bi('Skills could not be loaded.', 'Skills 加载失败。'),
+      });
+      skillHeader.querySelector('.nc-skill-count')?.setText('0');
+      skillCount.setText('0');
+      applySearch();
+    });
+  }
+
+  private renderCapabilityStat(parent: HTMLElement, value: string, label: string): HTMLElement {
+    const stat = parent.createEl('div', { cls: 'nc-capability-stat' });
+    const valueEl = stat.createEl('strong', { text: value });
+    stat.createEl('span', { text: label });
+    return valueEl;
+  }
+
+  private renderToolCapability(parent: HTMLElement, tool: ToolCapability): void {
+    const row = parent.createEl('div', { cls: 'nc-capability-row nc-tool-capability' });
+    const label = bi(tool.labelEn, tool.labelZh);
+    const description = bi(tool.descriptionEn, tool.descriptionZh);
+    row.dataset.filterText = `${tool.name} ${tool.labelEn} ${tool.labelZh} ${tool.descriptionEn} ${tool.descriptionZh}`.toLocaleLowerCase();
+    const icon = row.createEl('span', { cls: 'nc-capability-icon' });
+    setTrustedSvg(icon, tool.icon);
+    const copy = row.createEl('div', { cls: 'nc-capability-copy' });
+    const title = copy.createEl('div', { cls: 'nc-capability-title' });
+    title.createEl('strong', { text: label });
+    title.createEl('code', { text: tool.name });
+    copy.createEl('p', { text: description });
+    const badges = row.createEl('div', { cls: 'nc-capability-badges' });
+    badges.createEl('span', {
+      cls: tool.deferred ? 'is-deferred' : 'is-ready',
+      text: tool.deferred ? bi('On demand', '按需加载') : bi('Ready', '默认可用'),
+    });
+    if (tool.autoApproved) {
+      badges.createEl('span', { cls: 'is-approved', text: bi('Auto-approved', '自动批准') });
+    } else if (tool.dangerous) {
+      badges.createEl('span', { cls: 'is-approval', text: bi('Approval', '需要审批') });
+    } else {
+      badges.createEl('span', { text: bi('Read only', '只读') });
+    }
+  }
+
+  private renderSkillCapability(parent: HTMLElement, skill: Skill, availableTools: ReadonlySet<string>): void {
+    const zh = BUNDLED_SKILL_ZH[skill.name];
+    const titleText = bi(skill.title, zh?.title ?? skill.title);
+    const description = bi(skill.description, zh?.description ?? skill.description);
+    const when = bi(skill.whenToUse ?? '', zh?.whenToUse ?? skill.whenToUse ?? '');
+    const issues = validateSkillDefinition(skill, availableTools);
+    const errors = issues.filter(issue => issue.severity === 'error').length;
+    const warnings = issues.length - errors;
+    const row = parent.createEl('div', { cls: 'nc-capability-row nc-skill-capability' });
+    row.dataset.filterText = [
+      skill.name, skill.title, titleText, skill.description, description, skill.whenToUse, when,
+      ...(skill.triggers ?? []), ...(skill.paths ?? []), ...(skill.requiredTools ?? []),
+    ].filter(Boolean).join(' ').toLocaleLowerCase();
+    const icon = row.createEl('span', { cls: 'nc-capability-icon' });
+    setTrustedSvg(icon, ICON.sparkles);
+    const copy = row.createEl('div', { cls: 'nc-capability-copy' });
+    const title = copy.createEl('div', { cls: 'nc-capability-title' });
+    title.createEl('strong', { text: titleText });
+    title.createEl('code', { text: skill.name });
+    copy.createEl('p', { text: description });
+    if (when) {
+      const whenEl = copy.createEl('p', { cls: 'nc-skill-when' });
+      whenEl.createEl('span', { text: bi('When', '触发') });
+      whenEl.appendText(when);
+    }
+    const details = copy.createEl('div', { cls: 'nc-skill-details' });
+    for (const path of (skill.paths ?? []).slice(0, 3)) details.createEl('code', { text: path });
+    for (const tool of (skill.requiredTools ?? []).slice(0, 4)) details.createEl('code', { text: tool });
+    const badges = row.createEl('div', { cls: 'nc-capability-badges' });
+    badges.createEl('span', { text: this.skillSourceLabel(skill.source) });
+    if (errors > 0) badges.createEl('span', { cls: 'is-error', text: bi(`${errors} error`, `${errors} 个错误`) });
+    else if (warnings > 0) badges.createEl('span', { cls: 'is-warning', text: bi(`${warnings} warning`, `${warnings} 个提醒`) });
+    else badges.createEl('span', { cls: 'is-ready', text: bi('Ready', '可用') });
+    if (skill.context === 'fork') badges.createEl('span', { text: bi('Isolated', '隔离运行') });
+  }
+
+  private skillSourceLabel(source: Skill['source']): string {
+    if (source === 'bundled') return bi('Built in', '内置');
+    if (source === 'project') return bi('Vault', 'Vault');
+    if (source === 'project-nested') return bi('Project', '项目');
+    if (source === 'legacy') return bi('Legacy', '旧版');
+    return bi('User', '用户');
+  }
+
+  private renderAll(containerEl: HTMLElement, generation: number): void {
 
     // Security banner — only shown when encryption is ON, so users in the
     // default (plaintext) flow aren't nagged about it on every settings open.
@@ -235,47 +590,38 @@ export class GlossaSettingTab extends PluginSettingTab {
     if (this.plugin.settings.encryptionEnabled) {
       const hasAnyPlainKey = this.plugin.settings.endpoints.some(ep => ep.apiKey && !ep.apiKey.startsWith('NCENC1:'));
       const hasAnyEncKey   = this.plugin.settings.endpoints.some(ep => ep.apiKey && ep.apiKey.startsWith('NCENC1:'));
-      const sec = containerEl.createEl('div', { cls: 'nc-security-banner', attr: { 'data-tab': 'security' } });
+      const sec = containerEl.createEl('div', { cls: 'nc-security-banner', attr: { 'data-tab': 'advanced' } });
       let title = '', body = '';
       if (!this.plugin.isUnlocked()) {
-        title = '🔒 Encrypted — locked';
-        body = `Keys are AES-GCM encrypted at rest. Run "Unlock encrypted keys" from the command palette to use them.`;
+        title = bi('Encrypted · locked', '已加密 · 已锁定');
+        body = bi(
+          'Keys are encrypted at rest. Run “Unlock encrypted keys” from the command palette before using the endpoint.',
+          '密钥已加密保存。使用端点前，请在命令面板运行“解锁加密密钥”。',
+        );
         sec.addClass('is-locked');
       } else if (hasAnyPlainKey && hasAnyEncKey) {
-        title = '⚠ Mixed';
-        body = `Some endpoints have plaintext keys despite encryption being on. Re-enter their API keys to encrypt them.`;
+        title = bi('Mixed key storage', '密钥存储状态不一致');
+        body = bi(
+          'Some endpoints still contain plaintext keys. Re-enter those keys to encrypt them.',
+          '部分端点仍保存着明文密钥，请重新输入这些密钥以完成加密。',
+        );
         sec.addClass('is-mixed');
       } else {
-        title = '🔓 Encrypted — unlocked';
-        body = `API keys decrypt in memory only. Restart Obsidian → lock again. Passphrase is never stored.`;
+        title = bi('Encrypted · unlocked', '已加密 · 已解锁');
+        body = bi(
+          'Keys are decrypted in memory only. Restarting the app locks them again; the passphrase is never stored.',
+          '密钥只在内存中解密。重启应用后会重新锁定，passphrase 不会被保存。',
+        );
         sec.addClass('is-unlocked');
       }
       sec.createEl('div', { cls: 'nc-security-title', text: title });
       sec.createEl('div', { cls: 'nc-security-body', text: body });
     }
 
-    /* ----- Language ----- */
-    const langSetting = new Setting(containerEl)
-      .setName(t('language'))
-      .setDesc(t('language_desc'))
-      .addDropdown(d => d
-        .addOption('auto', t('lang_auto'))
-        .addOption('en',   t('lang_en'))
-        .addOption('zh',   t('lang_zh'))
-        .setValue(this.plugin.settings.uiLanguage)
-        .onChange(async v => {
-          this.plugin.settings.uiLanguage = v as AnyValue;
-          await this.plugin.saveSettings();
-          // setLanguage() inside saveSettings triggers onLanguageChange
-          // subscribers; the view re-renders itself, and we redraw this tab.
-          this.display();
-        }));
-    langSetting.settingEl.dataset.tab = 'general';
-
     /* ----- Font size — drives the WHOLE plugin (prose + reasoning + lists) ----- */
     const fontSetting = new Setting(containerEl)
       .setName(t('font_size'))
-      .setDesc(t('font_size_desc'))
+      .setDesc(bi('Controls text throughout the sidebar. Default: 13 px.', '控制侧栏中的整体文字大小，默认 13 px。'))
       .addSlider(s => {
         s.setLimits(11, 18, 1).setValue(this.plugin.settings.reasoningFontSize ?? 13).setDynamicTooltip();
         // Debounce: Obsidian's slider fires 'input' on every drag pixel, which
@@ -324,18 +670,26 @@ export class GlossaSettingTab extends PluginSettingTab {
 
     /* ----- Active endpoint ----- */
     const activeEpSetting = new Setting(containerEl)
-      .setName(bi('Active endpoint', '当前 endpoint'))
-      .setDesc('')
-      .addDropdown(dd => {
-        if (this.plugin.settings.endpoints.length === 0) dd.addOption('', '(None — add one below)');
-        else for (const ep of this.plugin.settings.endpoints) dd.addOption(ep.id, `${ep.label} · ${ep.kind}`);
-        dd.setValue(this.plugin.settings.activeEndpointId ?? '');
-        dd.onChange(async v => { this.plugin.settings.activeEndpointId = v || null; await this.plugin.saveSettings(); });
-      });
+      .setName(bi('Active model endpoint', '当前模型端点'))
+      .setDesc(bi('Used for new messages unless a conversation already has its own endpoint.', '新消息默认使用该端点；已有对话仍保留各自选择。'));
+    const endpointOptions: AlignedSelectOption<string>[] = this.plugin.settings.endpoints.length === 0
+      ? [{ value: '', label: bi('None · add an endpoint below', '无 · 请在下方添加端点') }]
+      : this.plugin.settings.endpoints.map(ep => ({ value: ep.id, label: ep.label, hint: ep.kind }));
+    createAlignedSelect(
+      activeEpSetting.controlEl,
+      this.selectPopup,
+      endpointOptions,
+      this.plugin.settings.activeEndpointId ?? '',
+      async value => {
+        this.plugin.settings.activeEndpointId = value || null;
+        await this.plugin.saveSettings();
+      },
+      bi('Active model endpoint', '当前模型端点'),
+    );
     activeEpSetting.settingEl.dataset.tab = 'providers';
 
     /* ----- Proxy ----- */
-    this.renderHeading(containerEl, bi('Network', '网络'), 'advanced');
+    this.renderHeading(containerEl, bi('Network', '网络'), 'providers');
     const proxySetting = new Setting(containerEl)
       .setName(bi('Proxy', '代理'))
       .setDesc(bi('CLI only. Custom API follows system proxy.', '只对 CLI 生效。Custom API 跟随系统代理。'))
@@ -348,25 +702,37 @@ export class GlossaSettingTab extends PluginSettingTab {
     proxySetting.settingEl.dataset.glossaId = 'global-proxy';
 
     /* ----- Web research ----- */
-    this.renderHeading(containerEl, bi('Web research', '网页搜索'), 'advanced');
-    new Setting(containerEl)
+    const webGroup = this.createSettingsGroup(
+      containerEl,
+      bi('Web research and downloads', '网页研究与下载'),
+      bi('Search provider, approvals, download limits, and provenance.', '搜索来源、审批、下载限制与来源记录。'),
+      false,
+      'providers',
+    );
+    const searchProviderSetting = new Setting(webGroup)
       .setName(bi('Search provider', '搜索 provider'))
-      .setDesc(bi('Auto uses free vertical sources first, then fallback search. For Claude/Codex-like quality, configure Brave, Tavily, Exa, or SerpAPI.', 'Auto 会先用免费垂直源，再 fallback 搜索。想接近 Claude/Codex 的搜索质量，建议配置 Brave、Tavily、Exa 或 SerpAPI。'))
-      .addDropdown(d => d
-        .addOption('auto', 'Auto (recommended)')
-        .addOption('duckduckgo', 'DuckDuckGo (fallback)')
-        .addOption('brave', 'Brave Search')
-        .addOption('tavily', 'Tavily')
-        .addOption('exa', 'Exa')
-        .addOption('serpapi', 'SerpAPI')
-        .setValue(this.plugin.settings.webSearchProvider)
-        .onChange(async v => {
-          this.plugin.settings.webSearchProvider = v as AnyValue;
-          await this.plugin.saveSettings();
-          this.display();
-        }));
+      .setDesc(bi('Auto uses free vertical sources first, then fallback search. For Claude/Codex-like quality, configure Brave, Tavily, Exa, or SerpAPI.', 'Auto 会先用免费垂直源，再 fallback 搜索。想接近 Claude/Codex 的搜索质量，建议配置 Brave、Tavily、Exa 或 SerpAPI。'));
+    createAlignedSelect(
+      searchProviderSetting.controlEl,
+      this.selectPopup,
+      [
+        { value: 'auto', label: bi('Auto', '自动'), hint: bi('Recommended', '推荐') },
+        { value: 'duckduckgo', label: 'DuckDuckGo', hint: bi('Fallback', '备用') },
+        { value: 'brave', label: 'Brave Search' },
+        { value: 'tavily', label: 'Tavily' },
+        { value: 'exa', label: 'Exa' },
+        { value: 'serpapi', label: 'SerpAPI' },
+      ] as const,
+      this.plugin.settings.webSearchProvider,
+      async value => {
+        this.plugin.settings.webSearchProvider = value;
+        await this.plugin.saveSettings();
+        this.display();
+      },
+      bi('Search provider', '搜索 provider'),
+    );
     if (this.plugin.settings.webSearchProvider !== 'duckduckgo' && this.plugin.settings.webSearchProvider !== 'auto') {
-      new Setting(containerEl)
+      new Setting(webGroup)
         .setName(bi('Search API key', '搜索 API key'))
         .setDesc(bi('Stored in plugin settings. Use a provider-specific key.', '保存在插件设置中。填写对应 provider 的 key。'))
         .addText(t => {
@@ -379,7 +745,7 @@ export class GlossaSettingTab extends PluginSettingTab {
             });
         });
     }
-    new Setting(containerEl)
+    new Setting(webGroup)
       .setName(bi('Auto-approve web reads', '自动批准网页读取'))
       .setDesc(bi('Skip approval for web_search, web_research, and web_fetch. Downloads still need their own setting/approval.', '跳过 web_search、web_research、web_fetch 的审批。下载仍然单独受下载设置/审批控制。'))
       .addToggle(t => t
@@ -388,7 +754,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           this.plugin.settings.webAutoApproveNetworkReads = v;
           await this.plugin.saveSettings();
         }));
-    new Setting(containerEl)
+    new Setting(webGroup)
       .setName(bi('Download folder', '下载目录'))
       .setDesc(bi('Default vault folder for download_file when no path is given.', 'download_file 没指定路径时的默认 vault 目录。'))
       .addText(t => t
@@ -398,7 +764,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           this.plugin.settings.webDefaultDownloadFolder = v.trim() || 'Downloads/Glossa';
           await this.plugin.saveSettings();
         }));
-    new Setting(containerEl)
+    new Setting(webGroup)
       .setName(bi('Max download MB', '最大下载 MB'))
       .setDesc(bi('Safety cap for download_file. Tool args can only lower or raise within the hard cap.', 'download_file 的安全上限。工具参数仍受硬上限限制。'))
       .addText(t => t
@@ -408,7 +774,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           this.plugin.settings.webMaxDownloadBytes = mb * 1024 * 1024;
           await this.plugin.saveSettings();
         }));
-    new Setting(containerEl)
+    new Setting(webGroup)
       .setName(bi('Allow auto download', '允许自动下载'))
       .setDesc(bi('Off = model should ask before downloads even in Act mode. Recommended off.', '关闭 = 即使 Act 模式也应先确认再下载。推荐关闭。'))
       .addToggle(t => t
@@ -417,7 +783,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           this.plugin.settings.webAllowAutoDownload = v;
           await this.plugin.saveSettings();
         }));
-    new Setting(containerEl)
+    new Setting(webGroup)
       .setName(bi('Save provenance', '保存来源记录'))
       .setDesc(bi('Write a .source.json file next to downloaded files.', '在下载文件旁边写入 .source.json 来源记录。'))
       .addToggle(t => t
@@ -428,73 +794,110 @@ export class GlossaSettingTab extends PluginSettingTab {
         }));
 
     /* ----- Context ----- */
-    this.renderHeading(containerEl, bi('Context', '上下文'), 'advanced');
-    new Setting(containerEl).setName(bi('Auto-attach current file', '自动附加当前文件')).addToggle(t => t
+    this.renderHeading(containerEl, bi('Context', '上下文'), 'general');
+    new Setting(containerEl)
+      .setName(bi('Auto-attach current file', '自动附加当前文件'))
+      .setDesc(bi(
+        'Make the active note available as ambient context so prompts like “summarize this file” work without a manual attachment.',
+        '把当前打开的笔记作为环境上下文，让“总结当前文件”这类请求无需手动附加。',
+      ))
+      .addToggle(t => t
       .setValue(this.plugin.settings.autoAttachCurrentFile)
       .onChange(async v => { this.plugin.settings.autoAttachCurrentFile = v; await this.plugin.saveSettings(); }));
     new Setting(containerEl).setName(bi('Auto-attach selection', '自动附加选中'))
-      .setDesc(bi('Markdown / PDF / HTML.', 'Markdown / PDF / HTML。'))
+      .setDesc(bi(
+        'When text is selected, treat it as the most specific context. Supports editor, PDF, and rendered HTML selections.',
+        '存在选中文本时，将其作为最精确的上下文。支持编辑器、PDF 与渲染后的 HTML 选区。',
+      ))
       .addToggle(t => t
         .setValue(this.plugin.settings.autoAttachSelection)
         .onChange(async v => { this.plugin.settings.autoAttachSelection = v; await this.plugin.saveSettings(); }));
-    new Setting(containerEl).setName(bi('Warn token threshold', 'Token 警告阈值'))
+    new Setting(containerEl).setName(bi('Context warning threshold', '上下文警告阈值'))
+      .setDesc(bi('Highlight the token counter after this estimated context size is reached.', '估算上下文达到该 token 数后，高亮顶部计数器。'))
       .addText(t => t.setValue(String(this.plugin.settings.warnTokenThreshold))
         .onChange(async v => {
           this.plugin.settings.warnTokenThreshold = parseClampedInt(v, 500_000, 10_000, 5_000_000);
           await this.plugin.saveSettings();
         }));
-    new Setting(containerEl).setName(bi('Cost bar', '费用条')).addToggle(t => t
+    new Setting(containerEl).setName(bi('Usage bar', '用量条'))
+      .setDesc(bi('Show token and estimated cost information below the composer when available.', '在可估算时，于输入区下方显示 token 与费用信息。'))
+      .addToggle(t => t
       .setValue(this.plugin.settings.showCostBar)
       .onChange(async v => { this.plugin.settings.showCostBar = v; await this.plugin.saveSettings(); }));
 
     /* ----- Agent ----- */
     this.renderHeading(containerEl, 'Agent', 'agent');
-    new Setting(containerEl).setName(bi('Permission', '权限'))
-      .setDesc(bi('read-only · workspace-write · full', 'read-only · workspace-write · full'))
-      .addDropdown(d => d.addOption('read-only', 'Read-only').addOption('workspace-write', 'Workspace-write').addOption('full', 'Full')
-        .setValue(this.plugin.settings.permissionLevel)
-        .onChange(async v => { this.plugin.settings.permissionLevel = v as AnyValue; await this.plugin.saveSettings(); }));
-    new Setting(containerEl).setName(bi('Default mode', '默认模式'))
-      .setDesc(bi('Plan = no writes. Act = full agent.', 'Plan 不写文件。Act 完整 agent。'))
-      .addDropdown(d => d.addOption('act', 'Act').addOption('plan', 'Plan')
-        .setValue(this.plugin.settings.runMode)
-        .onChange(async v => { this.plugin.settings.runMode = v as AnyValue; await this.plugin.saveSettings(); }));
+    const permissionSetting = new Setting(containerEl).setName(bi('Permission', '权限'))
+      .setDesc(bi(
+        'Read only blocks vault edits. Vault write allows note changes with approval. Full also permits high-impact tools when available.',
+        '只读会阻止 vault 编辑；允许写入可在审批后修改笔记；完整权限还允许可用的高影响工具。',
+      ));
+    createAlignedSelect(
+      permissionSetting.controlEl,
+      this.selectPopup,
+      [
+        { value: 'read-only', label: bi('Read only', '只读') },
+        { value: 'workspace-write', label: bi('Vault write', '允许写入 vault') },
+        { value: 'full', label: bi('Full access', '完整权限') },
+      ] as const,
+      this.plugin.settings.permissionLevel,
+      async value => {
+        this.plugin.settings.permissionLevel = value;
+        await this.plugin.saveSettings();
+      },
+      bi('Agent permission', 'Agent 权限'),
+    );
+    const modeSetting = new Setting(containerEl)
+      .setName(bi('Default mode', '默认模式'))
+      .setDesc(bi('Plan analyzes and proposes without writing. Act may execute approved tools and edits.', 'Plan 只分析与提出方案，不写入；Act 可执行已批准的工具与编辑。'));
+    createAlignedSelect(
+      modeSetting.controlEl,
+      this.selectPopup,
+      [
+        { value: 'plan', label: 'Plan', hint: bi('No writes', '不写入') },
+        { value: 'act', label: 'Act', hint: bi('Run approved actions', '执行已批准操作') },
+      ] as const,
+      this.plugin.settings.runMode,
+      async value => {
+        this.plugin.settings.runMode = value;
+        await this.plugin.saveSettings();
+      },
+      bi('Default Agent mode', '默认 Agent 模式'),
+    );
     new Setting(containerEl).setName(bi('Max steps', '最大步数'))
-      .setDesc('')
+      .setDesc(bi('Maximum model/tool iterations in one Agent run. Higher values help long tasks but use more time and tokens.', '单次 Agent 运行允许的最大模型/工具迭代次数。数值越高，长任务越完整，但耗时和 token 也更多。'))
       .addText(t => t.setValue(String(this.plugin.settings.agentMaxSteps))
         .onChange(async v => {
           this.plugin.settings.agentMaxSteps = parseClampedInt(v, 20, 1, 100);
           await this.plugin.saveSettings();
         }));
     new Setting(containerEl).setName(bi('Project context', '项目上下文'))
-      .setDesc(bi('Auto-load AGENTS.md / CLAUDE.md / .codex.md.', '自动加载 AGENTS.md / CLAUDE.md / .codex.md。'))
+      .setDesc(bi('Load nearby AGENTS.md, CLAUDE.md, or .codex.md files as project instructions for the active task.', '把当前任务附近的 AGENTS.md、CLAUDE.md 或 .codex.md 作为项目规则加载。'))
       .addToggle(t => t.setValue(this.plugin.settings.loadProjectContext)
         .onChange(async v => { this.plugin.settings.loadProjectContext = v; await this.plugin.saveSettings(); }));
+
+    this.renderCapabilities(containerEl, generation);
 
     /* Auto-approve checkboxes per tool */
     const autoGroup = this.createSettingsGroup(
       containerEl,
       bi('Auto-approve tools', '自动批准工具'),
-      bi('Advanced. Only enable tools you trust.', '高级项。只给可信工具开启。'),
+      bi('Skip per-call approval only for tools you trust.', '只对你信任的工具跳过逐次审批。'),
+      false,
+      'capabilities',
     );
     const autoCard = autoGroup.createEl('div', { cls: 'nc-endpoint-card nc-settings-plain-card' });
     autoCard.createEl('div', { cls: 'nc-endpoint-card-header' }).createEl('span', { text: bi('Auto-approve', '自动批准') });
-    // Single source of truth for the tool list — pulled from the live TOOLS registry,
-    // so flag changes there propagate automatically (fixes #7 web_fetch mismatch).
-    const allTools = Object.values(TOOLS).map(t => ({
-      name: t.spec.name,
-      dangerous: t.dangerous,
-      verb: metaFor(t.spec.name).verb,
-    }));
-    // Sort: safe reads first, then writes/network last
-    allTools.sort((a, b) => Number(a.dangerous) - Number(b.dangerous) || a.name.localeCompare(b.name));
-    for (const t of allTools) {
-      const label = t.dangerous ? `${t.name}  ⚠` : t.name;
-      new Setting(autoCard).setName(label).setDesc('')
-        .addToggle(tg => tg.setValue(this.plugin.settings.agentAlwaysApproveTools.includes(t.name))
+    const allTools = buildToolCapabilities(this.plugin.settings.agentAlwaysApproveTools);
+    for (const tool of allTools) {
+      const label = `${bi(tool.labelEn, tool.labelZh)}${tool.dangerous ? bi(' · approval', ' · 需审批') : ''}`;
+      new Setting(autoCard)
+        .setName(label)
+        .setDesc(`${tool.name} · ${bi(tool.descriptionEn, tool.descriptionZh)}`)
+        .addToggle(tg => tg.setValue(this.plugin.settings.agentAlwaysApproveTools.includes(tool.name))
           .onChange(async v => {
             const list = new Set(this.plugin.settings.agentAlwaysApproveTools);
-            if (v) list.add(t.name); else list.delete(t.name);
+            if (v) list.add(tool.name); else list.delete(tool.name);
             this.plugin.settings.agentAlwaysApproveTools = [...list];
             await this.plugin.saveSettings();
           }));
@@ -505,12 +908,17 @@ export class GlossaSettingTab extends PluginSettingTab {
       containerEl,
       bi('Approval rules', '批准规则'),
       bi('Saved “always allow” choices and audit log.', '保存的“始终允许”选择和审计日志。'),
+      false,
+      'agent',
     );
     ruleGroup.createEl('p', { cls: 'setting-item-description',
-      text: 'Rules you saved by clicking "always allow…" in the inline approval. The agent loop consults these before prompting.' });
+      text: bi(
+        'Rules saved from “always allow” decisions. The Agent checks them before showing another approval.',
+        '这里保存“始终允许”产生的规则。Agent 会先检查规则，再决定是否显示审批。',
+      ) });
     const rules = this.plugin.settings.permissionRules ?? [];
     if (rules.length === 0) {
-      ruleGroup.createEl('p', { cls: 'setting-item-description', text: '(None yet)' });
+      ruleGroup.createEl('p', { cls: 'setting-item-description', text: bi('No saved rules.', '暂无已保存规则。') });
     } else {
       for (const r of rules) {
         const row = ruleGroup.createEl('div', { cls: 'nc-permission-rule' });
@@ -523,7 +931,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           const v = lab.appendChild(activeDocument.createElement('code'));
           v.textContent = r.value;
         } else {
-          lab.appendChild(activeDocument.createTextNode(` · everywhere`));
+          lab.appendChild(activeDocument.createTextNode(bi(' · everywhere', ' · 全部位置')));
         }
         row.createEl('span', { cls: 'nc-permission-rule-meta', text: new Date(r.addedAt).toLocaleDateString() });
         const del = row.createEl('button', { text: '✕', cls: 'mod-warning' });
@@ -534,7 +942,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           this.display();
         };
       }
-      new Setting(ruleGroup).addButton(b => b.setButtonText('Clear all rules').setWarning().onClick(async () => {
+      new Setting(ruleGroup).addButton(b => b.setButtonText(bi('Clear all rules', '清除全部规则')).setWarning().onClick(async () => {
         this.plugin.settings.permissionRules = [];
         await this.plugin.saveSettings();
         this.display();
@@ -545,7 +953,9 @@ export class GlossaSettingTab extends PluginSettingTab {
     const log = this.plugin.settings.permissionLog ?? [];
     if (log.length > 0) {
       const det = ruleGroup.createEl('details', { cls: 'nc-settings-subdetails' });
-      const summary = det.createEl('summary', { text: `Last ${log.length} decisions (most recent first)` });
+      const summary = det.createEl('summary', {
+        text: bi(`Last ${log.length} decisions · newest first`, `最近 ${log.length} 条决定 · 新的在前`),
+      });
       setStyle(summary, { cursor: 'pointer', fontSize: '12px', color: 'var(--text-muted)' });
       const tbl = det.createEl('div');
       setStyle(tbl, { maxHeight: '240px', overflowY: 'auto', fontSize: '11px', fontFamily: 'var(--font-monospace)', marginTop: '8px' });
@@ -572,7 +982,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           setStyle(argsEl, { color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1' });
         }
       }
-      new Setting(ruleGroup).addButton(b => b.setButtonText('Clear log').onClick(async () => {
+      new Setting(ruleGroup).addButton(b => b.setButtonText(bi('Clear log', '清除日志')).onClick(async () => {
         this.plugin.settings.permissionLog = [];
         await this.plugin.saveSettings();
         this.display();
@@ -580,7 +990,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     }
 
     /* ----- Encryption (optional) ----- */
-    this.renderHeading(containerEl, bi('Encryption', '加密'), 'security');
+    this.renderHeading(containerEl, bi('Encryption', '加密'), 'advanced');
     containerEl.createEl('p', { cls: 'setting-item-description',
       text: this.plugin.settings.encryptionEnabled
         ? (this.plugin.isUnlocked() ? bi('🔓 unlocked', '🔓 已解锁') : bi('🔒 locked', '🔒 已锁定'))
@@ -602,7 +1012,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         }));
     if (this.plugin.settings.encryptionEnabled) {
       new Setting(containerEl).setName(bi('Lock', '锁定'))
-        .setDesc('')
+        .setDesc(bi('Remove decrypted keys from memory immediately.', '立即从内存中移除已解密密钥。'))
         .addButton(b => b.setButtonText(bi('Lock', '锁定')).onClick(() => { void this.plugin.lock(); void this.display(); }));
       new Setting(containerEl).setName(bi('Encrypt plaintext keys', '加密明文密钥'))
         .setDesc(bi('Wrap any remaining plaintext API keys.', '加密剩余明文 API key。'))
@@ -629,9 +1039,11 @@ export class GlossaSettingTab extends PluginSettingTab {
       containerEl,
       bi('Maintenance', '维护'),
       bi('Dangerous cleanup actions. Usually unnecessary.', '危险清理操作。通常不需要。'),
+      false,
+      'advanced',
     );
     new Setting(maintenance).setName(bi('Purge checkpoints', '清空检查点'))
-      .setDesc('')
+      .setDesc(bi('Delete every saved pre-edit snapshot. Existing notes are not changed.', '删除全部编辑前快照，不会修改现有笔记。'))
       .addButton(b => b.setButtonText(bi('Purge', '清空')).setWarning().onClick(async () => {
         b.setDisabled(true);
         const { confirmModal } = await import('./ui/confirm_modal');
@@ -650,7 +1062,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         }
       }));
     new Setting(maintenance).setName(bi('Purge embedding index', '清空嵌入索引'))
-      .setDesc('')
+      .setDesc(bi('Delete the local semantic-search index. Source notes remain untouched.', '删除本地语义搜索索引，不影响源笔记。'))
       .addButton(b => b.setButtonText(bi('Purge', '清空')).setWarning().onClick(async () => {
         b.setDisabled(true);
         const { confirmModal } = await import('./ui/confirm_modal');
@@ -669,7 +1081,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         }
       }));
     new Setting(maintenance).setName(bi('Purge legacy chat content', '清理旧对话内容'))
-      .setDesc('')
+      .setDesc(bi('Remove obsolete context fields from older saved chats.', '从旧版已保存对话中移除废弃的上下文字段。'))
       .addButton(b => b.setButtonText(bi('Run', '运行')).onClick(async () => {
         b.setDisabled(true).setButtonText(bi('Running…', '运行中…'));
         try {
@@ -681,24 +1093,32 @@ export class GlossaSettingTab extends PluginSettingTab {
       }));
 
     /* ----- Embedding RAG ----- */
-    this.renderHeading(containerEl, bi('Semantic search', '语义搜索'), 'rag');
-    new Setting(containerEl).setName(bi('Endpoint', 'Endpoint'))
-      .setDesc(bi('OpenAI-compatible /embeddings.', 'OpenAI 兼容 /embeddings。'))
-      .addDropdown(d => {
-        d.addOption('', '(None)');
-        for (const ep of this.plugin.settings.endpoints) {
-          if (ep.kind !== 'custom-api') continue;
-          if ((ep.apiStyle ?? 'openai') !== 'openai') continue;
-          d.addOption(ep.id, ep.label);
-        }
-        d.setValue(this.plugin.settings.embeddingEndpointId ?? '');
-        d.onChange(async v => { this.plugin.settings.embeddingEndpointId = v || null; await this.plugin.saveSettings(); });
-      });
+    this.renderHeading(containerEl, bi('Semantic search', '语义搜索'), 'advanced');
+    const embeddingEndpointSetting = new Setting(containerEl)
+      .setName(bi('Embedding endpoint', '嵌入端点'))
+      .setDesc(bi('An OpenAI-compatible endpoint that implements /embeddings. Note content is sent to this service while indexing.', '需要实现 /embeddings 的 OpenAI 兼容端点。构建索引时，笔记内容会发送到该服务。'));
+    const embeddingEndpointOptions: AlignedSelectOption<string>[] = [
+      { value: '', label: bi('None', '无') },
+      ...this.plugin.settings.endpoints
+        .filter(ep => ep.kind === 'custom-api' && (ep.apiStyle ?? 'openai') === 'openai')
+        .map(ep => ({ value: ep.id, label: ep.label })),
+    ];
+    createAlignedSelect(
+      embeddingEndpointSetting.controlEl,
+      this.selectPopup,
+      embeddingEndpointOptions,
+      this.plugin.settings.embeddingEndpointId ?? '',
+      async value => {
+        this.plugin.settings.embeddingEndpointId = value || null;
+        await this.plugin.saveSettings();
+      },
+      bi('Embedding endpoint', '嵌入端点'),
+    );
     new Setting(containerEl).setName(bi('Model', '模型'))
       .setDesc(bi('e.g. text-embedding-3-small', '例：text-embedding-3-small'))
       .addText(t => t.setValue(this.plugin.settings.embeddingModel).onChange(async v => { this.plugin.settings.embeddingModel = v; await this.plugin.saveSettings(); }));
     new Setting(containerEl).setName(bi('Chunk size / overlap', '分块大小 / 重叠'))
-      .setDesc('')
+      .setDesc(bi('Characters per indexed chunk, followed by repeated characters shared with the next chunk.', '第一个值是每个索引分块的字符数，第二个值是与下一分块重复的字符数。'))
       .addText(t => t.setValue(String(this.plugin.settings.embeddingChunkSize)).onChange(async v => {
         const size = parseClampedInt(v, 1500, 300, 12_000);
         this.plugin.settings.embeddingChunkSize = size;
@@ -711,7 +1131,10 @@ export class GlossaSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }));
     new Setting(containerEl).setName(bi('Rebuild index', '重建索引'))
-      .setDesc(`${this.plugin.embeddingIndex.size()} chunks · ${this.plugin.embeddingIndex.modelInfo().model || '(none)'}`)
+      .setDesc(bi(
+        `${this.plugin.embeddingIndex.size()} chunks · ${this.plugin.embeddingIndex.modelInfo().model || '(none)'}`,
+        `${this.plugin.embeddingIndex.size()} 个分块 · ${this.plugin.embeddingIndex.modelInfo().model || '无模型'}`,
+      ))
       .addButton(b => b.setButtonText(bi('Build', '构建')).setCta().onClick(async () => {
         b.setDisabled(true).setButtonText(bi('Building…', '构建中…'));
         try {
@@ -723,9 +1146,9 @@ export class GlossaSettingTab extends PluginSettingTab {
       }));
 
     /* ----- Checkpoint ----- */
-    this.renderHeading(containerEl, bi('Checkpoints', '检查点'), 'security');
+    this.renderHeading(containerEl, bi('Checkpoints', '检查点'), 'advanced');
     new Setting(containerEl).setName(bi('Snapshot before edits', '编辑前快照'))
-      .setDesc(bi('Enables the Rollback button on edits.', '为编辑启用 Rollback 按钮。'))
+      .setDesc(bi('Save the affected note state before an Agent edit so the turn can be rolled back.', 'Agent 编辑前保存受影响笔记的状态，以便按轮次回滚。'))
       .addToggle(t => t.setValue(this.plugin.settings.checkpointEnabled).onChange(async v => { this.plugin.settings.checkpointEnabled = v; await this.plugin.saveSettings(); }));
 
     /* ----- Auto-compaction ----- */
@@ -734,31 +1157,13 @@ export class GlossaSettingTab extends PluginSettingTab {
       .setDesc(bi('Summarise older turns when context fills up.', '上下文将满时压缩历史轮次。'))
       .addToggle(t => t.setValue(this.plugin.settings.autoCompactEnabled).onChange(async v => { this.plugin.settings.autoCompactEnabled = v; await this.plugin.saveSettings(); }));
     new Setting(containerEl).setName(bi('Threshold (%)', '阈值 (%)'))
-      .setDesc('')
+      .setDesc(bi('Compact older turns after estimated context usage reaches this percentage.', '估算上下文使用率达到该比例后，压缩较早轮次。'))
       .addSlider(s => s.setLimits(40, 95, 5).setValue(this.plugin.settings.autoCompactThresholdPct).setDynamicTooltip()
         .onChange(async v => { this.plugin.settings.autoCompactThresholdPct = v; await this.plugin.saveSettings(); }));
 
-    /* ----- MCP servers ----- */
-    this.renderHeading(containerEl, bi('MCP servers', 'MCP 服务'), 'mcp');
-    new Setting(containerEl)
-      .setName(bi('Unavailable in community build', '社区审核版不可用'))
-      .setDesc(bi('External tool servers are disabled in this release package.', '此发布包已禁用外部工具服务。'));
-    for (const s of this.plugin.settings.mcpServers) {
-      const card = containerEl.createEl('div', { cls: 'nc-endpoint-card' });
-      const hdr = card.createEl('div', { cls: 'nc-endpoint-card-header' });
-      hdr.createEl('span', { text: s.name });
-      hdr.createEl('span', { cls: 'nc-endpoint-kind-badge', text: 'disabled' });
-      const del = hdr.createEl('button', { text: bi('Delete', '删除'), cls: 'mod-warning' });
-      del.onclick = async () => {
-        this.plugin.settings.mcpServers = this.plugin.settings.mcpServers.filter(x => x.id !== s.id);
-        await this.plugin.saveSettings(); this.display();
-      };
-      new Setting(card).setName(bi('Name', '名称')).setDesc(s.name);
-    }
-
     /* ----- Endpoints ----- */
-    this.renderHeading(containerEl, bi('Endpoints', 'Endpoints'), 'providers');
-    const addBtn = containerEl.createEl('button', { text: bi('+ Add endpoint', '+ 新增 endpoint'), cls: 'nc-add-endpoint-btn mod-cta' });
+    this.renderHeading(containerEl, bi('Model endpoints', '模型端点'), 'providers');
+    const addBtn = containerEl.createEl('button', { text: bi('+ Add endpoint', '+ 添加端点'), cls: 'nc-add-endpoint-btn mod-cta' });
     addBtn.onclick = () => this.openAddEndpointModal();
 
     for (const ep of this.plugin.settings.endpoints) this.renderEndpointCard(containerEl, ep);
@@ -766,18 +1171,18 @@ export class GlossaSettingTab extends PluginSettingTab {
     /* ----- Chats folder ----- */
     this.renderHeading(containerEl, bi('Persistence', '持久化'), 'general');
     new Setting(containerEl).setName(bi('Chats folder', '对话文件夹'))
-      .setDesc(bi('Export destination.', '导出目标。'))
+      .setDesc(bi('Vault-relative folder used by the header export button.', '主页顶部“导出对话”按钮使用的 vault 相对目录。'))
       .addText(t => t.setValue(this.plugin.settings.chatsFolder).onChange(async v => {
         this.plugin.settings.chatsFolder = v || 'Chats'; await this.plugin.saveSettings();
       }));
 
     /* ----- Custom slash ----- */
-    this.renderHeading(containerEl, bi('Custom slash', '自定义 /'), 'advanced');
+    this.renderHeading(containerEl, bi('Custom slash commands', '自定义斜杠命令'), 'capabilities');
     containerEl.createEl('p', {
       text: '${selection} ${file} ${filename} ${selection-or-file} ${vault} ${args}',
       cls: 'setting-item-description',
     });
-    new Setting(containerEl).addButton(b => b.setButtonText('+ ' + 'Add command').onClick(async () => {
+    new Setting(containerEl).addButton(b => b.setButtonText(bi('+ Add command', '+ 添加命令')).onClick(async () => {
       this.plugin.settings.customSlashCommands.push({
         id: uid(), trigger: '/my-cmd', title: 'My command',
         template: 'Do something with ${selection}', custom: true,
@@ -787,7 +1192,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     for (const c of this.plugin.settings.customSlashCommands) this.renderSlashCmd(containerEl, c);
 
     /* ----- Workflows ----- */
-    this.renderHeading(containerEl, bi('Workflows', '工作流'), 'workflows');
+    this.renderHeading(containerEl, bi('Reusable prompts', '可复用 Prompt'), 'capabilities');
     new Setting(containerEl).addButton(b => b.setButtonText(bi('+ Add', '+ 新增')).onClick(async () => {
       this.plugin.settings.workflows.unshift({ id: uid(), title: bi('Untitled', '未命名'), prompt: '', createdAt: Date.now() });
       await this.plugin.saveSettings(); this.display();
@@ -829,8 +1234,8 @@ export class GlossaSettingTab extends PluginSettingTab {
     left.createEl('span', { text: ep.label });
     left.createEl('span', { text: ep.kind, cls: 'nc-endpoint-kind-badge' });
     // Right side of header: Test connectivity + Delete
-    const testBtn = hdr.createEl('button', { text: 'Test', cls: 'nc-endpoint-test-btn' });
-    testBtn.setAttribute('aria-label', `Test ${ep.label}`);
+    const testBtn = hdr.createEl('button', { text: bi('Test', '测试'), cls: 'nc-endpoint-test-btn' });
+    testBtn.setAttribute('aria-label', bi(`Test ${ep.label}`, `测试 ${ep.label}`));
     const testStatus = hdr.createEl('span', { cls: 'nc-endpoint-test-status' });
     testBtn.onclick = async () => {
       testBtn.setAttribute('disabled', 'true');
@@ -838,19 +1243,19 @@ export class GlossaSettingTab extends PluginSettingTab {
       testStatus.setText('…');
       const epDec = await this.plugin.getDecryptedEndpoint(ep);
       if (!epDec) {
-        testStatus.setText('Locked');
+        testStatus.setText(bi('Locked', '已锁定'));
         testStatus.addClass('fail');
         testBtn.removeAttribute('disabled');
         return;
       }
       try {
         const provider: AnyValue = await this.buildProviderFor(epDec);
-        if (!provider?.testConnect) { testStatus.setText('Unsupported'); return; }
+        if (!provider?.testConnect) { testStatus.setText(bi('Unsupported', '不支持测试')); return; }
         const r = await provider.testConnect();
         testStatus.setText(r.message);
         testStatus.addClass(r.ok ? 'ok' : 'fail');
         if (r.ok) new Notice(`${ep.label}: ${r.message}`);
-        else new Notice(`${ep.label} failed: ${r.message}`, 8000);
+        else new Notice(bi(`${ep.label} failed: ${r.message}`, `${ep.label} 测试失败：${r.message}`), 8000);
       } catch (e) {
         testStatus.setText(e.message ?? String(e));
         testStatus.addClass('fail');
@@ -858,15 +1263,15 @@ export class GlossaSettingTab extends PluginSettingTab {
         testBtn.removeAttribute('disabled');
       }
     };
-    const delBtn = hdr.createEl('button', { text: 'Delete', cls: 'mod-warning' });
-    delBtn.setAttribute('aria-label', `Delete ${ep.label}`);
+    const delBtn = hdr.createEl('button', { text: bi('Delete', '删除'), cls: 'mod-warning' });
+    delBtn.setAttribute('aria-label', bi(`Delete ${ep.label}`, `删除 ${ep.label}`));
     delBtn.onclick = async () => {
       // Find every place this endpoint id is referenced so the deletion
       // doesn't leave dangling pointers (which caused 404s on embedding
       // rebuild and "no endpoint" ghost state on session restore).
       const refs: string[] = [];
       const isEmbedRef = this.plugin.settings.embeddingEndpointId === ep.id;
-      if (isEmbedRef) refs.push('embedding endpoint');
+      if (isEmbedRef) refs.push(bi('semantic-search endpoint', '语义搜索端点'));
       const sessionRefs: string[] = [];
       try {
         for (const s of (this.plugin.store?.all() ?? [])) {
@@ -874,18 +1279,22 @@ export class GlossaSettingTab extends PluginSettingTab {
         }
       } catch { /* store might not be ready */ }
       if (sessionRefs.length > 0) {
-        refs.push(`${sessionRefs.length} chat session${sessionRefs.length === 1 ? '' : 's'}`);
+        refs.push(bi(
+          `${sessionRefs.length} chat session${sessionRefs.length === 1 ? '' : 's'}`,
+          `${sessionRefs.length} 个对话`,
+        ));
       }
 
       // If something refers to this endpoint, confirm before nulling out.
       if (refs.length > 0) {
         const { confirmModal } = await import('./ui/confirm_modal');
         const ok = await confirmModal(this.plugin.app, {
-          title: `Delete endpoint "${ep.label}"?`,
-          body:
-            `Endpoint is referenced by:\n\n  • ${refs.join('\n  • ')}\n\n` +
-            `Deleting will detach those references (they'll show as "no endpoint" until you pick a new one).`,
-          confirmText: 'Delete & detach',
+          title: bi(`Delete endpoint “${ep.label}”?`, `删除端点“${ep.label}”？`),
+          body: bi(
+            `This endpoint is used by:\n\n  • ${refs.join('\n  • ')}\n\nDeleting it will detach those references until another endpoint is selected.`,
+            `以下内容正在使用此端点：\n\n  • ${refs.join('\n  • ')}\n\n删除后，这些引用会解除，直到重新选择端点。`,
+          ),
+          confirmText: bi('Delete and detach', '删除并解除引用'),
           danger: true,
         });
         if (!ok) return;
@@ -925,7 +1334,10 @@ export class GlossaSettingTab extends PluginSettingTab {
       bi('Headers, proxy, diagnostics, sandbox, and compatibility options.', '请求头、代理、诊断、沙盒与兼容选项。'),
     );
 
-    new Setting(basic).setName(bi('Label', '名称')).addText(t => t.setValue(ep.label).onChange(async v => { ep.label = v; await this.plugin.saveSettings(); }));
+    new Setting(basic)
+      .setName(bi('Display name', '显示名称'))
+      .setDesc(bi('The name shown in the model picker.', '显示在模型选择器中的名称。'))
+      .addText(t => t.setValue(ep.label).onChange(async v => { ep.label = v; await this.plugin.saveSettings(); }));
 
     if (ep.kind !== 'custom-api') {
       new Setting(basic)
@@ -934,11 +1346,26 @@ export class GlossaSettingTab extends PluginSettingTab {
     }
 
     if (ep.kind === 'custom-api') {
-      new Setting(basic).setName(bi('API style', 'API 风格'))
-        .addDropdown(d => d.addOption('openai', 'OpenAI').addOption('anthropic', 'Anthropic')
-          .setValue(ep.apiStyle ?? 'openai')
-          .onChange(async v => { ep.apiStyle = v as AnyValue; await this.plugin.saveSettings(); }));
-      new Setting(basic).setName(bi('Base URL', '地址')).addText(t => t.setValue(ep.baseUrl ?? '').onChange(async v => {
+      const apiFormatSetting = new Setting(basic)
+        .setName(bi('API format', 'API 格式'))
+        .setDesc(bi('Choose the request and response format implemented by this endpoint.', '选择该端点实现的请求与响应格式。'));
+      createAlignedSelect(
+        apiFormatSetting.controlEl,
+        this.selectPopup,
+        [
+          { value: 'openai', label: 'OpenAI-compatible' },
+          { value: 'anthropic', label: 'Anthropic-style' },
+        ] as const,
+        ep.apiStyle ?? 'openai',
+        async value => {
+          ep.apiStyle = value;
+          await this.plugin.saveSettings();
+        },
+        bi('API format', 'API 格式'),
+      );
+      new Setting(basic).setName('Base URL')
+        .setDesc(bi('API root ending at the provider version path, for example /v1.', 'API 根地址，通常以 provider 的版本路径结尾，例如 /v1。'))
+        .addText(t => t.setValue(ep.baseUrl ?? '').onChange(async v => {
         const trimmed = v.trim();
         if (trimmed) {
           // Reject anything that isn't http(s) — Electron's renderer fetch will
@@ -946,7 +1373,10 @@ export class GlossaSettingTab extends PluginSettingTab {
           try {
             const u = new URL(trimmed);
             if (!/^https?:$/.test(u.protocol)) {
-              new Notice(`Base URL refused: only http(s) is allowed (got ${u.protocol}).`, 6000);
+              new Notice(bi(
+                `Base URL refused: only HTTP(S) is allowed (got ${u.protocol}).`,
+                `Base URL 无效：只允许 HTTP(S)，当前为 ${u.protocol}。`,
+              ), 6000);
               return;
             }
           } catch {
@@ -956,7 +1386,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         ep.baseUrl = trimmed;
         await this.plugin.saveSettings();
       }));
-      const apiKeySetting = new Setting(basic).setName(bi('API Key', 'API Key'))
+      const apiKeySetting = new Setting(basic).setName('API key')
         .setDesc(ep.apiKey?.startsWith('NCENC1:') ? bi('✓ encrypted', '✓ 已加密') : (this.plugin.settings.encryptionEnabled ? bi('will encrypt on save', '保存时加密') : bi('plaintext', '明文')))
         .addText(t => {
           t.inputEl.type = 'password';
@@ -1009,14 +1439,21 @@ export class GlossaSettingTab extends PluginSettingTab {
       new Setting(basic).setName(t('cli_default_model'))
         .setDesc(t('cli_default_model_desc'))
         .addText(tx => tx.setValue(ep.model ?? '').onChange(async v => { ep.model = v; await this.plugin.saveSettings(); }));
-      new Setting(basic).setName(t('reasoning_effort'))
-        .setDesc(t('reasoning_effort_desc_cli'))
-        .addDropdown(d => {
-          const opts = reasoningOptionsForEndpoint(ep);
-          for (const v of opts) d.addOption(v, t(`effort_${v}`));
-          d.setValue(opts.includes(ep.reasoningEffort ?? 'off') ? (ep.reasoningEffort ?? 'off') : 'off');
-          d.onChange(async v => { ep.reasoningEffort = v as AnyValue; await this.plugin.saveSettings(); });
-        });
+      const cliReasoningSetting = new Setting(basic)
+        .setName(t('reasoning_effort'))
+        .setDesc(t('reasoning_effort_desc_cli'));
+      const cliReasoningOptions = reasoningOptionsForEndpoint(ep);
+      createAlignedSelect(
+        cliReasoningSetting.controlEl,
+        this.selectPopup,
+        cliReasoningOptions.map(value => ({ value, label: t(`effort_${value}`) })),
+        cliReasoningOptions.includes(ep.reasoningEffort ?? 'off') ? (ep.reasoningEffort ?? 'off') : 'off',
+        async value => {
+          ep.reasoningEffort = value;
+          await this.plugin.saveSettings();
+        },
+        t('reasoning_effort'),
+      );
       new Setting(basic).setName(t('cli_working_dir')).setDesc(t('cli_working_dir_desc'))
         .addText(t => t.setValue(ep.cwd ?? '').onChange(async v => { ep.cwd = v; await this.plugin.saveSettings(); }))
         .addButton(b => b.setButtonText('Use vault').onClick(async () => {
@@ -1048,28 +1485,51 @@ export class GlossaSettingTab extends PluginSettingTab {
             this.display();
           }));
 
-        new Setting(advanced).setName(t('codex_sandbox'))
-          .setDesc(t('codex_sandbox_desc'))
-          .addDropdown(d => d.addOption('', '(Default)').addOption('read-only', 'Read-only').addOption('workspace-write', 'Workspace-write').addOption('danger-full-access', 'Danger-full-access ⚠')
-            .setValue(ep.codexSandboxMode ?? '')
-            .onChange(async v => {
-              ep.codexSandboxMode = (v || undefined) as AnyValue;
-              await this.plugin.saveSettings();
-              const warn = codexSafetyWarning(ep);
-              if (warn) new Notice(`Warning: ${warn}`, 10000);
-              this.display();
-            }));
-        new Setting(advanced).setName(t('codex_approval'))
-          .setDesc(t('codex_approval_desc'))
-          .addDropdown(d => d.addOption('', '(Default)').addOption('untrusted', 'Untrusted').addOption('on-failure', 'On-failure').addOption('on-request', 'On-request').addOption('never', 'Never ⚠')
-            .setValue(ep.codexApprovalPolicy ?? '')
-            .onChange(async v => {
-              ep.codexApprovalPolicy = (v || undefined) as AnyValue;
-              await this.plugin.saveSettings();
-              const warn = codexSafetyWarning(ep);
-              if (warn) new Notice(`Warning: ${warn}`, 10000);
-              this.display();
-            }));
+        const sandboxSetting = new Setting(advanced)
+          .setName(t('codex_sandbox'))
+          .setDesc(t('codex_sandbox_desc'));
+        createAlignedSelect(
+          sandboxSetting.controlEl,
+          this.selectPopup,
+          [
+            { value: '', label: bi('Default', '默认') },
+            { value: 'read-only', label: bi('Read only', '只读') },
+            { value: 'workspace-write', label: bi('Workspace write', '工作区可写') },
+            { value: 'danger-full-access', label: bi('Danger full access', '完全访问'), hint: bi('High risk', '高风险') },
+          ] as const,
+          ep.codexSandboxMode ?? '',
+          async value => {
+            ep.codexSandboxMode = value || undefined;
+            await this.plugin.saveSettings();
+            const warn = codexSafetyWarning(ep);
+            if (warn) new Notice(`Warning: ${warn}`, 10000);
+            this.display();
+          },
+          t('codex_sandbox'),
+        );
+        const approvalSetting = new Setting(advanced)
+          .setName(t('codex_approval'))
+          .setDesc(t('codex_approval_desc'));
+        createAlignedSelect(
+          approvalSetting.controlEl,
+          this.selectPopup,
+          [
+            { value: '', label: bi('Default', '默认') },
+            { value: 'untrusted', label: 'Untrusted' },
+            { value: 'on-failure', label: 'On failure' },
+            { value: 'on-request', label: 'On request' },
+            { value: 'never', label: 'Never', hint: bi('High risk', '高风险') },
+          ] as const,
+          ep.codexApprovalPolicy ?? '',
+          async value => {
+            ep.codexApprovalPolicy = value || undefined;
+            await this.plugin.saveSettings();
+            const warn = codexSafetyWarning(ep);
+            if (warn) new Notice(`Warning: ${warn}`, 10000);
+            this.display();
+          },
+          t('codex_approval'),
+        );
         new Setting(advanced).setName(t('codex_use_oss'))
           .addToggle(tg => tg.setValue(!!ep.codexUseOss).onChange(async v => { ep.codexUseOss = v; await this.plugin.saveSettings(); }));
         new Setting(advanced).setName(t('codex_config_overrides'))
@@ -1156,14 +1616,27 @@ export class GlossaSettingTab extends PluginSettingTab {
     // custom-api when requestUrl is used (system proxy follows). Hide otherwise.
     const proxyApplies = ep.kind === 'codex-cli' || ep.kind === 'claude-code-cli' || ep.useObsidianFetch;
     if (proxyApplies) {
-      new Setting(advanced).setName(bi('Proxy mode', '代理模式'))
+      const proxyModeSetting = new Setting(advanced).setName(bi('Proxy mode', '代理模式'))
         .setDesc(ep.kind === 'custom-api'
           ? bi('Follows system proxy.', '跟随系统代理。')
           : bi(`global = ${this.plugin.settings.globalProxy || 'unset'} · none · override`,
-               `global = ${this.plugin.settings.globalProxy || '未设'} · none · override`))
-        .addDropdown(d => d.addOption('global', 'Global').addOption('none', 'None').addOption('override', 'Override')
-          .setValue(ep.proxyMode ?? 'global')
-          .onChange(async v => { ep.proxyMode = v as AnyValue; await this.plugin.saveSettings(); this.display(); }));
+               `global = ${this.plugin.settings.globalProxy || '未设'} · none · override`));
+      createAlignedSelect(
+        proxyModeSetting.controlEl,
+        this.selectPopup,
+        [
+          { value: 'global', label: bi('Global', '全局') },
+          { value: 'none', label: bi('None', '无') },
+          { value: 'override', label: bi('Override', '单独设置') },
+        ] as const,
+        ep.proxyMode ?? 'global',
+        async value => {
+          ep.proxyMode = value;
+          await this.plugin.saveSettings();
+          this.display();
+        },
+        bi('Proxy mode', '代理模式'),
+      );
       if (ep.proxyMode === 'override') {
         new Setting(advanced).setName(bi('Proxy URL', '代理 URL')).addText(t => t.setPlaceholder(HTTP_PROXY_PLACEHOLDER).setValue(ep.proxy ?? '').onChange(async v => { ep.proxy = v.trim(); await this.plugin.saveSettings(); }));
       }
@@ -1173,7 +1646,7 @@ export class GlossaSettingTab extends PluginSettingTab {
   private renderModelRow(card: HTMLElement, ep: Endpoint) {
     let inputComp: AnyValue;
 
-    const setting = new Setting(card).setName('Model').setDesc(bi('Click "Detect" to fetch the supported model list from /v1/models.', '点击 "Detect" 从 /v1/models 拉取该端点支持的模型列表。'));
+    const setting = new Setting(card).setName(bi('Model', '模型')).setDesc(bi('Enter a model ID, or detect the list exposed by the endpoint.', '输入模型 ID，或探测该端点公开的模型列表。'));
     setting.addText(t => { inputComp = t; t.setValue(ep.model ?? '').onChange(async v => { ep.model = v; await this.plugin.saveSettings(); }); });
     setting.addButton(b => b.setButtonText(bi('↻ Detect', '↻ 探测')).onClick(async () => {
       if (!ep.baseUrl || !ep.apiKey) { new Notice(bi('Fill Base URL + API Key first.', '请先填写 Base URL + API Key。')); return; }
@@ -1189,23 +1662,43 @@ export class GlossaSettingTab extends PluginSettingTab {
     }));
 
     if (ep.availableModels && ep.availableModels.length > 0) {
-      new Setting(card).setName(bi('Pick model', '选择模型')).addDropdown(d => {
-        d.addOption('', `(${ep.availableModels.length})`);
-        for (const m of ep.availableModels) d.addOption(m, m);
-        d.setValue(ep.model && ep.availableModels.includes(ep.model) ? ep.model : '');
-        d.onChange(async v => { if (v) { ep.model = v; await this.plugin.saveSettings(); inputComp.setValue(v); } });
-      });
+      const modelPickerSetting = new Setting(card)
+        .setName(bi('Detected models', '已探测模型'))
+        .setDesc(bi(`${ep.availableModels.length} models returned by the endpoint.`, `端点返回了 ${ep.availableModels.length} 个模型。`));
+      createAlignedSelect(
+        modelPickerSetting.controlEl,
+        this.selectPopup,
+        [
+          { value: '', label: bi('Select a detected model', '选择已探测模型'), hint: String(ep.availableModels.length) },
+          ...ep.availableModels.map(model => ({ value: model, label: model })),
+        ],
+        ep.model && ep.availableModels.includes(ep.model) ? ep.model : '',
+        async value => {
+          if (!value) return;
+          ep.model = value;
+          await this.plugin.saveSettings();
+          inputComp.setValue(value);
+        },
+        bi('Detected model', '已探测模型'),
+      );
     }
 
     // Reasoning effort — unified across all three endpoint kinds
-    new Setting(card).setName(t('reasoning_effort'))
-      .setDesc(t('reasoning_effort_desc'))
-      .addDropdown(d => {
-        const opts = reasoningOptionsForEndpoint(ep);
-        for (const v of opts) d.addOption(v, t(`effort_${v}`));
-        d.setValue(opts.includes(ep.reasoningEffort ?? 'off') ? (ep.reasoningEffort ?? 'off') : 'off');
-        d.onChange(async v => { ep.reasoningEffort = v as AnyValue; await this.plugin.saveSettings(); });
-      });
+    const reasoningSetting = new Setting(card)
+      .setName(t('reasoning_effort'))
+      .setDesc(t('reasoning_effort_desc'));
+    const reasoningOptions = reasoningOptionsForEndpoint(ep);
+    createAlignedSelect(
+      reasoningSetting.controlEl,
+      this.selectPopup,
+      reasoningOptions.map(value => ({ value, label: t(`effort_${value}`) })),
+      reasoningOptions.includes(ep.reasoningEffort ?? 'off') ? (ep.reasoningEffort ?? 'off') : 'off',
+      async value => {
+        ep.reasoningEffort = value;
+        await this.plugin.saveSettings();
+      },
+      t('reasoning_effort'),
+    );
   }
 
   private renderSlashCmd(parent: HTMLElement, c: SlashCommand) {
@@ -1259,11 +1752,12 @@ export class GlossaSettingTab extends PluginSettingTab {
    ============================================================ */
 class AddEndpointModal extends Modal {
   private selectedKind: Endpoint['kind'] = 'custom-api';
+  private readonly selectPopup = new Popup();
   private draft: Partial<Endpoint> = {
     apiStyle: 'openai',
     baseUrl: '',
     model: '',
-    label: 'New endpoint',
+    label: bi('New endpoint', '新端点'),
   };
   private plainKey = '';     // never stored on draft.apiKey — encrypted at save time
   private formEl: HTMLElement;
@@ -1281,38 +1775,17 @@ class AddEndpointModal extends Modal {
     contentEl.empty();
 
     const hdr = contentEl.createEl('div', { cls: 'nc-add-modal-header' });
-    hdr.createEl('h2', { text: 'Add endpoint' });
-    hdr.createEl('p', { text: bi('Pick a kind → click a preset to fill defaults → paste API key → Detect models → Save', '选一种类型 → 点 preset 一键填好 → 输入 API Key → Detect 拉模型列表 → Save') });
-
-    /* Kind tabs */
-    const kinds = contentEl.createEl('div', { cls: 'nc-kind-tabs' });
-    kinds.setAttribute('role', 'tablist');
-    kinds.setAttribute('aria-label', 'Endpoint type');
-    const kindCards: HTMLElement[] = [];
-    for (const kc of KIND_CARDS) {
-      const card = kinds.createEl('div', { cls: 'nc-kind-card' });
-      const title = card.createEl('div', { cls: 'nc-kind-title' });
-      title.createEl('span', { text: kc.title });
-      title.createEl('span', { cls: 'nc-kind-title-badge', text: kc.badge });
-      card.createEl('div', { cls: 'nc-kind-desc', text: kc.desc });
-      card.onclick = () => {
-        this.selectedKind = kc.kind;
-        kindCards.forEach(c => c.removeClass('selected'));
-        card.addClass('selected');
-        kindCards.forEach(c => c.setAttribute('aria-selected', String(c === card)));
-        this.renderForm();
-      };
-      makeKeyboardClickable(card, kc.title);
-      card.setAttribute('role', 'tab');
-      card.setAttribute('aria-selected', 'false');
-      kindCards.push(card);
-    }
-    kindCards[0].addClass('selected');
-    kindCards[0].setAttribute('aria-selected', 'true');
+    hdr.createEl('h2', { text: bi('Add model endpoint', '添加模型端点') });
+    hdr.createEl('p', {
+      text: bi(
+        'Choose a preset or enter an OpenAI-compatible / Anthropic-compatible API manually. Detect models before saving when the endpoint supports it.',
+        '可选择预设，也可手动填写 OpenAI 兼容或 Anthropic 兼容 API。端点支持时，可在保存前探测模型列表。',
+      ),
+    });
 
     /* Presets (visible for custom-api) */
     const presetsSec = contentEl.createEl('div', { cls: 'nc-presets-section' });
-    presetsSec.createEl('h3', { text: 'Quick presets' });
+    presetsSec.createEl('h3', { text: bi('Provider presets', '服务商预设') });
     const grid = presetsSec.createEl('div', { cls: 'nc-preset-grid' });
     for (const p of PRESETS) {
       const chip = grid.createEl('div', { cls: 'nc-preset-chip' });
@@ -1325,9 +1798,6 @@ class AddEndpointModal extends Modal {
         this.draft.baseUrl = p.baseUrl;
         this.draft.model = p.defaultModel;
         this.draft.apiStyle = p.apiStyle;
-        this.selectedKind = 'custom-api';
-        kindCards.forEach((c, i) => c.toggleClass('selected', KIND_CARDS[i].kind === 'custom-api'));
-        kindCards.forEach((c, i) => c.setAttribute('aria-selected', String(KIND_CARDS[i].kind === 'custom-api')));
         this.renderForm();
       };
       makeKeyboardClickable(chip, p.name);
@@ -1336,6 +1806,10 @@ class AddEndpointModal extends Modal {
     /* Form */
     this.formEl = contentEl.createEl('div', { cls: 'nc-add-form' });
     this.renderForm();
+  }
+
+  onClose() {
+    this.selectPopup.destroy();
   }
 
   private renderForm() {
@@ -1350,19 +1824,25 @@ class AddEndpointModal extends Modal {
       return r;
     };
 
-    row('Label', (p) => {
+    row(bi('Display name', '显示名称'), (p) => {
       const inp = p.createEl('input', { type: 'text', value: this.draft.label ?? '' });
       inp.autocomplete = 'off';
       inp.oninput = () => { this.draft.label = inp.value; };
     });
 
     if (this.selectedKind === 'custom-api') {
-      row('API style', (p) => {
-        const sel = p.createEl('select');
-        sel.createEl('option', { value: 'openai', text: 'OpenAI-compatible' });
-        sel.createEl('option', { value: 'anthropic', text: 'Anthropic-style' });
-        sel.value = this.draft.apiStyle ?? 'openai';
-        sel.onchange = () => { this.draft.apiStyle = sel.value as AnyValue; };
+      row(bi('API format', 'API 格式'), (p) => {
+        createAlignedSelect(
+          p,
+          this.selectPopup,
+          [
+            { value: 'openai', label: 'OpenAI-compatible' },
+            { value: 'anthropic', label: 'Anthropic-style' },
+          ] as const,
+          this.draft.apiStyle ?? 'openai',
+          value => { this.draft.apiStyle = value; },
+          bi('API format', 'API 格式'),
+        );
       });
       row('Base URL', (p) => {
         const inp = p.createEl('input', { type: 'text', value: this.draft.baseUrl ?? '' });
@@ -1371,61 +1851,33 @@ class AddEndpointModal extends Modal {
         inp.spellcheck = false;
         inp.oninput = () => { this.draft.baseUrl = inp.value; };
       });
-      row('API Key', (p) => {
+      row('API key', (p) => {
         const inp = p.createEl('input', { type: 'password', value: this.plainKey });
         inp.placeholder = API_KEY_PLACEHOLDER;
         inp.autocomplete = 'off';
         inp.spellcheck = false;
         inp.oninput = () => { this.plainKey = inp.value; };
       });
-      row('Model', (p) => {
+      row(bi('Model', '模型'), (p) => {
         const wrap = p.createEl('div', { cls: 'nc-row-with-btn' });
         this.modelInput = wrap.createEl('input', { type: 'text', value: this.draft.model ?? '' });
         this.modelInput.placeholder = ['e.g. ', 'deepseek-chat'].join('');
         this.modelInput.autocomplete = 'off';
         this.modelInput.spellcheck = false;
         this.modelInput.oninput = () => { this.draft.model = this.modelInput.value; };
-        const btn = wrap.createEl('button', { text: DETECT_BUTTON_LABEL });
+        const btn = wrap.createEl('button', { text: bi('Detect', '探测') });
         btn.type = 'button';
-        btn.setAttribute('aria-label', 'Detect models');
+        btn.setAttribute('aria-label', bi('Detect models', '探测模型'));
         btn.onclick = () => this.detectModels(btn);
       });
       this.detectStatusEl = formEl.createEl('div', { cls: 'nc-detect-status' });
     }
 
-    if (this.selectedKind === 'codex-cli' || this.selectedKind === 'claude-code-cli') {
-      const warn = localCliWarning(this.selectedKind);
-      if (warn) renderWarningHint(formEl, warn);
-      const binName = this.selectedKind === 'codex-cli' ? 'codex' : 'claude';
-      row('Binary', (p) => {
-        const wrap = p.createEl('div', { cls: 'nc-row-with-btn' });
-        const inp = wrap.createEl('input', { type: 'text', value: (this.draft as AnyValue).binaryPath ?? '' });
-        inp.placeholder = `/path/to/${binName}`;
-        inp.autocomplete = 'off';
-        inp.spellcheck = false;
-        inp.oninput = () => { (this.draft as AnyValue).binaryPath = inp.value; };
-        const btn = wrap.createEl('button', { text: 'Auto' });
-        btn.type = 'button';
-        btn.onclick = () => {
-          new Notice('Local CLI providers are disabled in the community review build.');
-        };
-      });
-      row('Default model', (p) => {
-        const inp = p.createEl('input', { type: 'text', value: this.draft.model ?? '' });
-        inp.placeholder = this.selectedKind === 'codex-cli'
-          ? 'leave empty → uses ~/.codex/config.toml'
-          : 'leave empty → uses claude default (sonnet)';
-        inp.autocomplete = 'off';
-        inp.spellcheck = false;
-        inp.oninput = () => { this.draft.model = inp.value; };
-      });
-    }
-
     const actions = formEl.createEl('div', { cls: 'nc-add-form-actions' });
-    const cancel = actions.createEl('button', { text: 'Cancel' });
+    const cancel = actions.createEl('button', { text: bi('Cancel', '取消') });
     cancel.type = 'button';
     cancel.onclick = () => this.close();
-    const save = actions.createEl('button', { text: 'Save', cls: 'mod-cta' });
+    const save = actions.createEl('button', { text: bi('Save endpoint', '保存端点'), cls: 'mod-cta' });
     save.type = 'button';
     save.onclick = () => this.save();
   }
@@ -1433,18 +1885,18 @@ class AddEndpointModal extends Modal {
   private async detectModels(btn: HTMLButtonElement) {
     if (btn.disabled) return;
     if (!this.draft.baseUrl || !this.plainKey) {
-      this.detectStatusEl.setText('Need base URL + API key first.');
+      this.detectStatusEl.setText(bi('Enter the Base URL and API key first.', '请先填写 Base URL 与 API key。'));
       return;
     }
     const baseUrl = this.validBaseUrl(this.draft.baseUrl);
     if (!baseUrl) {
-      this.detectStatusEl.setText('Base URL must be HTTP(s).');
+      this.detectStatusEl.setText(bi('Base URL must use HTTP(S).', 'Base URL 必须使用 HTTP(S)。'));
       return;
     }
-    this.detectStatusEl.setText('Detecting…');
+    this.detectStatusEl.setText(bi('Detecting models…', '正在探测模型…'));
     btn.disabled = true;
     btn.setAttribute('aria-busy', 'true');
-    btn.textContent = 'Detecting…';
+    btn.textContent = bi('Detecting…', '探测中…');
     // Use plaintext key directly for detection — never persisted from this temp ep.
     const ep: Endpoint = {
       id: 'tmp', kind: 'custom-api',
@@ -1453,25 +1905,32 @@ class AddEndpointModal extends Modal {
     };
     try {
       const list = normalizeModelList(await new CustomApiProvider(ep).listModels());
-      btn.textContent = DETECT_BUTTON_LABEL;
-      if (list.length === 0) { this.detectStatusEl.setText('No models returned (endpoint /models 404 or empty).'); return; }
-      this.detectStatusEl.setText(`Found ${list.length} models. Pick one:`);
+      btn.textContent = bi('Detect', '探测');
+      if (list.length === 0) {
+        this.detectStatusEl.setText(bi('The endpoint returned no models.', '端点没有返回模型列表。'));
+        return;
+      }
+      this.detectStatusEl.setText(bi(`Found ${list.length} models.`, `找到 ${list.length} 个模型。`));
       // Replace model input with dropdown
       const oldRow = this.modelInput.closest('.nc-add-form-row');
       if (oldRow) {
         const right = oldRow.querySelector('div') as HTMLElement;
         right.empty();
-        const sel = right.createEl('select');
-        setStyle(sel, { flex: '1' });
-        for (const m of list) sel.createEl('option', { value: m, text: m });
         const cur = this.draft.model;
-        sel.value = cur && list.includes(cur) ? cur : list[0];
-        this.draft.model = sel.value;
-        sel.onchange = () => { this.draft.model = sel.value; };
+        const selected = cur && list.includes(cur) ? cur : list[0];
+        this.draft.model = selected;
+        createAlignedSelect(
+          right,
+          this.selectPopup,
+          list.map(model => ({ value: model, label: model })),
+          selected,
+          value => { this.draft.model = value; },
+          bi('Detected model', '已探测模型'),
+        );
       }
     } catch (e) {
-      btn.textContent = DETECT_BUTTON_LABEL;
-      this.detectStatusEl.setText(`Failed: ${e.message}`);
+      btn.textContent = bi('Detect', '探测');
+      this.detectStatusEl.setText(bi(`Detection failed: ${e.message}`, `探测失败：${e.message}`));
     } finally {
       btn.disabled = false;
       btn.removeAttribute('aria-busy');
@@ -1480,17 +1939,17 @@ class AddEndpointModal extends Modal {
 
   private save() {
     if (this.selectedKind === 'custom-api' && (!this.draft.baseUrl || !this.plainKey)) {
-      new Notice('Need base URL + API key.'); return;
+      new Notice(bi('Enter the Base URL and API key.', '请填写 Base URL 与 API key。')); return;
     }
     if (this.selectedKind === 'custom-api') {
       const baseUrl = this.validBaseUrl(this.draft.baseUrl);
-      if (!baseUrl) { new Notice('Base URL must be HTTP(s).'); return; }
+      if (!baseUrl) { new Notice(bi('Base URL must use HTTP(S).', 'Base URL 必须使用 HTTP(S)。')); return; }
       this.draft.baseUrl = baseUrl;
     }
     const ep: Endpoint = {
       id: uid(),
       kind: this.selectedKind,
-      label: this.draft.label || 'New endpoint',
+      label: this.draft.label || bi('New endpoint', '新端点'),
       ...this.draft,
       apiKey: '',          // populated by storeApiKey() in caller
       proxyMode: 'global',

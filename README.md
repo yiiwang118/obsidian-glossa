@@ -30,31 +30,40 @@ Glossa turns the sidebar into a working surface, not a separate chatbot. The act
 | 🧩 | **Runs focused Skills** | Use built-in workflows for Markdown, Canvas, Bases, PDFs, images, or create and validate your own vault Skills. |
 | 🔐 | **Keeps actions accountable** | Start read-only, approve writes, inspect tool results, and restore checkpointed files when an edit needs to be rolled back. |
 
-## New in 0.6.7
+## What's New
 
-### Less context overhead, more useful work
+- **2026-07-12 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 🎛️ Settings that explain themselves.** [`0.6.8`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.8) reorganizes configuration into five task-focused areas: General, Models & web, Agent, Tools & Skills, and Data & advanced. A compact status header keeps the active model, mode, and Auto/EN/中文 language control visible, while one keyboard-accessible selector keeps labels, checkmarks, arrows, and row geometry aligned throughout the plugin.
+- **2026-07-12 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 🧩 Every tool and Skill is visible before you trust it.** The new searchable capability catalog shows which tools load by default, which arrive on demand, what can run automatically, what requires approval, and which actions are read-only. Bundled and vault Skills expose their source, trigger guidance, required tools, and validation status instead of behaving like an opaque prompt folder.
+- **2026-07-12 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 🧠 Reasoning controls no longer second-guess you.** Choose `off`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. OpenAI-compatible requests send the selected value unchanged, `off` omits the field, Anthropic-style endpoints use explicit budgets, and an unsupported model or gateway returns its real error with the attempted effort identified. Export chat and Settings also have direct header buttons instead of living behind a generic overflow menu.
+- **2026-07-10 — 📌 The open note is useful context, not a selection requirement.** With [`0.6.7`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.7), requests to summarize, explain, translate, or analyze can use the active Markdown note automatically. Explicit selections and attachments still win when they name another target, while short follow-ups such as “continue”, “use Chinese”, or “save it below” retain the previous title, URL, output folder, failure, and requested object.
+- **2026-07-10 — ⚙️ Smaller prompts now do more work.** Specialized schemas stay deferred until `tool_search` or an active Skill requests them; `read_note` supports exact line ranges and `read_files` batches up to eight known files. Stale read/search evidence can leave the model prompt without deleting visible chat, while write confirmations, downloads, plans, failures, and Skill state stay protected. Repeated failures must change strategy, and identical-call loops stop before wasting a run.
+- **2026-07-10 — 📚 Papers, images, and formulas get task-specific treatment.** PDF work can inspect identity, summarize, search concepts, read page ranges, or render visual evidence for equations, tables, figures, and scans. Image work can switch among description, OCR, UI review, chart analysis, detail crops, and exact color sampling. Math normalization preserves code while fixing historical `\(...\)` and `\[...\]` output, and bounded caches make repeated media inspection faster.
+- **2026-07-10 — 🛠️ Six focused Skills ship with validation, not ceremony.** Glossa includes `obsidian-markdown`, `obsidian-canvas`, `obsidian-bases`, `pdf-analysis`, `image-analysis`, and `skill-creator`. Skill Creator uses positive and negative trigger examples, selects an appropriate constraint level, writes a focused `SKILL.md`, and checks naming, activation cues, path safety, workflow structure, and tool references before the Skill is trusted.
+- **2026-07-05 — 🛡️ Dynamic plugin boundaries became review-safe and explicit.** [`0.6.6`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.6) narrowed Dataview, Tasks, Templater, and PDF.js integration types, added runtime capability checks, and removed the last broad top-type unions reported by source review. The release kept compatibility at host-app boundaries while making failures predictable instead of hiding them behind unchecked values.
+- **2026-07-04 — ✅ Community review failures now stop locally.** [`0.6.5`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.5) removed forbidden `no-explicit-any` disables, described and bounded lint directives, wrapped non-`Error` promise rejections, and expanded release checks to reject the same source patterns that block directory review. [`0.6.4`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.4) is retained as the superseded cleanup attempt for a complete audit trail.
+- **2026-07-04 — 🔄 Updates lead back to the installed plugin.** [`0.6.3`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.3) changed the primary update action to open Glossa inside the app's plugin browser. GitHub Release remains available as a fallback when the community catalog has not synchronized yet.
 
-- **Smart current-file context.** Summarize, explain, translate, or analyze the open note without selecting it first. Explicit attachments still take priority when the user names another target.
-- **Reliable follow-ups.** Short instructions such as “continue”, “use Chinese”, or “save it below” retain the previous title, URL, output folder, failed attempt, and requested object.
-- **Targeted and batch reads.** `read_note` can read an exact line range; `read_files` reads up to eight known text files in one bounded call.
-- **Active context pruning.** Stale read/search results can leave the model prompt without deleting visible chat history. Write confirmations, downloads, failures, Skills, and plans stay protected.
-- **Deferred specialized tools.** The first request stays compact. Canvas, backlinks, frontmatter, batch reading, Skill validation, and other specialist schemas load only when needed.
-- **Loop protection.** Returned tool errors are represented as real errors, repeated failures force a strategy change, and identical-call loops are stopped before they waste the run.
+<details>
+<summary><strong>Earlier updates</strong> (2026-04-08 to 2026-07-04, 14 entries)</summary>
 
-### Better documents and media
+- **2026-07-04 — `0.6.2` marketplace-readiness pass.** Tightened the public description, refreshed release documentation, replaced review-facing direct fetch paths, removed CSS `:has()` compatibility risks, added strict source lint, and brought the dependency audit to zero known vulnerabilities.
+- **2026-07-03 — `0.6.1` faster selection translation.** Select text and press Enter twice to translate when the composer is empty; mixed-language detection ignores Markdown URLs and reduces the weight of model names, providers, and other proper nouns before choosing a target language.
+- **2026-07-03 — `0.6.1` quieter selection and session behavior.** The quick-translate hint moved into the composer placeholder, deleted active chats reset cleanly, streaming preserves scroll position unless the reader is already following the bottom, and Node integration tests gained the browser globals they need.
+- **2026-06-30 — `0.6.0` bounded web research.** Search can route through DuckDuckGo, Brave, Tavily, Exa, or SerpAPI, then fetch and extract bounded source notes with domain filtering, deduplication, trust hints, useful metadata, and task-guided excerpts.
+- **2026-06-30 — `0.6.0` safer downloads with provenance.** Public PDFs, images, datasets, and release assets can be saved with redirect checks, private-network blocking, size caps, overwrite controls, SHA-256 hashes, optional `.source.json` records, and post-download PDF inspection.
+- **2026-06-30 — `0.5.3` quiet update awareness.** A throttled sidebar notice can report newer GitHub releases, users can check manually or dismiss one version, semver patches sort correctly, and long-running conversations avoid repeated DOM work.
+- **2026-06-29 — `0.5.2` long-chat navigation.** A compact conversation rail records user prompts only, highlights the current prompt while scrolling, previews earlier questions, and jumps back without filling the transcript with navigation chrome.
+- **2026-06-26 — `0.5.1` clearer attachment context.** Uploaded files remain visible on sent messages, the composer separates explicit attachments from the active note, stale chips clear after sending, and ordinary prose avoids unnecessary MathJax work.
+- **2026-06-26 — `0.5.0` agent UI refresh.** The sidebar, composer, tool activity, status pills, PDF context, history naming, empty-chat persistence, and endpoint settings received a coordinated visual and interaction pass.
+- **2026-06-25 — `0.4.3` PDF, image, and provider polish.** Task-aware document guidance improved, `xhigh` became available without silent fallback, automatic selection capture stopped reading unrelated UI text, and custom API tool calls became more reliable.
+- **2026-06-23 — `0.4.2` submission follow-up.** Remaining review lint findings were cleared, trusted SVG rendering replaced unsafe HTML insertion, older WebViews kept readable release UI, and GitHub Actions added artifact provenance.
+- **2026-06-23 — `0.4.1` first community submission pass.** Added `read_pdf`, release metadata checks, conservative Plan plus read-only defaults, endpoint-native connection tests, bounded large-diff previews, and explicit privacy documentation.
+- **2026-05-19 — `0.4.0` security and persistence hardening.** Atomic JSON writes, first-build RAG consent, checkpoint write serialization, encoded path-traversal protection, strict patch-envelope parsing, deferred-tool filtering, CI, privacy documentation, and release automation landed together.
+- **2026-04-08 — `0.3.0` pre-open-source baseline.** The final internal build established the chat, context, provider, and note-tool foundations that were hardened for the first public release.
 
-- **Task-aware PDF reading.** Inspect identity, summarize, search concepts, read page ranges, or render visual evidence for formulas, tables, figures, and scans.
-- **Purpose-built image inspection.** Choose description, OCR, UI review, chart analysis, detail crops, or exact pixel-color sampling.
-- **Stable math rendering.** Existing `\(...\)` and `\[...\]` formulas are normalized for the reading view while code fences and inline code remain untouched.
-- **Faster repeated media work.** PDF text, rendered pages, image reads, and crops use bounded in-memory caches keyed by file identity and processing options.
+For the exact Added, Changed, Fixed, and Checks breakdown, see the full [Changelog](CHANGELOG.md).
 
-### Skills that are easier to trust
-
-Glossa includes six focused Skills:
-
-`obsidian-markdown` · `obsidian-canvas` · `obsidian-bases` · `pdf-analysis` · `image-analysis` · `skill-creator`
-
-The Skill Creator defines positive and negative trigger examples, chooses an appropriate constraint level, writes a focused `SKILL.md`, and validates naming, activation cues, path safety, workflow structure, and tool references.
+</details>
 
 ## Typical Workflows
 

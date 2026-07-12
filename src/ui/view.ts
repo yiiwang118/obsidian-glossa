@@ -441,17 +441,17 @@ export class GlossaView extends ItemView {
     setTrustedSvg(newBtn, ICON.plus);
     newBtn.onclick = () => this.startNewSession();
 
-    // Aurora v0.4: history popover stays as a dedicated header icon because
-    // it's a high-frequency action (chat-list lookups happen many times per
-    // session). Settings is the low-frequency action — collapsed into ⋯.
-    // This keeps the header at 3 right-side icons instead of 4.
     const histBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('chat_history'), type: 'button', attrs: { 'aria-label': t('chat_history') } });
     setTrustedSvg(histBtn, ICON.history);
     histBtn.onclick = () => this.toggleHistoryPopover(histBtn);
 
-    const moreBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('more'), type: 'button', attrs: { 'aria-label': t('more') } });
-    setTrustedSvg(moreBtn, ICON.more);
-    moreBtn.onclick = (e) => this.openMoreMenu(e);
+    const exportBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('export_chat'), type: 'button', attrs: { 'aria-label': t('export_chat') } });
+    setTrustedSvg(exportBtn, ICON.upload);
+    exportBtn.onclick = () => { void this.exportChatToNote(); };
+
+    const settingsBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('settings'), type: 'button', attrs: { 'aria-label': t('settings') } });
+    setTrustedSvg(settingsBtn, ICON.cog);
+    settingsBtn.onclick = () => this.openPluginSettings();
   }
 
   /** Public — called by plugin after settings save so chrome stays fresh. */
@@ -650,51 +650,10 @@ export class GlossaView extends ItemView {
     window.setTimeout(() => el.remove(), 140);
   }
 
-  private openMoreMenu(e: MouseEvent) {
-    const menu = new Menu();
-    // Aurora v0.4: settings was previously a dedicated header icon — moved
-    // here to free the header for the higher-frequency actions (new chat,
-    // history, more). Keep it at the top of the menu so it stays discoverable.
-    menu.addItem(it => it.setIcon('settings').setTitle(t('settings')).onClick(() => {
-      (this.app as AnyValue).setting.open();
-      (this.app as AnyValue).setting.openTabById(this.plugin.manifest.id);
-    }));
-    menu.addSeparator();
-    menu.addItem(it => it.setTitle('Clear messages').onClick(() => this.startNewSession()));
-    menu.addItem(it => it.setTitle('Export chat → note').onClick(() => { void this.exportChatToNote(); }));
-    menu.addSeparator();
-    menu.addItem(it => it.setTitle('Save first user message as workflow').onClick(() => this.saveAsWorkflow()));
-    if (this.plugin.settings.workflows.length) {
-      menu.addItem(it => it.setTitle('Run workflow…').onClick(e2 => this.openWorkflowMenu(e2 as AnyValue)));
-    }
-    menu.addSeparator();
-    menu.addItem(it => it.setTitle('Regenerate last response').onClick(() => { void this.regenerateLast(); }));
-    menu.showAtMouseEvent(e);
-  }
-
-  private saveAsWorkflow() {
-    const firstUser = this.session.messages.find(m => m.role === 'user');
-    if (!firstUser) { quickNotice('No user message in this session.'); return; }
-    const title = (this.session.title || firstUser.content.slice(0, 40)).trim();
-    this.plugin.settings.workflows.unshift({
-      id: uid(), title, prompt: firstUser.content, createdAt: Date.now(),
-    });
-    if (this.plugin.settings.workflows.length > 50) this.plugin.settings.workflows.length = 50;
-    void this.plugin.saveSettings();
-    quickNotice(`Saved as workflow: "${title.slice(0, 40)}"`);
-  }
-  private openWorkflowMenu(e: MouseEvent) {
-    const menu = new Menu();
-    for (const w of this.plugin.settings.workflows) {
-      menu.addItem(it => it.setTitle(w.title).onClick(() => {
-        this.inputEl.value = w.prompt;
-        this.inputEl.dispatchEvent(new Event('input'));
-        this.inputEl.focus();
-      }));
-    }
-    menu.addSeparator();
-    menu.addItem(it => it.setTitle('Manage in settings').onClick(() => (this.app as AnyValue).setting.open()));
-    menu.showAtMouseEvent(e);
+  private openPluginSettings() {
+    const settings = (this.app as AnyValue).setting;
+    settings?.open?.();
+    settings?.openTabById?.(this.plugin.manifest.id);
   }
 
   private updateTokenBadge() {
@@ -2532,7 +2491,9 @@ export class GlossaView extends ItemView {
     // thinking. Universally readable, brand-neutral.
     setTrustedSvg(ic, `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>`);
     // Subtle subscript so users see the current level at a glance.
-    const map: Record<string, string> = { off: '·', low: 'L', medium: 'M', high: 'H', xhigh: 'X' };
+    const map: Record<string, string> = {
+      off: '·', none: '0', minimal: 'MIN', low: 'L', medium: 'M', high: 'H', xhigh: 'X', max: 'MAX', ultra: 'U',
+    };
     el('span', { className: 'nc-pill-sub', text: map[effort] ?? 'M', parent: this.reasoningPillEl });
     el('span', { className: 'nc-pill-caret', text: '▾', parent: this.reasoningPillEl });
     this.reasoningPillEl.title = bi(`Reasoning effort: ${effort}`, `思考强度：${effort}`);
@@ -3926,7 +3887,10 @@ export class GlossaView extends ItemView {
   }
 
   private async exportChatToNote() {
-    if (this.session.messages.length === 0) { quickNotice('No messages.'); return; }
+    if (this.session.messages.length === 0) {
+      quickNotice(bi('There is no conversation to export yet.', '当前还没有可导出的对话。'));
+      return;
+    }
     const folder = this.plugin.settings.chatsFolder || 'Chats';
     try { await this.app.vault.createFolder(folder); } catch { /* ignore */ }
     const safeTitle = (this.session.title || 'chat').replace(/[\\/:*?"<>|]/g, '-').slice(0, 60);

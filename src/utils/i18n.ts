@@ -34,6 +34,7 @@ type Dict = Record<string, { en: string; zh: string }>;
 const D: Dict = {
   'new_chat':            { en: 'New chat',          zh: '新对话' },
   'settings':            { en: 'Settings',          zh: '设置' },
+  'export_chat':         { en: 'Export chat to note', zh: '导出对话为笔记' },
   'chat_history':        { en: 'Chat history',      zh: '历史对话' },
   'more':                { en: 'More',              zh: '更多' },
   'attach_file':         { en: 'Attach',             zh: '附加' },
@@ -82,15 +83,19 @@ const D: Dict = {
 
   /* ----- Reasoning effort ----- */
   'reasoning_effort':          { en: 'Reasoning',         zh: '思考强度' },
-  'reasoning_effort_desc':     { en: 'Higher = deeper + more tokens.',
-                                  zh: '越高越深，token 消耗越多。' },
+  'reasoning_effort_desc':     { en: 'OpenAI-compatible APIs receive the selected value unchanged. Unsupported models return their API error.',
+                                  zh: 'OpenAI 兼容 API 会原样收到所选值；模型不支持时直接显示 API 错误。' },
   'reasoning_effort_desc_cli': { en: 'Higher = deeper + more tokens.',
                                   zh: '越高越深，token 消耗越多。' },
-  'effort_off':                { en: 'off',               zh: 'off' },
+  'effort_off':                { en: 'off (omit)',        zh: 'off（不发送）' },
+  'effort_none':               { en: 'none',              zh: 'none' },
+  'effort_minimal':            { en: 'minimal',           zh: 'minimal' },
   'effort_low':                { en: 'low',               zh: 'low' },
   'effort_medium':             { en: 'medium',            zh: 'medium' },
   'effort_high':               { en: 'high',              zh: 'high' },
   'effort_xhigh':              { en: 'xhigh',             zh: 'xhigh' },
+  'effort_max':                { en: 'max',               zh: 'max' },
+  'effort_ultra':              { en: 'ultra',             zh: 'ultra' },
 
   /* ----- Codex-specific ----- */
   'codex_sandbox':             { en: 'Sandbox',           zh: '沙箱' },
