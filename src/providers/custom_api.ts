@@ -413,7 +413,7 @@ export class CustomApiProvider implements LLMProvider {
       try {
         const args = JSON.parse(slot.argsStr);
         yield { type: 'tool_call', id: slot.id, name: slot.name, args };
-      } catch (e) {
+      } catch {
         yield { type: 'error', error: `Tool call "${slot.name}" had truncated/unparsable JSON args from stream — likely the proxy dropped the connection mid-message.` };
       }
     }
@@ -612,7 +612,7 @@ export class CustomApiProvider implements LLMProvider {
       try {
         const args = JSON.parse(slot.argsStr);
         yield { type: 'tool_call', id: slot.id, name: slot.name, args };
-      } catch (e) {
+      } catch {
         yield { type: 'error', error: `Tool call "${slot.name}" had truncated/unparsable JSON args from stream — likely the proxy dropped the connection mid-message.` };
       }
     }

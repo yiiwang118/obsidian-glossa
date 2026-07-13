@@ -31,16 +31,16 @@ class PassphraseModal extends Modal {
       confirm.placeholder = t('pp_confirm');
     }
 
-    const actions = contentEl.createEl('div', { cls: 'nc-approval-actions' });
+    const actions = contentEl.createDiv({ cls: 'nc-approval-actions' });
     const cancel = actions.createEl('button', { text: t('pp_cancel') });
     cancel.onclick = () => this.done(null);
     const ok = actions.createEl('button', { text: this.mode === 'set' ? t('pp_encrypt') : t('pp_unlock'), cls: 'mod-cta' });
     ok.onclick = () => {
       if (this.mode === 'set' && confirm && confirm.value !== inp.value) {
-        contentEl.createEl('div', { cls: 'nc-approval-stats', text: t('pp_mismatch') }); return;
+        contentEl.createDiv({ cls: 'nc-approval-stats', text: t('pp_mismatch') }); return;
       }
       if (!inp.value || inp.value.length < 4) {
-        contentEl.createEl('div', { cls: 'nc-approval-stats', text: t('pp_too_short') }); return;
+        contentEl.createDiv({ cls: 'nc-approval-stats', text: t('pp_too_short') }); return;
       }
       this.done(inp.value);
     };

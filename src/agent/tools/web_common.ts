@@ -53,7 +53,10 @@ export function httpFallbackUrl(url: string, error: unknown, signal?: AbortSigna
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'number' || typeof error === 'boolean' || typeof error === 'bigint') return String(error);
+  return 'Unknown error';
 }
 
 function errorName(error: unknown): string {

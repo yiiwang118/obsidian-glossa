@@ -139,18 +139,18 @@ export const patchNote: ToolImpl = buildTool({
                 : t.frontmatter_key ? `props.${t.frontmatter_key}`
                 : 'unknown anchor';
     if (result.startsWith('Error')) return null;        // fall back to default error rendering
-    const wrap = activeDocument.createElement('div');
+    const wrap = activeWindow.createDiv();
     setStyle(wrap, { padding: '6px 10px' });
     setStyle(wrap, { fontSize: '12px' });
     setStyle(wrap, { background: 'color-mix(in srgb, var(--glossa-success, #2f7d52) 8%, transparent)' });
     setStyle(wrap, { borderLeft: '3px solid var(--glossa-success, #2f7d52)' });
     setStyle(wrap, { borderRadius: '4px' });
     setStyle(wrap, { lineHeight: '1.5' });
-    const head = activeDocument.createElement('div');
+    const head = activeWindow.createDiv();
     setStyle(head, { fontWeight: '600' });
     head.textContent = `${(args?.op ?? 'patched').toUpperCase()} · ${where}`;
     wrap.appendChild(head);
-    const sub = activeDocument.createElement('div');
+    const sub = activeWindow.createDiv();
     setStyle(sub, { opacity: '0.7' });
     setStyle(sub, { fontSize: '11px' });
     sub.textContent = result.split('\n')[0];

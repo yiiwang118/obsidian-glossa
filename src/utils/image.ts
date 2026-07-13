@@ -53,7 +53,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)) as AnyValue);
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
   return btoa(binary);
 }
@@ -133,7 +133,7 @@ export async function inspectImageArrayBuffer(data: ArrayBuffer | Uint8Array, mi
     const samplePoints = normalizeImageSamplePoints(opts.samplePoints, width, height);
 
     if (samplePoints.length > 0 || region || mode === 'color') {
-      const canvas = activeDocument.createElement('canvas');
+      const canvas = activeWindow.createEl('canvas');
       canvas.width = Math.max(1, width);
       canvas.height = Math.max(1, height);
       const ctx = canvas.getContext('2d');
@@ -224,7 +224,7 @@ function samplePixel(ctx: CanvasRenderingContext2D, point: ImageSamplePoint): Im
 }
 
 function cropCanvas(ctx: CanvasRenderingContext2D, region: ImageRegion): { mime: string; data: string } {
-  const canvas = activeDocument.createElement('canvas');
+  const canvas = activeWindow.createEl('canvas');
   canvas.width = region.width;
   canvas.height = region.height;
   const cropCtx = canvas.getContext('2d');
@@ -241,7 +241,7 @@ function decodeImage(bytes: Uint8Array, mime: string): Promise<HTMLImageElement>
   const win = activeDocument.defaultView ?? window;
   const blob = new Blob([bytes.slice()], { type: mime || DEFAULT_MIME });
   const url = win.URL.createObjectURL(blob);
-  const img = activeDocument.createElement('img');
+  const img = activeWindow.createEl('img');
   return new Promise((resolve, reject) => {
     const cleanup = () => win.URL.revokeObjectURL(url);
     img.onload = () => { cleanup(); resolve(img); };

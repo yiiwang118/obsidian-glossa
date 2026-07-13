@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
-import { createHash } from 'crypto';
+/* eslint-disable @typescript-eslint/no-unsafe-argument -- HTML replacement callbacks receive parser-derived values that are normalized before use. */
 
 export interface WebFetchOptions {
   signal?: AbortSignal;
@@ -172,8 +171,9 @@ function countTerm(text: string, term: string): number {
   return count;
 }
 
-export function sha256Hex(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 export function inferExtension(contentType: string, url: string): string {

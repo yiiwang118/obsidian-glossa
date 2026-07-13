@@ -29,14 +29,14 @@ class ConfirmModal extends Modal {
     contentEl.createEl('h3', { text: this.opts.title });
     // Preserve newlines / indentation in the body (most call sites use
     // multi-line text to show command + args + scope).
-    const bodyEl = contentEl.createEl('div', { cls: 'nc-confirm-body' });
+    const bodyEl = contentEl.createDiv({ cls: 'nc-confirm-body' });
     setStyle(bodyEl, { whiteSpace: 'pre-wrap' });
     setStyle(bodyEl, { fontSize: '13px' });
     setStyle(bodyEl, { lineHeight: '1.55' });
     setStyle(bodyEl, { padding: '6px 0 16px' });
     bodyEl.textContent = this.opts.body;
 
-    const row = contentEl.createEl('div', { cls: 'nc-confirm-actions' });
+    const row = contentEl.createDiv({ cls: 'nc-confirm-actions' });
     setStyle(row, { display: 'flex' });
     setStyle(row, { gap: '8px' });
     setStyle(row, { justifyContent: 'flex-end' });
@@ -81,7 +81,7 @@ class PromptModal extends Modal {
     contentEl.empty();
     contentEl.createEl('h3', { text: this.opts.title });
     if (this.opts.body) {
-      const bodyEl = contentEl.createEl('div', { cls: 'nc-prompt-body' });
+      const bodyEl = contentEl.createDiv({ cls: 'nc-prompt-body' });
       setStyle(bodyEl, { whiteSpace: 'pre-wrap' });
       setStyle(bodyEl, { fontSize: '13px' });
       setStyle(bodyEl, { opacity: '0.85' });
@@ -97,7 +97,7 @@ class PromptModal extends Modal {
     if (this.opts.defaultValue != null) inputEl.value = this.opts.defaultValue;
     window.setTimeout(() => inputEl.focus(), 0);
 
-    const row = contentEl.createEl('div', { cls: 'nc-prompt-actions' });
+    const row = contentEl.createDiv({ cls: 'nc-prompt-actions' });
     setStyle(row, { display: 'flex' });
     setStyle(row, { gap: '8px' });
     setStyle(row, { justifyContent: 'flex-end' });

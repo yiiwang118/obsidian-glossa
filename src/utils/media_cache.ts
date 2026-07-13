@@ -59,9 +59,9 @@ export class BoundedAsyncCache<T> {
       entry.weight = Math.max(0, this.weigh(value));
       this.trim(key);
       return value;
-    }).catch(error => {
+    }).catch(reason => {
       if (this.entries.get(key) === entry) this.entries.delete(key);
-      throw error;
+      throw asError(reason, 'Cached operation failed.');
     });
     return { value: await entry.promise, cacheHit: false };
   }
@@ -83,7 +83,11 @@ export class BoundedAsyncCache<T> {
 
   private trim(protectedKey: string): void {
     while (this.entries.size > this.maxEntries || this.totalWeight() > this.maxWeight) {
-      const oldestKey = this.entries.keys().next().value as string | undefined;
+      let oldestKey: string | undefined;
+      for (const key of this.entries.keys()) {
+        oldestKey = key;
+        break;
+      }
       if (!oldestKey) return;
       if (oldestKey === protectedKey && this.entries.size === 1) return;
       this.entries.delete(oldestKey);
@@ -174,9 +178,9 @@ export async function awaitWithAbortSignal<T>(
         signal.removeEventListener('abort', onAbort);
         resolve(value);
       },
-      error => {
+      reason => {
         signal.removeEventListener('abort', onAbort);
-        reject(error);
+        reject(asError(reason, 'Shared operation failed.'));
       },
     );
   });
@@ -213,4 +217,9 @@ function abortError(message: string): Error {
   const error = new Error(message);
   error.name = 'AbortError';
   return error;
+}
+
+function asError(reason: unknown, fallback: string): Error {
+  if (reason instanceof Error) return reason;
+  return new Error(typeof reason === 'string' && reason ? reason : fallback);
 }

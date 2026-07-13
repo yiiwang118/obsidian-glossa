@@ -582,7 +582,7 @@ export class GlossaView extends ItemView {
     // popover feel like a modal. We want a Raycast / Cursor task-list feel
     // (small floating panel, surrounding page stays alive). Outside-click
     // still closes via the document-level listener below.
-    const host = activeDocument.createElement('div');
+    const host = activeWindow.createDiv();
     host.className = 'nc-history-popover';
     activeDocument.body.appendChild(host);
     this.histPopEl = host;
@@ -994,7 +994,7 @@ export class GlossaView extends ItemView {
     examples.forEach((ex, i) => {
       // <button> so keyboard nav + screen reader semantics come for free
       // (was <div>, which screen readers skipped entirely).
-      const chip = activeDocument.createElement('button');
+      const chip = activeWindow.createEl('button');
       chip.className = 'nc-example-chip';
       chip.type = 'button';
       chip.setAttribute('role', 'listitem');
@@ -1128,7 +1128,7 @@ export class GlossaView extends ItemView {
       if (hasSnapshot) {
         const undoBtn = el('button', { className: 'nc-compact-undo', parent: acts, attrs: { title: 'Restore the pre-compact messages' } });
         setTrustedSvg(undoBtn, ICON.undo);
-        undoBtn.createEl('span', { text: 'Undo' });
+        undoBtn.createSpan({ text: 'Undo' });
         undoBtn.onclick = (e) => { e.stopPropagation(); void this.undoCompact(m.id); };
       }
       // Whole header row toggles collapse too (but ignore clicks on action buttons)
@@ -1957,7 +1957,7 @@ export class GlossaView extends ItemView {
       // growing). Append any new ones (paras.length - 1 > committed).
       if (paras.length - 1 > committed) {
         for (let i = committed; i < paras.length - 1; i++) {
-          const wrap = activeDocument.createElement('div');
+          const wrap = activeWindow.createDiv();
           wrap.className = 'nc-stream-para';
           // Insert BEFORE the tail element so paragraph order is correct.
           if (ui._tailEl?.isConnected) ui.body.insertBefore(wrap, ui._tailEl);
@@ -1969,7 +1969,7 @@ export class GlossaView extends ItemView {
       // Render the trailing (incomplete) paragraph — reuses tailEl so we don't
       // accumulate orphan nodes.
       if (!ui._tailEl || !ui._tailEl.isConnected) {
-        ui._tailEl = activeDocument.createElement('div');
+        ui._tailEl = activeWindow.createDiv();
         ui._tailEl.className = 'nc-stream-para nc-stream-tail';
         ui.body.appendChild(ui._tailEl);
       }
@@ -1996,7 +1996,7 @@ export class GlossaView extends ItemView {
           ui._tailPlain = undefined;
         }
       }
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
     this.streamRenderInFlight = false;
     this.scrollToBottom();
     if (this.streamingMsgUI && this.streamingBuf !== snapshot) this.scheduleStreamingRender();
@@ -2148,7 +2148,7 @@ export class GlossaView extends ItemView {
       if (mcpServer) opts.push({ value: 'always-mcp-server', label: `Always allow MCP server "${mcpServer}"` });
       const sel = el('select', { className: 'nc-inline-rule-select', parent: ruleRow });
       for (const o of opts) {
-        const optEl = activeDocument.createElement('option');
+        const optEl = activeWindow.createEl('option');
         optEl.value = o.value; optEl.textContent = o.label;
         sel.appendChild(optEl);
       }
@@ -2566,7 +2566,7 @@ export class GlossaView extends ItemView {
     if (text.length > 400) return;
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const rect = this.inputWrap.getBoundingClientRect();
-    const ghost = activeDocument.createElement('div');
+    const ghost = activeWindow.createDiv();
     ghost.className = 'nc-send-flyout';
     ghost.textContent = text;
     setStyle(ghost, {
@@ -3950,7 +3950,7 @@ export class GlossaView extends ItemView {
     ].join('\n');
     try {
       await this.app.vault.create(path, body);
-    } catch (e) {
+    } catch {
       quickNotice('Could not write file (already exists?).');
       return;
     }

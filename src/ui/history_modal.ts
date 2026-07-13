@@ -69,9 +69,9 @@ class HistoryPopover {
     this.root.addClass('nc-history-pop');
 
     // Top bar: search + overflow menu.
-    const top = this.root.createEl('div', { cls: 'nc-history-pop-top' });
-    const searchWrap = top.createEl('div', { cls: 'nc-history-pop-search' });
-    const searchIcon = searchWrap.createEl('span', { cls: 'nc-history-pop-search-icon' });
+    const top = this.root.createDiv({ cls: 'nc-history-pop-top' });
+    const searchWrap = top.createDiv({ cls: 'nc-history-pop-search' });
+    const searchIcon = searchWrap.createSpan({ cls: 'nc-history-pop-search-icon' });
     setTrustedSvg(searchIcon, `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`);
     const search = searchWrap.createEl('input', { type: 'text', cls: 'nc-history-pop-search-input' });
     search.placeholder = t('hist_search');
@@ -86,7 +86,7 @@ class HistoryPopover {
     moreBtn.onclick = (e) => this.openOverflowMenu(e, moreBtn);
 
     // List body — flex-grow, scrollable.
-    this.listEl = this.root.createEl('div', { cls: 'nc-history-pop-list' });
+    this.listEl = this.root.createDiv({ cls: 'nc-history-pop-list' });
     // a11y: announce the list semantics so screen readers can navigate
     // session rows as listbox items.
     this.listEl.setAttribute('role', 'listbox');
@@ -152,8 +152,8 @@ class HistoryPopover {
 
     if (sessions.length === 0) {
       this.kbdIdx = -1;
-      const empty = this.listEl.createEl('div', { cls: 'nc-history-pop-empty' });
-      empty.createEl('div', {
+      const empty = this.listEl.createDiv({ cls: 'nc-history-pop-empty' });
+      empty.createDiv({
         text: this.filter ? t('hist_no_match') : t('hist_empty'),
         cls: 'nc-history-pop-empty-title',
       });
@@ -171,7 +171,7 @@ class HistoryPopover {
   }
 
   private renderRow(s: ChatSession): HTMLElement | null {
-    const row = this.listEl.createEl('div', { cls: 'nc-history-pop-row' });
+    const row = this.listEl.createDiv({ cls: 'nc-history-pop-row' });
     // a11y: rows are option items within the listbox container. aria-selected
     // updates via the keyboard-nav cursor (this.kbdIdx) elsewhere.
     row.setAttribute('role', 'option');
@@ -180,9 +180,9 @@ class HistoryPopover {
     row.setAttribute('aria-label', `${s.title || bi('(untitled)', '（无标题）')} · ${this.relativeTime(s.updatedAt)}`);
     if (s.id === this.renamingId) { this.renderRenameInline(row, s); return null; }
 
-    const title = row.createEl('span', { cls: 'nc-history-pop-row-title', text: s.title || bi('(untitled)', '（无标题）') });
+    const title = row.createSpan({ cls: 'nc-history-pop-row-title', text: s.title || bi('(untitled)', '（无标题）') });
     title.title = title.textContent ?? '';
-    const ago = row.createEl('span', { cls: 'nc-history-pop-row-ago', text: this.relativeTime(s.updatedAt) });
+    const ago = row.createSpan({ cls: 'nc-history-pop-row-ago', text: this.relativeTime(s.updatedAt) });
     ago.title = new Date(s.updatedAt).toLocaleString();
 
     row.onclick = () => this.onPick(s);

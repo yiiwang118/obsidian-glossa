@@ -65,7 +65,7 @@ export const readCanvas: ToolImpl = buildTool({
       // The result string starts with our summary line; pull just that for a
       // tighter UI presentation.
       const firstLine = result.split('\n').slice(0, 4).join('\n');
-      const el = activeDocument.createElement('div');
+      const el = activeWindow.createDiv();
       el.className = 'nc-canvas-summary';
       setStyle(el, { whiteSpace: 'pre-wrap' });
       setStyle(el, { padding: '6px 10px' });
@@ -75,15 +75,15 @@ export const readCanvas: ToolImpl = buildTool({
       setStyle(el, { borderRadius: '4px' });
       el.textContent = firstLine;
       // Append a "show full" details below.
-      const det = activeDocument.createElement('details');
+      const det = activeWindow.createEl('details');
       setStyle(det, { marginTop: '6px' });
-      const sum = activeDocument.createElement('summary');
+      const sum = activeWindow.createEl('summary');
       sum.textContent = 'Full JSON';
       setStyle(sum, { cursor: 'pointer' });
       setStyle(sum, { fontSize: '11px' });
       setStyle(sum, { opacity: '0.7' });
       det.appendChild(sum);
-      const pre = activeDocument.createElement('pre');
+      const pre = activeWindow.createEl('pre');
       setStyle(pre, { fontSize: '11px' });
       setStyle(pre, { margin: '4px 0 0 0' });
       pre.textContent = result.slice(0, 8000);

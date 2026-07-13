@@ -70,9 +70,9 @@ export function renderDiffInto(target: HTMLElement, a: string, b: string): DiffO
   target.empty();
   const ops = lineDiff(a, b);
   for (const op of ops) {
-    const line = target.createEl('div', { cls: `nc-diff-line ${op.type}` });
-    line.createEl('span', { text: op.type === 'add' ? '+ ' : op.type === 'del' ? '- ' : '  ' });
-    line.createEl('span', { text: op.text || ' ' });
+    const line = target.createDiv({ cls: `nc-diff-line ${op.type}` });
+    line.createSpan({ text: op.type === 'add' ? '+ ' : op.type === 'del' ? '- ' : '  ' });
+    line.createSpan({ text: op.text || ' ' });
   }
   return ops;
 }

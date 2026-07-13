@@ -75,6 +75,7 @@ const cssChecks = [
   { label: 'source map marker', pattern: /sourceMappingURL|sourcesContent/ },
   { label: '!important', pattern: /!important/ },
   { label: 'CSS :has() selector', pattern: /:has\(/ },
+  { label: 'CSS multicolumn property', pattern: /(?:^|[;{\n]\s*)(?:columns|column-(?:count|fill|gap|rule(?:-color|-style|-width)?|span|width))\s*:/m },
   { label: 'duplicate font-size declaration on one rule line', pattern: /font-size:[^;]+;[^\n]*font-size:/ },
   { label: 'selection preview icon style marker', pattern: /nc-selection-preview-icon/ },
 ];

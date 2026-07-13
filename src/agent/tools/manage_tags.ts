@@ -31,12 +31,12 @@ export const manageTags: ToolImpl = buildTool({
   // line-per-tag list, otherwise a one-line summary.
   renderToolResultMessage(result, args) {
     if (result.startsWith('Error') || result.startsWith('(')) return null;
-    const wrap = activeDocument.createElement('div');
+    const wrap = activeWindow.createDiv();
     setStyle(wrap, { padding: '6px 10px' });
     setStyle(wrap, { lineHeight: '1.5' });
     setStyle(wrap, { fontSize: '12px' });
 
-    const header = activeDocument.createElement('div');
+    const header = activeWindow.createDiv();
     setStyle(header, { fontWeight: '600' });
     setStyle(header, { marginBottom: '6px' });
     header.textContent = `${(args?.op ?? 'tags').toUpperCase()}  ·  ${args?.path ?? ''}`;
@@ -52,14 +52,14 @@ export const manageTags: ToolImpl = buildTool({
       if (m) tags = m[2].split(',').map(s => s.trim()).filter(Boolean);
     }
     if (tags.length === 0) {
-      const sub = activeDocument.createElement('div');
+      const sub = activeWindow.createDiv();
       setStyle(sub, { opacity: '0.7' });
       sub.textContent = result;
       wrap.appendChild(sub);
       return wrap;
     }
 
-    const chipRow = activeDocument.createElement('div');
+    const chipRow = activeWindow.createDiv();
     setStyle(chipRow, { display: 'flex' });
     setStyle(chipRow, { flexWrap: 'wrap' });
     setStyle(chipRow, { gap: '4px' });
@@ -71,7 +71,7 @@ export const manageTags: ToolImpl = buildTool({
                  : op === 'remove' ? 'color-mix(in srgb, var(--glossa-danger, #b84a4a) 10%, transparent)'
                  : 'var(--glossa-active-bg, #eef3fb)';
     for (const t of tags) {
-      const chip = activeDocument.createElement('span');
+      const chip = activeWindow.createSpan();
       chip.textContent = `#${t}`;
       setStyle(chip, { padding: '2px 8px' });
       setStyle(chip, { fontSize: '11px' });
@@ -118,7 +118,9 @@ export const manageTags: ToolImpl = buildTool({
       return uniq.length === 0 ? '(no tags)' : uniq.join('\n');
     }
 
-    const inputTags = Array.isArray(args.tags) ? (args.tags as unknown[]).map(t => normalizeTag(String(t))).filter(Boolean) : [];
+    const inputTags = Array.isArray(args.tags)
+      ? (args.tags as unknown[]).filter((tag): tag is string => typeof tag === 'string').map(normalizeTag).filter(Boolean)
+      : [];
     if (inputTags.length === 0) return 'Error: tags array is required for add/remove (and must be non-empty).';
 
     if (op === 'add') {

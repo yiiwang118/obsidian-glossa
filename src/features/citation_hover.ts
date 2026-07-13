@@ -237,10 +237,10 @@ export class CitationHoverController {
   private showLoading(candidate: HoverCandidate): void {
     const pop = this.ensurePopup();
     clear(pop);
-    pop.createEl('div', { cls: 'nc-citation-title', text: 'Reference preview' });
-    pop.createEl('div', { cls: 'nc-citation-cite', text: candidate.citation.raw });
-    const row = pop.createEl('div', { cls: 'nc-citation-loading' });
-    row.createEl('span', { cls: 'nc-citation-spinner' });
+    pop.createDiv({ cls: 'nc-citation-title', text: 'Reference preview' });
+    pop.createDiv({ cls: 'nc-citation-cite', text: candidate.citation.raw });
+    const row = pop.createDiv({ cls: 'nc-citation-loading' });
+    row.createSpan({ cls: 'nc-citation-spinner' });
     row.appendText('Reading PDF references...');
     this.positionPopup(candidate.anchor);
   }
@@ -249,10 +249,10 @@ export class CitationHoverController {
     const pop = this.ensurePopup();
     clear(pop);
 
-    const head = pop.createEl('div', { cls: 'nc-citation-head' });
-    head.createEl('div', { cls: 'nc-citation-title', text: 'Reference' });
-    head.createEl('div', { cls: 'nc-citation-source', text: candidate.file.basename });
-    pop.createEl('div', { cls: 'nc-citation-cite', text: normalizedCitationLabel(result.citation.raw) });
+    const head = pop.createDiv({ cls: 'nc-citation-head' });
+    head.createDiv({ cls: 'nc-citation-title', text: 'Reference' });
+    head.createDiv({ cls: 'nc-citation-source', text: candidate.file.basename });
+    pop.createDiv({ cls: 'nc-citation-cite', text: normalizedCitationLabel(result.citation.raw) });
 
     if (result.status !== 'matched') {
       this.hide();
@@ -268,22 +268,22 @@ export class CitationHoverController {
   }
 
   private renderEntry(parent: HTMLElement, entry: PdfReferenceEntry, showLabel: boolean): void {
-    const item = parent.createEl('div', { cls: 'nc-citation-entry' });
+    const item = parent.createDiv({ cls: 'nc-citation-entry' });
     const label = entry.number ? `[${entry.number}]` : 'Reference';
-    if (showLabel) item.createEl('div', { cls: 'nc-citation-entry-label', text: label });
-    item.createEl('div', { cls: 'nc-citation-entry-text', text: displayReferenceText(entry.text) });
+    if (showLabel) item.createDiv({ cls: 'nc-citation-entry-label', text: label });
+    item.createDiv({ cls: 'nc-citation-entry-text', text: displayReferenceText(entry.text) });
     const meta: string[] = [];
     if (entry.page) meta.push(`p. ${entry.page}`);
     if (entry.doi) meta.push(`DOI ${entry.doi}`);
     if (entry.url) meta.push(entry.url);
-    if (meta.length) item.createEl('div', { cls: 'nc-citation-meta', text: meta.join(' · ') });
+    if (meta.length) item.createDiv({ cls: 'nc-citation-meta', text: meta.join(' · ') });
   }
 
   private showMessage(candidate: HoverCandidate, title: string, message: string): void {
     const pop = this.ensurePopup();
     clear(pop);
-    pop.createEl('div', { cls: 'nc-citation-title', text: title });
-    pop.createEl('div', { cls: 'nc-citation-empty', text: message });
+    pop.createDiv({ cls: 'nc-citation-title', text: title });
+    pop.createDiv({ cls: 'nc-citation-empty', text: message });
     this.positionPopup(candidate.anchor);
   }
 

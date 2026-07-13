@@ -18,7 +18,7 @@ export const contextPrune: ToolImpl = buildTool({
   isDestructive: () => false,
   searchHint: 'remove stale tool results from model context',
   searchTags: ['context cleanup', 'token efficiency', '上下文裁剪', '清理工具结果'],
-  describe: args => `prune context: ${String(record(args).mode ?? 'selected')}`,
+  describe: args => `prune context: ${record(args).mode === 'all' ? 'all' : 'selected'}`,
   spec: {
     name: 'context_prune',
     description: 'Exclude stale successful read/search results from future model requests without deleting visible chat history. Use after large evidence is no longer needed. Write confirmations, downloads, failures, skill instructions, tool discovery, and the active plan are never pruned.',

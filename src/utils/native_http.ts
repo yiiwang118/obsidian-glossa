@@ -1,26 +1,47 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment -- Dynamic plugin and host-app boundaries validate these values at runtime. */
-import { request as requestHttp } from 'http';
-import { request as requestHttps } from 'https';
-import type { IncomingHttpHeaders, IncomingMessage } from 'http';
+type NodeIncomingHeaders = Record<string, string | string[] | undefined>;
 
-const nativeRequest: typeof window.fetch | undefined = window.fetch?.bind(window);
+interface NodeIncomingMessage {
+  statusCode?: number;
+  statusMessage?: string;
+  headers: NodeIncomingHeaders;
+  on(event: 'data', listener: (chunk: unknown) => void): NodeIncomingMessage;
+  once(event: 'end', listener: () => void): NodeIncomingMessage;
+  once(event: 'error', listener: (reason: unknown) => void): NodeIncomingMessage;
+  destroy(error?: Error): void;
+}
+
+interface NodeClientRequest {
+  on(event: 'error', listener: (reason: unknown) => void): NodeClientRequest;
+  once(event: 'close', listener: () => void): NodeClientRequest;
+  write(chunk: string | Uint8Array): void;
+  end(): void;
+  destroy(error?: Error): void;
+}
+
+type NodeRequest = (
+  url: URL,
+  options: { method: string; headers?: Record<string, string> },
+  onResponse: (response: NodeIncomingMessage) => void,
+) => NodeClientRequest;
+
+interface NodeHttpModule {
+  request: NodeRequest;
+}
 
 /** Native browser HTTP is required only where Obsidian requestUrl cannot provide
  *  the streaming Response body or manual redirect handling we need. */
 export async function nativeStreamingHttpRequest(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  if (nativeRequest) {
-    try {
-      return await nativeRequest(input, init);
-    } catch (error) {
-      if (init?.signal?.aborted || errorName(error) === 'AbortError') throw error;
-    }
+  try {
+    return await window.fetch(input, init);
+  } catch (error) {
+    if (init?.signal?.aborted || errorName(error) === 'AbortError') throw asError(error);
   }
   return nodeStreamingHttpRequest(input, init);
 }
 
 function nodeStreamingHttpRequest(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
-  const request = url.protocol === 'https:' ? requestHttps : requestHttp;
+  const request = loadNodeRequest(url.protocol === 'https:' ? 'https' : 'http');
   return new Promise<Response>((resolve, reject) => {
     let settled = false;
     const req = request(url, {
@@ -39,7 +60,7 @@ function nodeStreamingHttpRequest(input: RequestInfo | URL, init?: RequestInit):
       settled = true;
       reject(error);
     };
-    req.on('error', error => rejectOnce(error));
+    req.on('error', reason => rejectOnce(asError(reason)));
     const onAbort = () => {
       const error = new Error('Request aborted.');
       error.name = 'AbortError';
@@ -60,12 +81,16 @@ function nodeStreamingHttpRequest(input: RequestInfo | URL, init?: RequestInit):
   });
 }
 
-function responseFromNode(response: IncomingMessage): Response {
+function responseFromNode(response: NodeIncomingMessage): Response {
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
-      response.on('data', (chunk: Buffer) => controller.enqueue(Uint8Array.from(chunk)));
+      response.on('data', chunk => {
+        const bytes = nodeChunkBytes(chunk);
+        if (bytes) controller.enqueue(bytes);
+        else controller.error(new Error('Native HTTP returned an unsupported body chunk.'));
+      });
       response.once('end', () => controller.close());
-      response.once('error', error => controller.error(error));
+      response.once('error', reason => controller.error(asError(reason)));
     },
     cancel() {
       response.destroy();
@@ -89,7 +114,7 @@ function requestHeaders(headers: HeadersInit | undefined): Record<string, string
   return headers;
 }
 
-function responseHeaders(headers: IncomingHttpHeaders): Headers {
+function responseHeaders(headers: NodeIncomingHeaders): Headers {
   const out = new Headers();
   for (const [key, value] of Object.entries(headers)) {
     if (Array.isArray(value)) for (const item of value) out.append(key, item);
@@ -101,4 +126,29 @@ function responseHeaders(headers: IncomingHttpHeaders): Headers {
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : '';
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment -- Re-enable review lint rules after dynamic boundary module. */
+
+function asError(reason: unknown): Error {
+  return reason instanceof Error ? reason : new Error('Native HTTP request failed.');
+}
+
+function nodeChunkBytes(chunk: unknown): Uint8Array | null {
+  if (chunk instanceof Uint8Array) return Uint8Array.from(chunk);
+  if (typeof chunk === 'string') return new TextEncoder().encode(chunk);
+  return null;
+}
+
+function loadNodeRequest(moduleId: 'http' | 'https'): NodeRequest {
+  const nodeRequire = window.require;
+  if (typeof nodeRequire !== 'function') throw new Error('Native HTTP is unavailable in this runtime.');
+  const moduleValue = nodeRequire(moduleId);
+  if (!isNodeHttpModule(moduleValue)) throw new Error(`Native ${moduleId.toUpperCase()} module is unavailable.`);
+  return moduleValue.request;
+}
+
+function isNodeHttpModule(value: unknown): value is NodeHttpModule {
+  return isRecord(value) && typeof value.request === 'function';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}

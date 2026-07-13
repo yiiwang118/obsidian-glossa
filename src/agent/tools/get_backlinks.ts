@@ -26,11 +26,11 @@ export const getBacklinks: ToolImpl = buildTool({
   // model used with_context, otherwise a tighter "X × N" list.
   renderToolResultMessage(result, args) {
     if (result.startsWith('No backlinks') || result.startsWith('Error')) return null;
-    const wrap = activeDocument.createElement('div');
+    const wrap = activeWindow.createDiv();
     setStyle(wrap, { padding: '6px 10px' });
     setStyle(wrap, { fontSize: '12px' });
     setStyle(wrap, { lineHeight: '1.5' });
-    const header = activeDocument.createElement('div');
+    const header = activeWindow.createDiv();
     setStyle(header, { fontWeight: '600' });
     setStyle(header, { marginBottom: '6px' });
     header.textContent = `↩  Backlinks of ${args?.path ?? ''}`;
@@ -53,23 +53,23 @@ export const getBacklinks: ToolImpl = buildTool({
       }
       if (cur) sections.push(cur);
       for (const sec of sections) {
-        const card = activeDocument.createElement('div');
+        const card = activeWindow.createDiv();
         setStyle(card, { padding: '4px 0' });
         setStyle(card, { marginBottom: '6px' });
         setStyle(card, { borderLeft: '2px solid var(--glossa-active-text, #365f9f)' });
         setStyle(card, { paddingLeft: '8px' });
-        const srcEl = activeDocument.createElement('div');
+        const srcEl = activeWindow.createDiv();
         setStyle(srcEl, { fontFamily: 'var(--font-monospace, monospace)' });
         setStyle(srcEl, { fontSize: '11px' });
         setStyle(srcEl, { opacity: '0.85' });
         srcEl.textContent = sec.source;
         card.appendChild(srcEl);
         for (const r of sec.rows) {
-          const row = activeDocument.createElement('div');
+          const row = activeWindow.createDiv();
           setStyle(row, { fontSize: '11px' });
           setStyle(row, { opacity: '0.7' });
           setStyle(row, { marginTop: '2px' });
-          const lineNo = activeDocument.createElement('span');
+          const lineNo = activeWindow.createSpan();
           setStyle(lineNo, { color: 'var(--glossa-faint, #80868b)' });
           lineNo.textContent = `L${r.line}`;
           row.appendChild(lineNo);
@@ -83,15 +83,15 @@ export const getBacklinks: ToolImpl = buildTool({
       for (const line of result.split('\n')) {
         const m = line.match(/^-\s+(.+?)\s+\(×(\d+)\)\s*$/);
         if (!m) continue;
-        const row = activeDocument.createElement('div');
+        const row = activeWindow.createDiv();
         setStyle(row, { display: 'flex' });
         setStyle(row, { justifyContent: 'space-between' });
         setStyle(row, { padding: '2px 0' });
-        const src = activeDocument.createElement('span');
+        const src = activeWindow.createSpan();
         setStyle(src, { fontFamily: 'var(--font-monospace, monospace)' });
         setStyle(src, { fontSize: '11px' });
         src.textContent = m[1];
-        const badge = activeDocument.createElement('span');
+        const badge = activeWindow.createSpan();
         badge.textContent = `×${m[2]}`;
         setStyle(badge, { fontSize: '10px' });
         setStyle(badge, { padding: '1px 6px' });

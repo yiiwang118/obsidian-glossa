@@ -29,12 +29,12 @@ export const readPdf: ToolImpl = buildTool({
     const bodyStart = result.indexOf('---\n');
     const body = bodyStart >= 0 ? result.slice(bodyStart + 4) : result;
 
-    const wrap = activeDocument.createElement('div');
+    const wrap = activeWindow.createDiv();
     setStyle(wrap, { padding: '6px 10px' });
     setStyle(wrap, { fontSize: '12px' });
     setStyle(wrap, { lineHeight: '1.5' });
 
-    const header = activeDocument.createElement('div');
+    const header = activeWindow.createDiv();
     setStyle(header, { fontWeight: '600' });
     setStyle(header, { marginBottom: '6px' });
     header.textContent = `PDF ${path}  ·  ${totalPages} pages  ·  read ${pageLabel}  ·  ${chars} chars`;
@@ -42,26 +42,26 @@ export const readPdf: ToolImpl = buildTool({
 
     const headings = [...body.matchAll(/^### Page\s+\d+/gm)].slice(0, 30).map(m => m[0]);
     if (headings.length > 0) {
-      const tree = activeDocument.createElement('div');
+      const tree = activeWindow.createDiv();
       setStyle(tree, { padding: '4px 0 6px 0' });
       setStyle(tree, { opacity: '0.85' });
       setStyle(tree, { fontSize: '11px' });
       for (const h of headings) {
-        const item = activeDocument.createElement('div');
+        const item = activeWindow.createDiv();
         item.textContent = h;
         tree.appendChild(item);
       }
       wrap.appendChild(tree);
     }
 
-    const det = activeDocument.createElement('details');
-    const sum = activeDocument.createElement('summary');
+    const det = activeWindow.createEl('details');
+    const sum = activeWindow.createEl('summary');
     sum.textContent = 'Extracted text';
     setStyle(sum, { cursor: 'pointer' });
     setStyle(sum, { fontSize: '11px' });
     setStyle(sum, { opacity: '0.7' });
     det.appendChild(sum);
-    const pre = activeDocument.createElement('pre');
+    const pre = activeWindow.createEl('pre');
     setStyle(pre, { fontSize: '11px' });
     setStyle(pre, { margin: '4px 0 0 0' });
     setStyle(pre, { maxHeight: '400px' });

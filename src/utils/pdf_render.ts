@@ -62,7 +62,7 @@ export async function renderVaultPdfPagesCached(
             ? scale * Math.sqrt(MAX_PIXEL_AREA / initialArea)
             : scale;
           const viewport = safeScale === scale ? initialViewport : page.getViewport({ scale: safeScale });
-          const canvas = activeDocument.createElement('canvas');
+          const canvas = activeWindow.createEl('canvas');
           try {
             canvas.width = Math.max(1, Math.ceil(viewport.width));
             canvas.height = Math.max(1, Math.ceil(viewport.height));

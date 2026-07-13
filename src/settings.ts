@@ -79,11 +79,11 @@ function createAlignedSelect<T extends string>(
   const renderValue = () => {
     button.empty();
     const selected = options.find(option => option.value === current) ?? options[0];
-    button.createEl('span', {
+    button.createSpan({
       cls: 'nc-aligned-select-label',
       text: selected?.label ?? current,
     });
-    const icon = button.createEl('span', { cls: 'nc-aligned-select-chevron' });
+    const icon = button.createSpan({ cls: 'nc-aligned-select-chevron' });
     setTrustedSvg(icon, ICON.chevronDown);
   };
   const open = () => {
@@ -145,7 +145,7 @@ const PRESETS: Preset[] = [
 ];
 
 function renderWarningHint(parent: HTMLElement, text: string) {
-  const hint = parent.createEl('div', { cls: 'nc-info-hint nc-warning-hint' });
+  const hint = parent.createDiv({ cls: 'nc-info-hint nc-warning-hint' });
   hint.createEl('strong', { text: bi('Warning', '警告') });
   hint.appendText(` — ${text}`);
   return hint;
@@ -268,32 +268,32 @@ export class GlossaSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.addClass('nc-settings');
 
-    const header = containerEl.createEl('div', { cls: 'nc-settings-header' });
+    const header = containerEl.createDiv({ cls: 'nc-settings-header' });
     header.dataset.glossaAlways = 'true';
-    const headerMain = header.createEl('div', { cls: 'nc-settings-header-main' });
-    const headerCopy = headerMain.createEl('div', { cls: 'nc-settings-header-copy' });
-    headerCopy.createEl('h2', { text: 'Glossa' });
+    const headerMain = header.createDiv({ cls: 'nc-settings-header-main' });
+    const headerCopy = headerMain.createDiv({ cls: 'nc-settings-header-copy' });
+    headerCopy.createDiv({ cls: 'nc-settings-brand-heading', text: 'Glossa' });
     headerCopy.createEl('p', {
       text: bi(
         'Configure models, Agent behavior, tools, and data without digging through unrelated options.',
         '集中配置模型、Agent 行为、工具与数据，不必在无关选项之间来回查找。',
       ),
     });
-    const status = headerCopy.createEl('div', { cls: 'nc-settings-status' });
+    const status = headerCopy.createDiv({ cls: 'nc-settings-status' });
     const endpoint = this.plugin.settings.endpoints.find(ep => ep.id === this.plugin.settings.activeEndpointId);
-    status.createEl('span', {
+    status.createSpan({
       text: endpoint
         ? bi(`Model: ${endpoint.label}`, `模型：${endpoint.label}`)
         : bi('Model not configured', '尚未配置模型'),
       cls: 'nc-settings-status-chip',
     });
-    status.createEl('span', {
+    status.createSpan({
       text: this.plugin.settings.runMode === 'act' ? 'Act' : 'Plan',
       cls: `nc-settings-status-chip ${this.plugin.settings.runMode === 'act' ? 'is-act' : ''}`,
     });
     this.renderLanguageControl(headerMain);
 
-    const bar = containerEl.createEl('div', { cls: 'nc-settings-tabs' });
+    const bar = containerEl.createDiv({ cls: 'nc-settings-tabs' });
     bar.setAttribute('role', 'tablist');
     for (const [index, tab] of SETTINGS_TABS.entries()) {
       const tabEl = bar.createEl('button', {
@@ -320,9 +320,10 @@ export class GlossaSettingTab extends PluginSettingTab {
     bar.dataset.glossaAlways = 'true';
 
     const activeCopy = SETTINGS_TABS.find(tab => tab.id === this.activeTab) ?? SETTINGS_TABS[0];
-    const pageIntro = containerEl.createEl('div', { cls: 'nc-settings-page-intro' });
+    const pageIntro = containerEl.createDiv({ cls: 'nc-settings-page-intro' });
     pageIntro.dataset.glossaAlways = 'true';
-    pageIntro.createEl('h3', { text: activeCopy.title() });
+    const pageHeading = new Setting(pageIntro).setName(activeCopy.title()).setHeading();
+    pageHeading.settingEl.addClass('nc-settings-page-heading');
     pageIntro.createEl('p', { text: activeCopy.description() });
 
     this.renderAll(containerEl, generation);
@@ -335,9 +336,9 @@ export class GlossaSettingTab extends PluginSettingTab {
   }
 
   private renderLanguageControl(parent: HTMLElement): void {
-    const wrap = parent.createEl('div', { cls: 'nc-settings-language' });
-    wrap.createEl('span', { text: bi('Interface language', '界面语言'), cls: 'nc-settings-language-label' });
-    const control = wrap.createEl('div', { cls: 'nc-settings-language-options' });
+    const wrap = parent.createDiv({ cls: 'nc-settings-language' });
+    wrap.createSpan({ text: bi('Interface language', '界面语言'), cls: 'nc-settings-language-label' });
+    const control = wrap.createDiv({ cls: 'nc-settings-language-options' });
     control.setAttribute('role', 'group');
     control.setAttribute('aria-label', bi('Interface language', '界面语言'));
     const options: Array<{ value: 'auto' | 'en' | 'zh'; label: string }> = [
@@ -396,9 +397,9 @@ export class GlossaSettingTab extends PluginSettingTab {
     if (tab) details.dataset.tab = tab;
     details.open = open;
     const summary = details.createEl('summary', { cls: 'nc-settings-group-summary' });
-    summary.createEl('span', { cls: 'nc-settings-group-title', text: title });
-    if (desc) summary.createEl('span', { cls: 'nc-settings-group-desc', text: desc });
-    return details.createEl('div', { cls: 'nc-settings-group-body' });
+    summary.createSpan({ cls: 'nc-settings-group-title', text: title });
+    if (desc) summary.createSpan({ cls: 'nc-settings-group-desc', text: desc });
+    return details.createDiv({ cls: 'nc-settings-group-body' });
   }
 
   private renderCapabilities(containerEl: HTMLElement, generation: number): void {
@@ -407,8 +408,8 @@ export class GlossaSettingTab extends PluginSettingTab {
     const initialCount = catalog.filter(tool => !tool.deferred).length;
     const deferredCount = catalog.length - initialCount;
 
-    const overview = containerEl.createEl('div', { cls: 'nc-capability-overview' });
-    const intro = overview.createEl('div', { cls: 'nc-capability-overview-copy' });
+    const overview = containerEl.createDiv({ cls: 'nc-capability-overview' });
+    const intro = overview.createDiv({ cls: 'nc-capability-overview-copy' });
     intro.createEl('strong', { text: bi('Progressive capability loading', '渐进式能力加载') });
     intro.createEl('p', {
       text: bi(
@@ -416,14 +417,14 @@ export class GlossaSettingTab extends PluginSettingTab {
         '核心工具会立即可用；专业工具与完整 Skill 指令只在任务匹配时加载，让模型上下文保持专注。',
       ),
     });
-    const stats = overview.createEl('div', { cls: 'nc-capability-stats' });
+    const stats = overview.createDiv({ cls: 'nc-capability-stats' });
     this.renderCapabilityStat(stats, String(catalog.length), bi('Available tools', '可用工具'));
     this.renderCapabilityStat(stats, String(initialCount), bi('Ready by default', '默认加载'));
     this.renderCapabilityStat(stats, String(deferredCount), bi('On demand', '按需加载'));
     const skillCount = this.renderCapabilityStat(stats, '…', 'Skills');
 
-    const searchWrap = containerEl.createEl('div', { cls: 'nc-capability-search' });
-    const searchIcon = searchWrap.createEl('span', { cls: 'nc-capability-search-icon' });
+    const searchWrap = containerEl.createDiv({ cls: 'nc-capability-search' });
+    const searchIcon = searchWrap.createSpan({ cls: 'nc-capability-search-icon' });
     setTrustedSvg(searchIcon, ICON.search);
     const search = searchWrap.createEl('input', {
       type: 'search',
@@ -432,27 +433,32 @@ export class GlossaSettingTab extends PluginSettingTab {
     });
 
     const toolSection = containerEl.createEl('section', { cls: 'nc-capability-section' });
-    const toolHeader = toolSection.createEl('div', { cls: 'nc-capability-section-head' });
-    toolHeader.createEl('h4', { text: bi('Tools', '工具') });
-    toolHeader.createEl('span', { text: String(catalog.length) });
-    const toolGroups = toolSection.createEl('div', { cls: 'nc-capability-groups' });
+    const toolHeader = toolSection.createDiv({ cls: 'nc-capability-section-head' });
+    const toolHeading = new Setting(toolHeader).setName(bi('Tools', '工具')).setHeading();
+    toolHeading.settingEl.addClass('nc-capability-section-heading');
+    toolHeader.createSpan({ text: String(catalog.length) });
+    const toolGroups = toolSection.createDiv({ cls: 'nc-capability-groups' });
     for (const category of TOOL_CATEGORY_ORDER) {
       const tools = catalog.filter(tool => tool.category === category);
       if (tools.length === 0) continue;
-      const group = toolGroups.createEl('div', { cls: 'nc-capability-group' });
-      group.createEl('h5', { text: bi(TOOL_CATEGORY_COPY[category].en, TOOL_CATEGORY_COPY[category].zh) });
-      const rows = group.createEl('div', { cls: 'nc-capability-list' });
+      const group = toolGroups.createDiv({ cls: 'nc-capability-group' });
+      const groupHeading = new Setting(group)
+        .setName(bi(TOOL_CATEGORY_COPY[category].en, TOOL_CATEGORY_COPY[category].zh))
+        .setHeading();
+      groupHeading.settingEl.addClass('nc-capability-group-heading');
+      const rows = group.createDiv({ cls: 'nc-capability-list' });
       for (const tool of tools) this.renderToolCapability(rows, tool);
     }
 
     const skillSection = containerEl.createEl('section', { cls: 'nc-capability-section nc-skill-section' });
-    const skillHeader = skillSection.createEl('div', { cls: 'nc-capability-section-head' });
-    skillHeader.createEl('h4', { text: 'Skills' });
-    skillHeader.createEl('span', { text: bi('Loading…', '加载中…'), cls: 'nc-skill-count' });
-    const skillList = skillSection.createEl('div', { cls: 'nc-capability-list' });
-    skillList.createEl('div', { cls: 'nc-capability-loading', text: bi('Discovering available Skills…', '正在发现可用 Skills…') });
+    const skillHeader = skillSection.createDiv({ cls: 'nc-capability-section-head' });
+    const skillHeading = new Setting(skillHeader).setName('Skills').setHeading();
+    skillHeading.settingEl.addClass('nc-capability-section-heading');
+    skillHeader.createSpan({ text: bi('Loading…', '加载中…'), cls: 'nc-skill-count' });
+    const skillList = skillSection.createDiv({ cls: 'nc-capability-list' });
+    skillList.createDiv({ cls: 'nc-capability-loading', text: bi('Discovering available Skills…', '正在发现可用 Skills…') });
 
-    const empty = containerEl.createEl('div', {
+    const empty = containerEl.createDiv({
       cls: 'nc-capability-empty',
       text: bi('No matching tools or Skills.', '没有匹配的工具或 Skill。'),
     });
@@ -484,7 +490,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       skillHeader.querySelector('.nc-skill-count')?.setText(String(skills.length));
       skillCount.setText(String(skills.length));
       if (skills.length === 0) {
-        skillList.createEl('div', {
+        skillList.createDiv({
           cls: 'nc-capability-loading',
           text: bi('No Skills are available.', '当前没有可用 Skill。'),
         });
@@ -493,7 +499,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     }).catch(() => {
       if (generation !== this.renderGeneration || !skillList.isConnected) return;
       skillList.empty();
-      skillList.createEl('div', {
+      skillList.createDiv({
         cls: 'nc-capability-loading',
         text: bi('Skills could not be loaded.', 'Skills 加载失败。'),
       });
@@ -504,35 +510,35 @@ export class GlossaSettingTab extends PluginSettingTab {
   }
 
   private renderCapabilityStat(parent: HTMLElement, value: string, label: string): HTMLElement {
-    const stat = parent.createEl('div', { cls: 'nc-capability-stat' });
+    const stat = parent.createDiv({ cls: 'nc-capability-stat' });
     const valueEl = stat.createEl('strong', { text: value });
-    stat.createEl('span', { text: label });
+    stat.createSpan({ text: label });
     return valueEl;
   }
 
   private renderToolCapability(parent: HTMLElement, tool: ToolCapability): void {
-    const row = parent.createEl('div', { cls: 'nc-capability-row nc-tool-capability' });
+    const row = parent.createDiv({ cls: 'nc-capability-row nc-tool-capability' });
     const label = bi(tool.labelEn, tool.labelZh);
     const description = bi(tool.descriptionEn, tool.descriptionZh);
     row.dataset.filterText = `${tool.name} ${tool.labelEn} ${tool.labelZh} ${tool.descriptionEn} ${tool.descriptionZh}`.toLocaleLowerCase();
-    const icon = row.createEl('span', { cls: 'nc-capability-icon' });
+    const icon = row.createSpan({ cls: 'nc-capability-icon' });
     setTrustedSvg(icon, tool.icon);
-    const copy = row.createEl('div', { cls: 'nc-capability-copy' });
-    const title = copy.createEl('div', { cls: 'nc-capability-title' });
+    const copy = row.createDiv({ cls: 'nc-capability-copy' });
+    const title = copy.createDiv({ cls: 'nc-capability-title' });
     title.createEl('strong', { text: label });
     title.createEl('code', { text: tool.name });
     copy.createEl('p', { text: description });
-    const badges = row.createEl('div', { cls: 'nc-capability-badges' });
-    badges.createEl('span', {
+    const badges = row.createDiv({ cls: 'nc-capability-badges' });
+    badges.createSpan({
       cls: tool.deferred ? 'is-deferred' : 'is-ready',
       text: tool.deferred ? bi('On demand', '按需加载') : bi('Ready', '默认可用'),
     });
     if (tool.autoApproved) {
-      badges.createEl('span', { cls: 'is-approved', text: bi('Auto-approved', '自动批准') });
+      badges.createSpan({ cls: 'is-approved', text: bi('Auto-approved', '自动批准') });
     } else if (tool.dangerous) {
-      badges.createEl('span', { cls: 'is-approval', text: bi('Approval', '需要审批') });
+      badges.createSpan({ cls: 'is-approval', text: bi('Approval', '需要审批') });
     } else {
-      badges.createEl('span', { text: bi('Read only', '只读') });
+      badges.createSpan({ text: bi('Read only', '只读') });
     }
   }
 
@@ -544,32 +550,32 @@ export class GlossaSettingTab extends PluginSettingTab {
     const issues = validateSkillDefinition(skill, availableTools);
     const errors = issues.filter(issue => issue.severity === 'error').length;
     const warnings = issues.length - errors;
-    const row = parent.createEl('div', { cls: 'nc-capability-row nc-skill-capability' });
+    const row = parent.createDiv({ cls: 'nc-capability-row nc-skill-capability' });
     row.dataset.filterText = [
       skill.name, skill.title, titleText, skill.description, description, skill.whenToUse, when,
       ...(skill.triggers ?? []), ...(skill.paths ?? []), ...(skill.requiredTools ?? []),
     ].filter(Boolean).join(' ').toLocaleLowerCase();
-    const icon = row.createEl('span', { cls: 'nc-capability-icon' });
+    const icon = row.createSpan({ cls: 'nc-capability-icon' });
     setTrustedSvg(icon, ICON.sparkles);
-    const copy = row.createEl('div', { cls: 'nc-capability-copy' });
-    const title = copy.createEl('div', { cls: 'nc-capability-title' });
+    const copy = row.createDiv({ cls: 'nc-capability-copy' });
+    const title = copy.createDiv({ cls: 'nc-capability-title' });
     title.createEl('strong', { text: titleText });
     title.createEl('code', { text: skill.name });
     copy.createEl('p', { text: description });
     if (when) {
       const whenEl = copy.createEl('p', { cls: 'nc-skill-when' });
-      whenEl.createEl('span', { text: bi('When', '触发') });
+      whenEl.createSpan({ text: bi('When', '触发') });
       whenEl.appendText(when);
     }
-    const details = copy.createEl('div', { cls: 'nc-skill-details' });
+    const details = copy.createDiv({ cls: 'nc-skill-details' });
     for (const path of (skill.paths ?? []).slice(0, 3)) details.createEl('code', { text: path });
     for (const tool of (skill.requiredTools ?? []).slice(0, 4)) details.createEl('code', { text: tool });
-    const badges = row.createEl('div', { cls: 'nc-capability-badges' });
-    badges.createEl('span', { text: this.skillSourceLabel(skill.source) });
-    if (errors > 0) badges.createEl('span', { cls: 'is-error', text: bi(`${errors} error`, `${errors} 个错误`) });
-    else if (warnings > 0) badges.createEl('span', { cls: 'is-warning', text: bi(`${warnings} warning`, `${warnings} 个提醒`) });
-    else badges.createEl('span', { cls: 'is-ready', text: bi('Ready', '可用') });
-    if (skill.context === 'fork') badges.createEl('span', { text: bi('Isolated', '隔离运行') });
+    const badges = row.createDiv({ cls: 'nc-capability-badges' });
+    badges.createSpan({ text: this.skillSourceLabel(skill.source) });
+    if (errors > 0) badges.createSpan({ cls: 'is-error', text: bi(`${errors} error`, `${errors} 个错误`) });
+    else if (warnings > 0) badges.createSpan({ cls: 'is-warning', text: bi(`${warnings} warning`, `${warnings} 个提醒`) });
+    else badges.createSpan({ cls: 'is-ready', text: bi('Ready', '可用') });
+    if (skill.context === 'fork') badges.createSpan({ text: bi('Isolated', '隔离运行') });
   }
 
   private skillSourceLabel(source: Skill['source']): string {
@@ -590,7 +596,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     if (this.plugin.settings.encryptionEnabled) {
       const hasAnyPlainKey = this.plugin.settings.endpoints.some(ep => ep.apiKey && !ep.apiKey.startsWith('NCENC1:'));
       const hasAnyEncKey   = this.plugin.settings.endpoints.some(ep => ep.apiKey && ep.apiKey.startsWith('NCENC1:'));
-      const sec = containerEl.createEl('div', { cls: 'nc-security-banner', attr: { 'data-tab': 'advanced' } });
+      const sec = containerEl.createDiv({ cls: 'nc-security-banner', attr: { 'data-tab': 'advanced' } });
       let title = '', body = '';
       if (!this.plugin.isUnlocked()) {
         title = bi('Encrypted · locked', '已加密 · 已锁定');
@@ -614,8 +620,8 @@ export class GlossaSettingTab extends PluginSettingTab {
         );
         sec.addClass('is-unlocked');
       }
-      sec.createEl('div', { cls: 'nc-security-title', text: title });
-      sec.createEl('div', { cls: 'nc-security-body', text: body });
+      sec.createDiv({ cls: 'nc-security-title', text: title });
+      sec.createDiv({ cls: 'nc-security-body', text: body });
     }
 
     /* ----- Font size — drives the WHOLE plugin (prose + reasoning + lists) ----- */
@@ -886,8 +892,8 @@ export class GlossaSettingTab extends PluginSettingTab {
       false,
       'capabilities',
     );
-    const autoCard = autoGroup.createEl('div', { cls: 'nc-endpoint-card nc-settings-plain-card' });
-    autoCard.createEl('div', { cls: 'nc-endpoint-card-header' }).createEl('span', { text: bi('Auto-approve', '自动批准') });
+    const autoCard = autoGroup.createDiv({ cls: 'nc-endpoint-card nc-settings-plain-card' });
+    autoCard.createDiv({ cls: 'nc-endpoint-card-header' }).createSpan({ text: bi('Auto-approve', '自动批准') });
     const allTools = buildToolCapabilities(this.plugin.settings.agentAlwaysApproveTools);
     for (const tool of allTools) {
       const label = `${bi(tool.labelEn, tool.labelZh)}${tool.dangerous ? bi(' · approval', ' · 需审批') : ''}`;
@@ -921,19 +927,19 @@ export class GlossaSettingTab extends PluginSettingTab {
       ruleGroup.createEl('p', { cls: 'setting-item-description', text: bi('No saved rules.', '暂无已保存规则。') });
     } else {
       for (const r of rules) {
-        const row = ruleGroup.createEl('div', { cls: 'nc-permission-rule' });
-        const lab = row.createEl('span');
+        const row = ruleGroup.createDiv({ cls: 'nc-permission-rule' });
+        const lab = row.createSpan();
         lab.appendChild(activeDocument.createTextNode(`${r.behavior === 'allow' ? '✓' : '✗'} `));
-        const codeEl = lab.appendChild(activeDocument.createElement('code'));
+        const codeEl = lab.appendChild(activeWindow.createEl('code'));
         codeEl.textContent = r.tool;
         if (r.scope !== 'global' && r.value) {
           lab.appendChild(activeDocument.createTextNode(` · ${r.scope}: `));
-          const v = lab.appendChild(activeDocument.createElement('code'));
+          const v = lab.appendChild(activeWindow.createEl('code'));
           v.textContent = r.value;
         } else {
           lab.appendChild(activeDocument.createTextNode(bi(' · everywhere', ' · 全部位置')));
         }
-        row.createEl('span', { cls: 'nc-permission-rule-meta', text: new Date(r.addedAt).toLocaleDateString() });
+        row.createSpan({ cls: 'nc-permission-rule-meta', text: new Date(r.addedAt).toLocaleDateString() });
         const del = row.createEl('button', { text: '✕', cls: 'mod-warning' });
         setStyle(del, { marginLeft: 'auto' });
         del.onclick = async () => {
@@ -957,28 +963,28 @@ export class GlossaSettingTab extends PluginSettingTab {
         text: bi(`Last ${log.length} decisions · newest first`, `最近 ${log.length} 条决定 · 新的在前`),
       });
       setStyle(summary, { cursor: 'pointer', fontSize: '12px', color: 'var(--text-muted)' });
-      const tbl = det.createEl('div');
+      const tbl = det.createDiv();
       setStyle(tbl, { maxHeight: '240px', overflowY: 'auto', fontSize: '11px', fontFamily: 'var(--font-monospace)', marginTop: '8px' });
       for (const e of log.slice().reverse().slice(0, 100)) {
-        const row = tbl.createEl('div');
+        const row = tbl.createDiv();
         setStyle(row, { padding: '3px 0', display: 'flex', gap: '8px', borderBottom: '1px solid var(--background-modifier-border)' });
         const date = new Date(e.at);
-        const dateEl = row.createEl('span', { text: date.toLocaleTimeString() });
+        const dateEl = row.createSpan({ text: date.toLocaleTimeString() });
         setStyle(dateEl, { color: 'var(--text-faint)', minWidth: '80px' });
         const colors: Record<string, string> = {
           'allow': 'var(--glossa-success)', 'auto-allow': 'var(--glossa-success)', 'allowed-by-rule': 'var(--glossa-active-text)',
           'deny': 'var(--glossa-danger)', 'auto-deny': 'var(--glossa-danger)', 'denied-by-rule': 'var(--glossa-danger)',
         };
-        const decisionEl = row.createEl('span', { text: e.decision });
+        const decisionEl = row.createSpan({ text: e.decision });
         setStyle(decisionEl, { color: colors[e.decision] ?? 'var(--text-muted)', minWidth: '110px', fontWeight: '600' });
-        const toolEl = row.createEl('span', { text: e.tool });
+        const toolEl = row.createSpan({ text: e.tool });
         setStyle(toolEl, { color: 'var(--text-normal)', minWidth: '120px' });
         if (e.scope) {
-          const scopeEl = row.createEl('span', { text: e.scope });
+          const scopeEl = row.createSpan({ text: e.scope });
           setStyle(scopeEl, { color: 'var(--text-muted)' });
         }
         if (e.args) {
-          const argsEl = row.createEl('span', { text: e.args });
+          const argsEl = row.createSpan({ text: e.args });
           setStyle(argsEl, { color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1' });
         }
       }
@@ -997,7 +1003,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         : bi('Off. Enabling wraps API keys with a passphrase-derived AES-256 key.',
              '关闭。开启后用 passphrase 派生 AES-256 加密 API key。') });
     // Scope clarification — kept brief. Users should know chats.json is plaintext.
-    const scope = containerEl.createEl('div', { cls: 'nc-info-hint' });
+    const scope = containerEl.createDiv({ cls: 'nc-info-hint' });
     scope.appendText(bi(
       'Scope: API keys, embeddings, checkpoints. Chats are NOT encrypted.',
       '范围：API key、嵌入向量、检查点。对话历史不加密。',
@@ -1198,9 +1204,9 @@ export class GlossaSettingTab extends PluginSettingTab {
       await this.plugin.saveSettings(); this.display();
     }));
     for (const w of this.plugin.settings.workflows) {
-      const card = containerEl.createEl('div', { cls: 'nc-endpoint-card' });
-      const hdr = card.createEl('div', { cls: 'nc-endpoint-card-header' });
-      hdr.createEl('span', { text: new Date(w.createdAt).toLocaleDateString() });
+      const card = containerEl.createDiv({ cls: 'nc-endpoint-card' });
+      const hdr = card.createDiv({ cls: 'nc-endpoint-card-header' });
+      hdr.createSpan({ text: new Date(w.createdAt).toLocaleDateString() });
       const del = hdr.createEl('button', { text: bi('Delete', '删除'), cls: 'mod-warning' });
       del.onclick = async () => {
         this.plugin.settings.workflows = this.plugin.settings.workflows.filter(x => x.id !== w.id);
@@ -1228,15 +1234,15 @@ export class GlossaSettingTab extends PluginSettingTab {
   }
 
   private renderEndpointCard(parent: HTMLElement, ep: Endpoint) {
-    const card = parent.createEl('div', { cls: 'nc-endpoint-card' });
-    const hdr = card.createEl('div', { cls: 'nc-endpoint-card-header' });
-    const left = hdr.createEl('div');
-    left.createEl('span', { text: ep.label });
-    left.createEl('span', { text: ep.kind, cls: 'nc-endpoint-kind-badge' });
+    const card = parent.createDiv({ cls: 'nc-endpoint-card' });
+    const hdr = card.createDiv({ cls: 'nc-endpoint-card-header' });
+    const left = hdr.createDiv();
+    left.createSpan({ text: ep.label });
+    left.createSpan({ text: ep.kind, cls: 'nc-endpoint-kind-badge' });
     // Right side of header: Test connectivity + Delete
     const testBtn = hdr.createEl('button', { text: bi('Test', '测试'), cls: 'nc-endpoint-test-btn' });
     testBtn.setAttribute('aria-label', bi(`Test ${ep.label}`, `测试 ${ep.label}`));
-    const testStatus = hdr.createEl('span', { cls: 'nc-endpoint-test-status' });
+    const testStatus = hdr.createSpan({ cls: 'nc-endpoint-test-status' });
     testBtn.onclick = async () => {
       testBtn.setAttribute('disabled', 'true');
       testStatus.removeClass('ok'); testStatus.removeClass('fail');
@@ -1327,7 +1333,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     const codexWarn = codexSafetyWarning(ep);
     if (codexWarn) renderWarningHint(card, codexWarn);
 
-    const basic = card.createEl('div', { cls: 'nc-endpoint-basic' });
+    const basic = card.createDiv({ cls: 'nc-endpoint-basic' });
     const advanced = this.createSettingsGroup(
       card,
       bi('Advanced', '高级'),
@@ -1470,7 +1476,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         // Banner reflecting the active mode. With app-server (default), tokens
         // truly stream — same protocol codex's native TUI uses. Legacy `codex exec`
         // mode arrives in chunks at completion.
-        const hint = advanced.createEl('div', { cls: 'nc-info-hint' });
+        const hint = advanced.createDiv({ cls: 'nc-info-hint' });
         hint.createEl('strong', { text: appServerActive ? bi('app-server ✓', 'app-server ✓') : bi('legacy exec', 'legacy exec') });
         hint.appendText(appServerActive
           ? bi(' — token-level streaming.', ' — token 级流式。')
@@ -1702,9 +1708,9 @@ export class GlossaSettingTab extends PluginSettingTab {
   }
 
   private renderSlashCmd(parent: HTMLElement, c: SlashCommand) {
-    const card = parent.createEl('div', { cls: 'nc-endpoint-card' });
-    const hdr = card.createEl('div', { cls: 'nc-endpoint-card-header' });
-    hdr.createEl('span', { text: c.trigger });
+    const card = parent.createDiv({ cls: 'nc-endpoint-card' });
+    const hdr = card.createDiv({ cls: 'nc-endpoint-card-header' });
+    hdr.createSpan({ text: c.trigger });
     const del = hdr.createEl('button', { text: bi('Delete', '删除'), cls: 'mod-warning' });
     del.onclick = async () => {
       this.plugin.settings.customSlashCommands = this.plugin.settings.customSlashCommands.filter(x => x.id !== c.id);
@@ -1716,9 +1722,9 @@ export class GlossaSettingTab extends PluginSettingTab {
   }
 
   private renderCustomPrompt(parent: HTMLElement, p: CustomPrompt) {
-    const card = parent.createEl('div', { cls: 'nc-endpoint-card' });
-    const hdr = card.createEl('div', { cls: 'nc-endpoint-card-header' });
-    hdr.createEl('span', { text: p.name || bi('Untitled', '未命名') });
+    const card = parent.createDiv({ cls: 'nc-endpoint-card' });
+    const hdr = card.createDiv({ cls: 'nc-endpoint-card-header' });
+    hdr.createSpan({ text: p.name || bi('Untitled', '未命名') });
     const del = hdr.createEl('button', { text: bi('Delete', '删除'), cls: 'mod-warning' });
     del.onclick = async () => {
       this.plugin.settings.customPrompts = this.plugin.settings.customPrompts.filter(x => x.id !== p.id);
@@ -1774,7 +1780,7 @@ class AddEndpointModal extends Modal {
     contentEl.addClass('nc-add-modal-content');
     contentEl.empty();
 
-    const hdr = contentEl.createEl('div', { cls: 'nc-add-modal-header' });
+    const hdr = contentEl.createDiv({ cls: 'nc-add-modal-header' });
     hdr.createEl('h2', { text: bi('Add model endpoint', '添加模型端点') });
     hdr.createEl('p', {
       text: bi(
@@ -1784,14 +1790,14 @@ class AddEndpointModal extends Modal {
     });
 
     /* Presets (visible for custom-api) */
-    const presetsSec = contentEl.createEl('div', { cls: 'nc-presets-section' });
+    const presetsSec = contentEl.createDiv({ cls: 'nc-presets-section' });
     presetsSec.createEl('h3', { text: bi('Provider presets', '服务商预设') });
-    const grid = presetsSec.createEl('div', { cls: 'nc-preset-grid' });
+    const grid = presetsSec.createDiv({ cls: 'nc-preset-grid' });
     for (const p of PRESETS) {
-      const chip = grid.createEl('div', { cls: 'nc-preset-chip' });
-      const dot = chip.createEl('span', { cls: 'nc-preset-dot' });
+      const chip = grid.createDiv({ cls: 'nc-preset-chip' });
+      const dot = chip.createSpan({ cls: 'nc-preset-dot' });
       setStyle(dot, { background: p.color });
-      chip.createEl('span', { cls: 'nc-preset-name', text: p.name });
+      chip.createSpan({ cls: 'nc-preset-name', text: p.name });
       chip.title = `${p.baseUrl} · ${p.defaultModel}`;
       chip.onclick = () => {
         this.draft.label = p.name;
@@ -1804,7 +1810,7 @@ class AddEndpointModal extends Modal {
     }
 
     /* Form */
-    this.formEl = contentEl.createEl('div', { cls: 'nc-add-form' });
+    this.formEl = contentEl.createDiv({ cls: 'nc-add-form' });
     this.renderForm();
   }
 
@@ -1817,9 +1823,9 @@ class AddEndpointModal extends Modal {
     formEl.empty();
 
     const row = (label: string, build: (parent: HTMLElement) => void) => {
-      const r = formEl.createEl('div', { cls: 'nc-add-form-row' });
+      const r = formEl.createDiv({ cls: 'nc-add-form-row' });
       r.createEl('label', { text: label });
-      const right = r.createEl('div');
+      const right = r.createDiv();
       build(right);
       return r;
     };
@@ -1859,7 +1865,7 @@ class AddEndpointModal extends Modal {
         inp.oninput = () => { this.plainKey = inp.value; };
       });
       row(bi('Model', '模型'), (p) => {
-        const wrap = p.createEl('div', { cls: 'nc-row-with-btn' });
+        const wrap = p.createDiv({ cls: 'nc-row-with-btn' });
         this.modelInput = wrap.createEl('input', { type: 'text', value: this.draft.model ?? '' });
         this.modelInput.placeholder = ['e.g. ', 'deepseek-chat'].join('');
         this.modelInput.autocomplete = 'off';
@@ -1870,10 +1876,10 @@ class AddEndpointModal extends Modal {
         btn.setAttribute('aria-label', bi('Detect models', '探测模型'));
         btn.onclick = () => this.detectModels(btn);
       });
-      this.detectStatusEl = formEl.createEl('div', { cls: 'nc-detect-status' });
+      this.detectStatusEl = formEl.createDiv({ cls: 'nc-detect-status' });
     }
 
-    const actions = formEl.createEl('div', { cls: 'nc-add-form-actions' });
+    const actions = formEl.createDiv({ cls: 'nc-add-form-actions' });
     const cancel = actions.createEl('button', { text: bi('Cancel', '取消') });
     cancel.type = 'button';
     cancel.onclick = () => this.close();
@@ -1953,7 +1959,7 @@ class AddEndpointModal extends Modal {
       ...this.draft,
       apiKey: '',          // populated by storeApiKey() in caller
       proxyMode: 'global',
-    } as Endpoint;
+    };
     if (ep.kind === 'claude-code-cli' && !ep.maxTurns) ep.maxTurns = 1;
     if (ep.kind === 'claude-code-cli' && ep.bareMode == null) ep.bareMode = true;
     const warn = localCliWarning(ep.kind) ?? codexSafetyWarning(ep);
@@ -1989,18 +1995,18 @@ class CodexDiagnosticModal extends Modal {
     const r = this.result;
 
     // Verdict block at the top
-    const verdict = contentEl.createEl('div', { cls: 'nc-codex-diag-verdict' });
+    const verdict = contentEl.createDiv({ cls: 'nc-codex-diag-verdict' });
     verdict.textContent = r.diagnosis;
     if (r.diagnosis.startsWith('✅')) verdict.addClass('ok');
     else if (r.diagnosis.startsWith('⚠'))  verdict.addClass('warn');
     else verdict.addClass('fail');
 
     // Summary table
-    const summary = contentEl.createEl('div', { cls: 'nc-codex-diag-summary' });
+    const summary = contentEl.createDiv({ cls: 'nc-codex-diag-summary' });
     const row = (k: string, v: string) => {
-      const r1 = summary.createEl('div', { cls: 'nc-codex-diag-row' });
-      r1.createEl('span', { text: k, cls: 'nc-codex-diag-k' });
-      r1.createEl('span', { text: v, cls: 'nc-codex-diag-v' });
+      const r1 = summary.createDiv({ cls: 'nc-codex-diag-row' });
+      r1.createSpan({ text: k, cls: 'nc-codex-diag-k' });
+      r1.createSpan({ text: v, cls: 'nc-codex-diag-v' });
     };
     row('Version check', r.version.ok ? `✓ ${r.version.message}` : `✗ ${r.version.message}`);
     row('Working dir', r.cwd);
@@ -2028,12 +2034,12 @@ class CodexDiagnosticModal extends Modal {
     // Event timeline — most useful section for debugging
     if (r.eventTimeline?.length) {
       contentEl.createEl('h4', { text: `Event timeline (${r.eventTimeline.length} events)` });
-      const tl = contentEl.createEl('div', { cls: 'nc-codex-diag-timeline' });
+      const tl = contentEl.createDiv({ cls: 'nc-codex-diag-timeline' });
       for (const ev of r.eventTimeline) {
-        const row = tl.createEl('div', { cls: 'nc-codex-diag-tl-row' });
-        row.createEl('span', { cls: 'nc-codex-diag-tl-time', text: `+${(ev.at / 1000).toFixed(2)}s` });
-        row.createEl('span', { cls: 'nc-codex-diag-tl-type', text: ev.type });
-        if (ev.payload) row.createEl('span', { cls: 'nc-codex-diag-tl-payload', text: ev.payload });
+        const row = tl.createDiv({ cls: 'nc-codex-diag-tl-row' });
+        row.createSpan({ cls: 'nc-codex-diag-tl-time', text: `+${(ev.at / 1000).toFixed(2)}s` });
+        row.createSpan({ cls: 'nc-codex-diag-tl-type', text: ev.type });
+        if (ev.payload) row.createSpan({ cls: 'nc-codex-diag-tl-payload', text: ev.payload });
       }
     }
 
@@ -2049,7 +2055,7 @@ class CodexDiagnosticModal extends Modal {
     contentEl.createEl('h4', { text: `stderr (${r.stderr.length} bytes)` });
     contentEl.createEl('pre', { cls: 'nc-codex-diag-pre nc-codex-diag-stream', text: r.stderr.slice(0, 6000) || '(empty)' });
 
-    const footer = contentEl.createEl('div', { cls: 'modal-button-container' });
+    const footer = contentEl.createDiv({ cls: 'modal-button-container' });
     setStyle(footer, { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' });
     // Quick-fix button when no proxy was detected.
     const haveProxy = !!(r.env.HTTPS_PROXY || r.env.HTTP_PROXY || r.env.ALL_PROXY);

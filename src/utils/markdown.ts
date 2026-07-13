@@ -229,7 +229,7 @@ function scrubRenderedResourceUrls(target: HTMLElement) {
   for (const img of Array.from(imgs)) {
     const src = img.getAttribute('src') || '';
     if (!BLOCKED_IMAGE_SCHEMES.test(src)) continue;
-    const replacement = target.ownerDocument.createElement('span');
+    const replacement = target.ownerDocument.win.createSpan();
     replacement.className = 'nc-omitted-image';
     replacement.textContent = omittedImageText(img.getAttribute('alt') || basenameFromUrl(src));
     img.replaceWith(replacement);
@@ -387,11 +387,11 @@ export function decorateCodeBlocks(
     const code = codeEl?.textContent ?? '';
     pre.classList.add('nc-has-code-actions');
 
-    const bar = activeDocument.createElement('div');
+    const bar = activeWindow.createDiv();
     bar.className = 'nc-code-actions';
 
     const makeButton = (icon: string, label: string, onClick: (button: HTMLButtonElement) => void) => {
-      const button = activeDocument.createElement('button');
+      const button = activeWindow.createEl('button');
       button.type = 'button';
       button.className = 'nc-code-action';
       button.title = label;

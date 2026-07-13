@@ -677,7 +677,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           dangerous: true, describe: () => call.name,
           spec: { name: call.name, description: 'MCP tool', parameters: {} },
           run: async () => '',
-        } as ToolImpl);
+        });
         const askFn = opts.approver ?? ((t: ToolImpl, a: AnyValue) => askApproval(opts.app, t, a));
         const res = await askFn(previewTool, call.args);
         if (!res.ok) {

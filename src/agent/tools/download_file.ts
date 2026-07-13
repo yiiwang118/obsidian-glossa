@@ -43,21 +43,21 @@ export const downloadFile: ToolImpl = buildTool({
   renderToolResultMessage(result) {
     if (!result.startsWith('Downloaded:')) return null;
     const fields = parseResultFields(result);
-    const wrap = activeDocument.createElement('div');
+    const wrap = activeWindow.createDiv();
     wrap.addClass('nc-download-result');
     setStyle(wrap, { display: 'grid', gap: '6px', padding: '8px 10px' });
-    const title = wrap.createEl('div', { text: fields.Downloaded ?? 'Downloaded file' });
+    const title = wrap.createDiv({ text: fields.Downloaded ?? 'Downloaded file' });
     setStyle(title, { fontWeight: '700' });
-    const source = fields.Source ? wrap.createEl('div', { text: fields.Source }) : null;
+    const source = fields.Source ? wrap.createDiv({ text: fields.Source }) : null;
     if (source) setStyle(source, { color: 'var(--text-muted)', fontSize: '12px', overflowWrap: 'anywhere' });
-    const meta = wrap.createEl('div', { text: [fields['Content-Type'], fields.Size].filter(Boolean).join(' · ') });
+    const meta = wrap.createDiv({ text: [fields['Content-Type'], fields.Size].filter(Boolean).join(' · ') });
     setStyle(meta, { color: 'var(--text-faint)', fontSize: '12px' });
     if (fields.SHA256) {
       const hash = wrap.createEl('code', { text: `sha256:${fields.SHA256.slice(0, 16)}…` });
       setStyle(hash, { fontSize: '11px' });
     }
     if (fields.Provenance) {
-      const prov = wrap.createEl('div', { text: `source: ${fields.Provenance}` });
+      const prov = wrap.createDiv({ text: `source: ${fields.Provenance}` });
       setStyle(prov, { color: 'var(--text-faint)', fontSize: '11px' });
     }
     return wrap;
@@ -142,7 +142,7 @@ export const downloadFile: ToolImpl = buildTool({
       if (existing instanceof TFile) await app.vault.modifyBinary(existing, buffer);
       else await app.vault.createBinary(target, buffer);
 
-      const sha256 = sha256Hex(fetched.bytes);
+      const sha256 = await sha256Hex(fetched.bytes);
       const sourcePath = `${target}.source.json`;
       if (settings.webSaveProvenance !== false) {
         await safeWriteJson(app.vault.adapter, sourcePath, {
@@ -274,7 +274,10 @@ function filenameFromQuery(query: string, ext: string): string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'number' || typeof error === 'boolean' || typeof error === 'bigint') return String(error);
+  return 'Unknown error';
 }
 
 function chooseTargetPath(saveTo: unknown, filename: unknown, finalUrl: string, ext: string, defaultFolder: unknown, saveToIsFolder = false): string {

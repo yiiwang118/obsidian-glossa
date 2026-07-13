@@ -180,8 +180,12 @@ interface ToolJsonSchema {
  *  vary; this keeps malformed calls away from approval and execution paths. */
 export function validateToolInput(parameters: unknown, input: unknown): string[] {
   const errors: string[] = [];
-  validateSchemaNode(parameters as ToolJsonSchema, input, 'arguments', errors);
+  if (isToolJsonSchema(parameters)) validateSchemaNode(parameters, input, 'arguments', errors);
   return errors.slice(0, 8);
+}
+
+function isToolJsonSchema(value: unknown): value is ToolJsonSchema {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function validateSchemaNode(

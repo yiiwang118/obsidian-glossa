@@ -48,7 +48,9 @@ function fmtDate(d: unknown): string {
   // Tasks uses moment objects — call format if available, else toString.
   const record = objectRecord(d);
   if (typeof record?.format === 'function') return String(record.format('YYYY-MM-DD'));
-  return String(d);
+  if (d instanceof Date) return d.toISOString();
+  if (typeof d === 'number' || typeof d === 'boolean' || typeof d === 'bigint') return String(d);
+  return '';
 }
 
 export const tasksQuery: ToolImpl = buildTool({

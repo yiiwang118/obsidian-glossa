@@ -112,7 +112,7 @@ export const patchCanvas: ToolImpl = buildTool({
       if (doc.edges.length === before) return `Error: edge ${id} not found.`;
       summary = `Removed edge ${id}.`;
     } else {
-      return `Error: unknown op "${op}"`;
+      return 'Error: unknown canvas operation.';
     }
 
     await app.vault.modify(f, JSON.stringify(doc, null, '\t') + '\n');

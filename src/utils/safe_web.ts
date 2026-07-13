@@ -1,7 +1,10 @@
-
-import { lookup } from 'dns/promises';
-import { isIP } from 'net';
 import { nativeStreamingHttpRequest } from './native_http';
+
+type NodeDnsLookup = (host: string, options: { all: true }) => Promise<unknown>;
+
+interface NodeDnsPromisesModule {
+  lookup: NodeDnsLookup;
+}
 
 /** True for any IPv4 address in a non-routable / private / loopback / CGNAT
  *  / link-local block. */
@@ -44,20 +47,21 @@ export function parseHttpUrl(raw: string): URL {
 /** Resolve hostname and assert NO address in the answer set is private.
  *  Throws on private-IP hit so the caller bails out. */
 export async function assertPublicHost(host: string): Promise<void> {
-  const ipver = isIP(host);
-  if (ipver === 4 && isPrivateIPv4(host)) throw new Error(`refused: ${host} is a private IPv4`);
-  if (ipver === 6 && isPrivateIPv6(host)) throw new Error(`refused: ${host} is a private IPv6`);
+  const normalizedHost = stripIpv6Brackets(host);
+  const ipver = ipVersion(normalizedHost);
+  if (ipver === 4 && isPrivateIPv4(normalizedHost)) throw new Error(`refused: ${host} is a private IPv4`);
+  if (ipver === 6 && isPrivateIPv6(normalizedHost)) throw new Error(`refused: ${host} is a private IPv6`);
   if (ipver !== 0) return;
 
-  const low = host.toLowerCase();
+  const low = normalizedHost.toLowerCase();
   if (low === 'localhost' || low.endsWith('.localhost') || low.endsWith('.local') || low.endsWith('.internal')) {
     throw new Error(`refused: ${host} is a reserved hostname`);
   }
 
-  const records = await lookup(host, { all: true });
-  for (const r of records) {
-    if (r.family === 4 && isPrivateIPv4(r.address)) throw new Error(`refused: ${host} resolves to private IPv4 ${r.address}`);
-    if (r.family === 6 && isPrivateIPv6(r.address)) throw new Error(`refused: ${host} resolves to private IPv6 ${r.address}`);
+  const records = await lookupPublicHost(normalizedHost);
+  for (const record of records) {
+    if (record.family === 4 && isPrivateIPv4(record.address)) throw new Error(`refused: ${host} resolves to private IPv4 ${record.address}`);
+    if (record.family === 6 && isPrivateIPv6(record.address)) throw new Error(`refused: ${host} resolves to private IPv6 ${record.address}`);
   }
 }
 
@@ -84,4 +88,46 @@ export async function fetchWithSafeRedirects(url: string, signal: AbortSignal): 
     return r;
   }
   throw new Error(`refused: too many redirects (>${MAX_HOPS})`);
+}
+
+interface DnsAddressRecord {
+  address: string;
+  family: 4 | 6;
+}
+
+async function lookupPublicHost(host: string): Promise<DnsAddressRecord[]> {
+  const nodeRequire = window.require;
+  if (typeof nodeRequire !== 'function') throw new Error('DNS validation is unavailable in this runtime.');
+  const moduleValue = nodeRequire('dns/promises');
+  if (!isNodeDnsPromisesModule(moduleValue)) throw new Error('Node DNS promises API is unavailable.');
+  const result = await moduleValue.lookup(host, { all: true });
+  if (!Array.isArray(result)) throw new Error('DNS lookup returned an invalid result.');
+  const records: DnsAddressRecord[] = [];
+  for (const value of result) {
+    if (!isRecord(value)) continue;
+    const address = value.address;
+    const family = value.family;
+    if (typeof address === 'string' && (family === 4 || family === 6)) records.push({ address, family });
+  }
+  if (records.length === 0) throw new Error(`DNS lookup returned no usable addresses for ${host}.`);
+  return records;
+}
+
+function isNodeDnsPromisesModule(value: unknown): value is NodeDnsPromisesModule {
+  return isRecord(value) && typeof value.lookup === 'function';
+}
+
+function stripIpv6Brackets(host: string): string {
+  return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+}
+
+function ipVersion(host: string): 0 | 4 | 6 {
+  const octets = host.split('.');
+  if (octets.length === 4 && octets.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255)) return 4;
+  if (host.includes(':') && /^[0-9a-f:.]+$/i.test(host)) return 6;
+  return 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
 }

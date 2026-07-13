@@ -54,7 +54,15 @@ function makeFixture(mutator) {
     author: 'yiiwang',
     isDesktopOnly: true,
   });
-  writeJson(root, 'package.json', { name: 'glossa', version: '0.6.6', description, main: 'main.js', license: 'MIT', scripts: defaultScripts() });
+  writeJson(root, 'package.json', {
+    name: 'glossa',
+    version: '0.6.6',
+    description,
+    main: 'main.js',
+    license: 'MIT',
+    scripts: defaultScripts(),
+    devDependencies: { 'eslint-plugin-obsidianmd': '^0.4.1' },
+  });
   writeJson(root, 'package-lock.json', {
     name: 'glossa',
     version: '0.6.6',
@@ -71,6 +79,7 @@ function makeFixture(mutator) {
   writeFile(root, 'main.js', 'window.setTimeout(() => console.log("ok"), 1);\n');
   writeFile(root, 'styles.css', '.x { color: red; }\n');
   writeFile(root, 'src/clean.ts', 'export type Clean = { value: string };\n');
+  writeFile(root, 'eslint.config.mjs', "import obsidianmd from 'eslint-plugin-obsidianmd';\nexport default [...obsidianmd.configs.recommended];\n");
   writeFile(root, 'scripts/review_scan.cjs', `require(${JSON.stringify(reviewScanScript)});\n`);
   writeFile(root, '.github/workflows/ci.yml', `name: CI\nsteps:\n  - name: Verify build output\n    run: |\n      test -s main.js\n      test -s manifest.json\n      test -s styles.css\n  - name: Upload\n    with:\n      ${workflowAssetBlock('path').replace(/\n/g, '\n      ')}\n`);
   writeFile(root, '.github/workflows/release.yml', [
@@ -244,6 +253,22 @@ exports.run = async function(t) {
   }, root => {
     const result = runReleaseCheck(root);
     t.ok(!result.ok && result.output.includes('package script lint:review must include --max-warnings=0'), 'package lint:review script must fail on warnings');
+  });
+
+  withFixture(root => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    delete pkg.devDependencies['eslint-plugin-obsidianmd'];
+    writeJson(root, 'package.json', pkg);
+  }, root => {
+    const result = runReleaseCheck(root);
+    t.ok(!result.ok && result.output.includes('devDependencies must include eslint-plugin-obsidianmd'), 'official Obsidian lint dependency is required');
+  });
+
+  withFixture(root => {
+    writeFile(root, 'eslint.config.mjs', 'export default [];\n');
+  }, root => {
+    const result = runReleaseCheck(root);
+    t.ok(!result.ok && result.output.includes('must enable the official obsidianmd recommended rules'), 'official Obsidian lint config is required');
   });
 
   withFixture(root => {

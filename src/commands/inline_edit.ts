@@ -70,7 +70,7 @@ class InstructionModal extends Modal {
     setStyle(inp, { width: '100%', minHeight: '60px', padding: '8px', fontSize: '13px' });
     inp.placeholder = ['E.g. translate to ', 'Chinese', ' · make it concise · convert to bullet list'].join('');
     inp.focus();
-    const actions = this.contentEl.createEl('div', { cls: 'nc-approval-actions' });
+    const actions = this.contentEl.createDiv({ cls: 'nc-approval-actions' });
     const cancel = actions.createEl('button', { text: 'Cancel' });
     cancel.onclick = () => this.finish(null);
     const ok = actions.createEl('button', { text: 'Edit', cls: 'mod-cta' });
@@ -93,10 +93,10 @@ class DiffPreviewModal extends Modal {
     modalEl.addClass('nc-approval');
     contentEl.empty();
     contentEl.createEl('h3', { text: 'Inline edit preview' });
-    const wrap = contentEl.createEl('div', { cls: 'nc-approval-diff-wrap' });
-    const box = wrap.createEl('div', { cls: 'nc-diff-box' });
+    const wrap = contentEl.createDiv({ cls: 'nc-approval-diff-wrap' });
+    const box = wrap.createDiv({ cls: 'nc-diff-box' });
     renderDiffInto(box, this.oldText, this.newText);
-    const actions = contentEl.createEl('div', { cls: 'nc-approval-actions' });
+    const actions = contentEl.createDiv({ cls: 'nc-approval-actions' });
     actions.createEl('button', { text: 'Reject' }).onclick = () => this.finish(false);
     const ok = actions.createEl('button', { text: 'Accept', cls: 'mod-cta' });
     ok.onclick = () => this.finish(true);

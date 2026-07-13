@@ -27,6 +27,7 @@ if (pkg.name !== manifest.id) fail(`package name (${pkg.name}) must match manife
 if (pkg.main !== 'main.js') fail('package main must be main.js.');
 if (pkg.license !== 'MIT') fail('package license must be MIT.');
 expectPackageScripts(pkg.scripts ?? {});
+expectOfficialLint(pkg.devDependencies ?? {});
 if (manifest.isDesktopOnly !== true) fail('manifest.isDesktopOnly must be true for this desktop-only plugin.');
 if (manifest.version !== pkg.version) fail(`manifest version (${manifest.version}) does not match package version (${pkg.version}).`);
 if (lock.version && lock.version !== pkg.version) fail(`package-lock version (${lock.version}) does not match package version (${pkg.version}).`);
@@ -146,6 +147,17 @@ function expectPackageScripts(scripts) {
     '@typescript-eslint/only-throw-error:error',
     '@typescript-eslint/no-unused-vars:error',
   ]);
+}
+
+function expectOfficialLint(devDependencies) {
+  if (typeof devDependencies['eslint-plugin-obsidianmd'] !== 'string') {
+    fail('package devDependencies must include eslint-plugin-obsidianmd.');
+  }
+  if (!fs.existsSync('eslint.config.mjs')) fail('eslint.config.mjs is missing.');
+  const config = fs.readFileSync('eslint.config.mjs', 'utf8');
+  if (!/from\s+['"]eslint-plugin-obsidianmd['"]/.test(config) || !/obsidianmd\.configs\.recommended/.test(config)) {
+    fail('eslint.config.mjs must enable the official obsidianmd recommended rules.');
+  }
 }
 
 function expectScriptEquals(scripts, name, expected) {

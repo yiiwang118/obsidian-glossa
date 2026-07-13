@@ -22,5 +22,5 @@ exports.run = async function(t, loadModule) {
   t.eq(mod.inferExtension('text/html', 'https://x.test/a'), 'html', 'infer html extension');
   t.eq(mod.inferExtension('', 'https://x.test/a/report.PDF?download=1'), 'pdf', 'path extension wins');
   t.eq(mod.sanitizeFilename('../bad:name?.pdf'), '-bad-name-.pdf', 'sanitize filename');
-  t.eq(mod.sha256Hex(new Uint8Array([97, 98, 99])), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', 'sha256');
+  t.eq(await mod.sha256Hex(new Uint8Array([97, 98, 99])), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', 'sha256');
 };

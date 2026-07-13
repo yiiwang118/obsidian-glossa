@@ -12,7 +12,6 @@
  * Returns the rendered body. The caller wraps it with title/metadata.
  */
 import type { App } from 'obsidian';
-import { dirname } from 'path';
 import type { Skill } from './skills';
 
 /** Path under the vault where bundled skill files are extracted. We do NOT
@@ -68,11 +67,12 @@ async function ensureAdapterDir(adapter: App['vault']['adapter'], path: string):
 }
 
 /** Compute the directory path the skill's `${SKILL_DIR}` should resolve to. */
-function skillDirFor(app: App, skill: Skill): string {
+function skillDirFor(skill: Skill): string {
   // Bundled skills use the (deterministic) extraction dir.
   if (skill.source === 'bundled') return bundledSkillDir(skill.name);
-  // Disk skills: dirname of the SKILL.md path.
-  return dirname(skill.path);
+  // Skill paths are vault-relative and always use forward slashes.
+  const separator = skill.path.lastIndexOf('/');
+  return separator > 0 ? skill.path.slice(0, separator) : '';
 }
 
 /** Render the skill body with substitutions applied. */
@@ -81,7 +81,7 @@ export async function renderSkillBody(app: App, skill: Skill, args: string): Pro
   if (skill.source === 'bundled' && skill.files && Object.keys(skill.files).length > 0) {
     await ensureBundledFilesExtracted(app, skill);
   }
-  const skillDir = skillDirFor(app, skill);
+  const skillDir = skillDirFor(skill);
 
   // Substitution table. Order: SKILL_DIR first (likely to be referenced as
   // part of file paths in template strings), then args.

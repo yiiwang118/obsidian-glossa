@@ -10,7 +10,7 @@ export function quickNotice(text: string, timeoutMs = 1600): Notice {
   const n = new Notice(text, timeoutMs);
   // Add a close × on the right
   try {
-    const x = activeDocument.createElement('span');
+    const x = activeWindow.createSpan();
     x.textContent = '✕';
     setStyle(x, { marginLeft: '10px' });
     setStyle(x, { cursor: 'pointer' });

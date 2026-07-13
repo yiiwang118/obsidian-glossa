@@ -75,13 +75,20 @@ export const dataviewQuery: ToolImpl = buildTool({
         // (which yields raw arrays we\'d have to re-serialize).
         if (typeof dv.queryMarkdown !== 'function') return 'Error: Dataview API queryMarkdown is unavailable.';
         const res = await dv.queryMarkdown(q);
-        if (!res?.successful) return `Dataview error: ${res?.error ?? 'unknown'}`;
-        let text = String(res.value ?? '');
+        if (!res?.successful) return `Dataview error: ${unknownMessage(res?.error, 'unknown')}`;
+        let text = typeof res.value === 'string' ? res.value : '';
         // Truncate at row level so we don\'t cut a table mid-row.
         const lines = text.split('\n');
         if (lines.length > limit + 10) {
           text = lines.slice(0, limit + 4).join('\n') + `\n... [+${lines.length - limit - 4} rows truncated; raise limit]`;
-        }
+}
+
+function unknownMessage(value: unknown, fallback: string): string {
+  if (value instanceof Error) return value.message;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+  return fallback;
+}
         return text || '(no rows)';
       }
 

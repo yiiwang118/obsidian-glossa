@@ -52,11 +52,11 @@ class ApprovalModal extends Modal {
           previewText = JSON.stringify(this.args, null, 2);
         }
       } catch { previewText = JSON.stringify(this.args, null, 2); }
-      const pre = contentEl.createEl('div', { cls: 'nc-approval-diff' });
+      const pre = contentEl.createDiv({ cls: 'nc-approval-diff' });
       pre.textContent = previewText;
     }
 
-    const actions = contentEl.createEl('div', { cls: 'nc-approval-actions' });
+    const actions = contentEl.createDiv({ cls: 'nc-approval-actions' });
     const cancel = actions.createEl('button', { text: 'Deny' });
     cancel.onclick = () => this.decide({ ok: false });
     const allow = actions.createEl('button', { text: 'Approve', cls: 'mod-cta' });
@@ -159,13 +159,13 @@ class ApprovalModal extends Modal {
       }
     } catch { return null; }
 
-    const wrap = contentEl.createEl('div', { cls: 'nc-approval-diff-wrap' });
-    if (label) wrap.createEl('div', { cls: 'nc-approval-file', text: label });
-    for (const w of warnings) wrap.createEl('div', { cls: 'nc-approval-warning', text: w });
+    const wrap = contentEl.createDiv({ cls: 'nc-approval-diff-wrap' });
+    if (label) wrap.createDiv({ cls: 'nc-approval-file', text: label });
+    for (const w of warnings) wrap.createDiv({ cls: 'nc-approval-warning', text: w });
 
     // Stats line
     const { adds, dels } = diffStats(oldText, newText);
-    wrap.createEl('div', {
+    wrap.createDiv({
       cls: 'nc-approval-stats',
       text: `+${adds} −${dels}  ·  ${(newText.length)} chars`,
     });
@@ -178,14 +178,14 @@ class ApprovalModal extends Modal {
     const tooBigForPerLine = Math.max(oldLineCount, newLineCount) > 2000;
 
     if (tooBigForPerLine) {
-      wrap.createEl('div', { cls: 'nc-approval-warning',
+      wrap.createDiv({ cls: 'nc-approval-warning',
         text: `⚠ File is ${Math.max(oldLineCount, newLineCount).toLocaleString()} lines — per-line accept/reject is disabled (only safe up to 2000 lines). Approve = apply ALL changes, Deny = cancel.` });
     }
     const ops = lineDiff(oldText, newText);
-    const diffBox = wrap.createEl('div', { cls: 'nc-diff-box' });
+    const diffBox = wrap.createDiv({ cls: 'nc-diff-box' });
     const decisions = new Map<number, boolean>();
     ops.forEach((op, i) => {
-      const line = diffBox.createEl('div', { cls: `nc-diff-line ${op.type}` });
+      const line = diffBox.createDiv({ cls: `nc-diff-line ${op.type}` });
       if (!tooBigForPerLine && (op.type === 'add' || op.type === 'del')) {
         const cb = line.createEl('input', { type: 'checkbox' });
         (cb).checked = true;
@@ -193,10 +193,10 @@ class ApprovalModal extends Modal {
         decisions.set(i, true);
         cb.onchange = () => decisions.set(i, (cb).checked);
       }
-      line.createEl('span', { text: op.type === 'add' ? '+' : op.type === 'del' ? '−' : ' ' });
-      line.createEl('span', { text: ` ${op.text || ' '}` });
+      line.createSpan({ text: op.type === 'add' ? '+' : op.type === 'del' ? '−' : ' ' });
+      line.createSpan({ text: ` ${op.text || ' '}` });
     });
-    if (ops.length === 0) wrap.createEl('div', { cls: 'nc-diff-line eq', text: '(No changes detected)' });
+    if (ops.length === 0) wrap.createDiv({ cls: 'nc-diff-line eq', text: '(No changes detected)' });
     // Stash for decide() to rebuild content if user toggled lines.
     (this as AnyValue).__diff = { oldText, newText, decisions };
     return wrap;
@@ -257,14 +257,14 @@ class ApprovalModal extends Modal {
    *  per-line toggle is intentionally disabled because envelope semantics span files. */
   private async renderEnvelopePreview(patch: string): Promise<HTMLElement> {
     const { contentEl } = this;
-    const wrap = contentEl.createEl('div', { cls: 'nc-approval-diff-wrap' });
+    const wrap = contentEl.createDiv({ cls: 'nc-approval-diff-wrap' });
     const { ops, files, parseError } = await previewEnvelope(patch, async (p) => {
       const f = this.app.vault.getAbstractFileByPath(p);
       return f instanceof TFile ? await this.app.vault.read(f) : null;
     });
 
     if (parseError) {
-      wrap.createEl('div', { cls: 'nc-approval-warning', text: `Parse error: ${parseError}` });
+      wrap.createDiv({ cls: 'nc-approval-warning', text: `Parse error: ${parseError}` });
       // Synchronously mark the modal as blocking-approve. The approve button
       // is rendered AFTER this preview (see onOpen ordering), so we set a
       // flag the buildResult / keydown paths check rather than relying on a
@@ -281,27 +281,27 @@ class ApprovalModal extends Modal {
       for (const op of ops) { if (op.type === 'add') totalAdds++; else if (op.type === 'del') totalDels++; }
     };
     for (const f of files) tally(f.oldText, f.newText);
-    wrap.createEl('div', {
+    wrap.createDiv({
       cls: 'nc-approval-stats',
       text: `envelope · ${ops.length} op${ops.length === 1 ? '' : 's'} · +${totalAdds} −${totalDels}`,
     });
 
     for (const fp of files) {
-      const fileSec = wrap.createEl('div', { cls: 'nc-approval-file-section' });
+      const fileSec = wrap.createDiv({ cls: 'nc-approval-file-section' });
       const label = fp.movePath && fp.movePath !== fp.path ? `${fp.path} → ${fp.movePath}` : fp.path;
-      const head = fileSec.createEl('div', { cls: 'nc-approval-file' });
-      head.createEl('span', { cls: `nc-approval-op-pill ${fp.kind}`, text: fp.kind });
-      head.createEl('span', { text: label });
-      if (fp.warning) fileSec.createEl('div', { cls: 'nc-approval-warning', text: '⚠ ' + fp.warning });
+      const head = fileSec.createDiv({ cls: 'nc-approval-file' });
+      head.createSpan({ cls: `nc-approval-op-pill ${fp.kind}`, text: fp.kind });
+      head.createSpan({ text: label });
+      if (fp.warning) fileSec.createDiv({ cls: 'nc-approval-warning', text: '⚠ ' + fp.warning });
       if (fp.kind === 'delete') {
-        fileSec.createEl('div', { cls: 'nc-diff-line del', text: `(file will be deleted — ${fp.oldText.split('\n').length} lines lost)` });
+        fileSec.createDiv({ cls: 'nc-diff-line del', text: `(file will be deleted — ${fp.oldText.split('\n').length} lines lost)` });
         continue;
       }
       const a = fp.oldText, b = fp.newText ?? '';
       if (a === b) {
-        fileSec.createEl('div', { cls: 'nc-diff-line eq', text: '(No changes)' });
+        fileSec.createDiv({ cls: 'nc-diff-line eq', text: '(No changes)' });
       } else {
-        const box = fileSec.createEl('div', { cls: 'nc-diff-box' });
+        const box = fileSec.createDiv({ cls: 'nc-diff-box' });
         renderDiffInto(box, a, b);
       }
     }
@@ -309,7 +309,7 @@ class ApprovalModal extends Modal {
     // If any file has a warning that would break apply, disable approve.
     const blocking = files.some(f => f.warning);
     if (blocking) {
-      wrap.createEl('div', { cls: 'nc-approval-warning', text: 'Approve disabled while warnings are above — ask the model to retry.' });
+      wrap.createDiv({ cls: 'nc-approval-warning', text: 'Approve disabled while warnings are above — ask the model to retry.' });
       // Synchronous flag — see __blockApprove handling in decide()/keydown
       // path. Replaces the racy window.setTimeout(0) DOM-button disable.
       (this as AnyValue).__blockApprove = 'Envelope has unresolved warnings.';
@@ -321,10 +321,10 @@ class ApprovalModal extends Modal {
   /** When the diff is broken (e.g., non-unique match), show warnings and disable Approve. */
   private renderWarnings(label: string, warnings: string[]): HTMLElement {
     const { contentEl } = this;
-    const wrap = contentEl.createEl('div', { cls: 'nc-approval-diff-wrap' });
-    if (label) wrap.createEl('div', { cls: 'nc-approval-file', text: label });
-    for (const w of warnings) wrap.createEl('div', { cls: 'nc-approval-warning', text: w });
-    const disabledMsg = wrap.createEl('div', {
+    const wrap = contentEl.createDiv({ cls: 'nc-approval-diff-wrap' });
+    if (label) wrap.createDiv({ cls: 'nc-approval-file', text: label });
+    for (const w of warnings) wrap.createDiv({ cls: 'nc-approval-warning', text: w });
+    const disabledMsg = wrap.createDiv({
       cls: 'nc-approval-warning',
       text: 'Approve disabled — the LLM should retry with a different patch (more unique context). Click ' + 'Deny.',
     });

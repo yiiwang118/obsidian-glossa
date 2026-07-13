@@ -6609,10 +6609,13 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   min-width: 0;
 }
 
-.nc-settings-header-copy h2 {
+.nc-settings-header-copy .nc-settings-brand-heading {
   margin: 0 0 5px;
+  padding: 0;
+  border: 0;
   color: var(--glossa-ink);
   font-size: 22px;
+  font-weight: 700;
   line-height: 1.25;
   letter-spacing: 0;
 }
@@ -6744,8 +6747,17 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   border-bottom: 1px solid var(--glossa-line-soft);
 }
 
-.nc-settings-page-intro h3 {
+.nc-settings-page-intro .nc-settings-page-heading {
   margin: 0 0 3px;
+  padding: 0;
+  border: 0;
+}
+
+.nc-settings-page-intro .nc-settings-page-heading .setting-item-info {
+  margin: 0;
+}
+
+.nc-settings-page-intro .nc-settings-page-heading .setting-item-name {
   color: var(--glossa-ink);
   font-size: 15px;
   line-height: 1.35;
@@ -6881,8 +6893,18 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
   border-bottom: 1px solid var(--glossa-line-soft);
 }
 
-.nc-capability-section-head h4 {
+.nc-capability-section-heading {
+  flex: 1 1 auto;
   margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.nc-capability-section-heading .setting-item-info {
+  margin: 0;
+}
+
+.nc-capability-section-heading .setting-item-name {
   color: var(--glossa-ink);
   font-size: 13px;
   letter-spacing: 0;
@@ -6896,15 +6918,24 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-capability-groups {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 18px;
+  gap: 18px;
 }
 
 .nc-capability-group {
   min-width: 0;
 }
 
-.nc-capability-group h5 {
+.nc-capability-group-heading {
   margin: 10px 0 3px;
+  padding: 0;
+  border: 0;
+}
+
+.nc-capability-group-heading .setting-item-info {
+  margin: 0;
+}
+
+.nc-capability-group-heading .setting-item-name {
   color: var(--glossa-muted);
   font-size: 10px;
   font-weight: 700;
@@ -7137,7 +7168,7 @@ button.nc-aligned-select[aria-expanded="true"] .nc-aligned-select-chevron {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
-  column-gap: 8px;
+  gap: 8px;
   min-height: 32px;
   padding: 6px 8px;
   line-height: 16px;

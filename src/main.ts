@@ -480,7 +480,7 @@ export default class GlossaPlugin extends Plugin {
     try {
       const plain = await decryptString(ep.apiKey, this.cryptoHandle);
       return { ...ep, apiKey: plain };
-    } catch (e) {
+    } catch {
       new Notice(bi('Failed to decrypt API key — passphrase may be wrong.', 'API 密钥解密失败 — 密码可能错误。')); return null;
     }
   }

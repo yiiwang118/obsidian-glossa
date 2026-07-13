@@ -18,7 +18,7 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   // That was an XSS footgun (any model-derived text reaching el could inject
   // script) — removed. Callers that genuinely need trusted SVG
   // constants should go through setTrustedSvg().
-  const e = activeDocument.createElement(tag);
+  const e = activeWindow.createEl(tag);
   if (opts.className) e.className = opts.className;
   if (opts.text != null) e.textContent = opts.text;
   if (opts.title) e.title = opts.title;

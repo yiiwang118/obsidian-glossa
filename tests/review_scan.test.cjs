@@ -44,6 +44,10 @@ exports.run = async function(t) {
     const cssHas = runScan(root);
     t.ok(!cssHas.ok && cssHas.output.includes('CSS :has() selector'), 'CSS :has selector is rejected');
 
+    fs.writeFileSync(path.join(root, 'styles.css'), '.x { display: grid; column-gap: 8px; }\n');
+    const cssMulticolumn = runScan(root);
+    t.ok(!cssMulticolumn.ok && cssMulticolumn.output.includes('CSS multicolumn property'), 'CSS multicolumn properties are rejected');
+
     fs.writeFileSync(path.join(root, 'styles.css'), '.x { color: red; }\n');
     fs.writeFileSync(path.join(root, 'src/clean.ts'), 'export type Bad = unknown | string;\n');
     const topType = runScan(root);

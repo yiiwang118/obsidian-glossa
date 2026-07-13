@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file. Format adhe
 
 ## [Unreleased]
 
+## [0.6.9] — 2026-07-13
+
+### Added
+- Added the official `eslint-plugin-obsidianmd` recommended rules to the release gate alongside the existing strict TypeScript, source review, dependency, test, and build checks.
+- Added regression coverage for the typed native-network fallback and CSS compatibility scanner.
+
+### Changed
+- Replaced legacy ESLint configuration with the current flat config and aligned settings headings and DOM helpers with host-app conventions.
+- Hardened native HTTP and DNS fallbacks with explicit runtime validation at the Node bridge while preserving browser-first requests and private-network protection.
+- Moved hashing to Web Crypto and removed unnecessary Node utility dependencies from document and Skill paths.
+
+### Fixed
+- Cleared the remaining source-review errors and warnings for unsafe values, unnecessary assertions, non-`Error` rejections, and unused catch bindings.
+- Replaced partially supported multicolumn CSS declarations and added a scanner rule that prevents them from returning.
+
+### Checks
+- Passed official Obsidian lint and strict TypeScript lint with zero warnings, 580 automated tests, dependency audit, production build, source/CSS review scan, and release metadata validation.
+
 ## [0.6.8] — 2026-07-12
 
 ### Added
