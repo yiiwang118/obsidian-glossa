@@ -29,9 +29,6 @@ export default defineConfig(
   {
     files: ['src/**/*.ts'],
     rules: {
-      // Searchable setting definitions require the 1.13 API; Glossa still
-      // supports 1.12.3 and keeps the required display() implementation.
-      'obsidianmd/settings-tab/prefer-setting-definitions': 'off',
       'obsidianmd/ui/sentence-case': ['warn', { brands: ['Glossa', 'Markdown'] }],
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unsafe-assignment': 'error',

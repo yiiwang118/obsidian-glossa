@@ -1,8 +1,8 @@
 {
   "id": "glossa",
   "name": "Glossa",
-  "version": "0.6.10",
-  "minAppVersion": "1.12.3",
+  "version": "0.6.11",
+  "minAppVersion": "1.13.0",
   "description": "Local-first AI sidebar for context-aware chat, precise note editing, PDF and image analysis, and web research.",
   "author": "yiiwang",
   "authorUrl": "https://github.com/yiiwang118",

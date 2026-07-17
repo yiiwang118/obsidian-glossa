@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
+import type { SettingDefinitionItem } from 'obsidian';
 import type GlossaPlugin from './main';
 import type { Endpoint, CustomPrompt, SlashCommand } from './types';
 import { reasoningOptionsForEndpoint } from './types';
@@ -261,10 +262,40 @@ export class GlossaSettingTab extends PluginSettingTab {
 
   constructor(app: App, public plugin: GlossaPlugin) { super(app, plugin); }
 
-  display(): void {
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [{
+      name: bi('Glossa settings', 'Glossa 设置'),
+      desc: bi(
+        'Models, translation, Agent behavior, context, tools, privacy, and storage.',
+        '模型、翻译、Agent 行为、上下文、工具、隐私与存储。',
+      ),
+      aliases: [
+        bi('Interface language', '界面语言'),
+        bi('Font size', '字体大小'),
+        bi('Update checks', '版本更新检查'),
+        bi('Model endpoints', '模型端点'),
+        bi('Network and proxy', '网络与代理'),
+        bi('Web research and downloads', '网页研究与下载'),
+        bi('Context and selection', '上下文与选中内容'),
+        bi('Quick translation', '快速翻译'),
+        bi('Agent permissions and approvals', 'Agent 权限与审批'),
+        bi('Tools and Skills', '工具与 Skills'),
+        bi('Encryption and privacy', '加密与隐私'),
+        bi('Semantic search', '语义搜索'),
+        bi('Checkpoints and compaction', '检查点与上下文压缩'),
+        bi('Chats and prompts', '对话与 Prompt'),
+      ],
+      render: setting => {
+        setting.settingEl.addClass('nc-settings-definition-root');
+        this.renderSettings(setting.settingEl);
+        return () => this.selectPopup.hide();
+      },
+    }];
+  }
+
+  private renderSettings(containerEl: HTMLElement): void {
     this.selectPopup.hide();
     const generation = ++this.renderGeneration;
-    const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass('nc-settings');
 
@@ -304,14 +335,14 @@ export class GlossaSettingTab extends PluginSettingTab {
       tabEl.setAttribute('role', 'tab');
       tabEl.setAttribute('aria-selected', String(this.activeTab === tab.id));
       tabEl.tabIndex = this.activeTab === tab.id ? 0 : -1;
-      tabEl.onclick = () => { this.activeTab = tab.id; this.display(); };
+      tabEl.onclick = () => { this.activeTab = tab.id; this.refresh(); };
       tabEl.onkeydown = (event) => {
         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
         event.preventDefault();
         const offset = event.key === 'ArrowRight' ? 1 : -1;
         const next = SETTINGS_TABS[(index + offset + SETTINGS_TABS.length) % SETTINGS_TABS.length];
         this.activeTab = next.id;
-        this.display();
+        this.refresh();
         window.requestAnimationFrame(() => {
           this.containerEl.querySelector<HTMLButtonElement>('.nc-settings-tab.active')?.focus();
         });
@@ -328,6 +359,10 @@ export class GlossaSettingTab extends PluginSettingTab {
 
     this.renderAll(containerEl, generation);
     this.applyTabFilter(containerEl);
+  }
+
+  private refresh(): void {
+    this.update();
   }
 
   hide(): void {
@@ -357,7 +392,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         if (this.plugin.settings.uiLanguage === option.value) return;
         this.plugin.settings.uiLanguage = option.value;
         await this.plugin.saveSettings();
-        this.display();
+        this.refresh();
       };
     }
   }
@@ -629,7 +664,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       .setName(t('font_size'))
       .setDesc(bi('Controls text throughout the sidebar. Default: 13 px.', '控制侧栏中的整体文字大小，默认 13 px。'))
       .addSlider(s => {
-        s.setLimits(11, 18, 1).setValue(this.plugin.settings.reasoningFontSize ?? 13).setDynamicTooltip();
+        s.setLimits(11, 18, 1).setValue(this.plugin.settings.reasoningFontSize ?? 13);
         // Debounce: Obsidian's slider fires 'input' on every drag pixel, which
         // would re-run iterateAllLeaves+applyCssVars per pixel — heavy. Wait
         // 150ms after the user stops moving before applying.
@@ -733,7 +768,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       async value => {
         this.plugin.settings.webSearchProvider = value;
         await this.plugin.saveSettings();
-        this.display();
+        this.refresh();
       },
       bi('Search provider', '搜索 provider'),
     );
@@ -852,7 +887,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         this.plugin.settings.translationEndpointId = value || null;
         this.plugin.settings.translationModel = '';
         await this.plugin.saveSettings();
-        this.display();
+        this.refresh();
       },
       bi('Translation endpoint', '翻译端点'),
     );
@@ -892,7 +927,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           this.plugin.settings.translationEndpointId = translationEndpoint.id;
         }
         await this.plugin.saveSettings();
-        this.display();
+        this.refresh();
       },
       bi('Translation model', '翻译模型'),
     );
@@ -1023,13 +1058,13 @@ export class GlossaSettingTab extends PluginSettingTab {
         del.onclick = async () => {
           this.plugin.settings.permissionRules = rules.filter(x => x !== r);
           await this.plugin.saveSettings();
-          this.display();
+          this.refresh();
         };
       }
-      new Setting(ruleGroup).addButton(b => b.setButtonText(bi('Clear all rules', '清除全部规则')).setWarning().onClick(async () => {
+      new Setting(ruleGroup).addButton(b => b.setButtonText(bi('Clear all rules', '清除全部规则')).setDestructive().onClick(async () => {
         this.plugin.settings.permissionRules = [];
         await this.plugin.saveSettings();
-        this.display();
+        this.refresh();
       }));
     }
 
@@ -1069,7 +1104,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       new Setting(ruleGroup).addButton(b => b.setButtonText(bi('Clear log', '清除日志')).onClick(async () => {
         this.plugin.settings.permissionLog = [];
         await this.plugin.saveSettings();
-        this.display();
+        this.refresh();
       }));
     }
 
@@ -1092,12 +1127,12 @@ export class GlossaSettingTab extends PluginSettingTab {
         .onClick(async () => {
           if (this.plugin.settings.encryptionEnabled) await this.plugin.disableEncryption();
           else await this.plugin.enableEncryption();
-          this.display();
+          this.refresh();
         }));
     if (this.plugin.settings.encryptionEnabled) {
       new Setting(containerEl).setName(bi('Lock', '锁定'))
         .setDesc(bi('Remove decrypted keys from memory immediately.', '立即从内存中移除已解密密钥。'))
-        .addButton(b => b.setButtonText(bi('Lock', '锁定')).onClick(() => { void this.plugin.lock(); void this.display(); }));
+        .addButton(b => b.setButtonText(bi('Lock', '锁定')).onClick(() => { void this.plugin.lock(); void this.refresh(); }));
       new Setting(containerEl).setName(bi('Encrypt plaintext keys', '加密明文密钥'))
         .setDesc(bi('Wrap any remaining plaintext API keys.', '加密剩余明文 API key。'))
         .addButton(b => b.setButtonText(bi('Run', '运行')).setCta().onClick(async () => {
@@ -1113,7 +1148,7 @@ export class GlossaSettingTab extends PluginSettingTab {
             }
             await this.plugin.saveSettings();
             new Notice(bi(`Encrypted ${wrapped} key(s).`, `已加密 ${wrapped} 个密钥。`));
-            this.display();
+            this.refresh();
           } finally {
             b.setDisabled(false).setButtonText(bi('Run', '运行'));
           }
@@ -1128,7 +1163,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     );
     new Setting(maintenance).setName(bi('Purge checkpoints', '清空检查点'))
       .setDesc(bi('Delete every saved pre-edit snapshot. Existing notes are not changed.', '删除全部编辑前快照，不会修改现有笔记。'))
-      .addButton(b => b.setButtonText(bi('Purge', '清空')).setWarning().onClick(async () => {
+      .addButton(b => b.setButtonText(bi('Purge', '清空')).setDestructive().onClick(async () => {
         b.setDisabled(true);
         const { confirmModal } = await import('./ui/confirm_modal');
         const ok = await confirmModal(this.app, {
@@ -1147,7 +1182,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       }));
     new Setting(maintenance).setName(bi('Purge embedding index', '清空嵌入索引'))
       .setDesc(bi('Delete the local semantic-search index. Source notes remain untouched.', '删除本地语义搜索索引，不影响源笔记。'))
-      .addButton(b => b.setButtonText(bi('Purge', '清空')).setWarning().onClick(async () => {
+      .addButton(b => b.setButtonText(bi('Purge', '清空')).setDestructive().onClick(async () => {
         b.setDisabled(true);
         const { confirmModal } = await import('./ui/confirm_modal');
         const ok = await confirmModal(this.app, {
@@ -1223,7 +1258,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         b.setDisabled(true).setButtonText(bi('Building…', '构建中…'));
         try {
           await this.plugin.rebuildEmbeddings();
-          this.display();
+          this.refresh();
         } finally {
           b.setDisabled(false).setButtonText(bi('Build', '构建'));
         }
@@ -1242,7 +1277,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       .addToggle(t => t.setValue(this.plugin.settings.autoCompactEnabled).onChange(async v => { this.plugin.settings.autoCompactEnabled = v; await this.plugin.saveSettings(); }));
     new Setting(containerEl).setName(bi('Threshold (%)', '阈值 (%)'))
       .setDesc(bi('Compact older turns after estimated context usage reaches this percentage.', '估算上下文使用率达到该比例后，压缩较早轮次。'))
-      .addSlider(s => s.setLimits(40, 95, 5).setValue(this.plugin.settings.autoCompactThresholdPct).setDynamicTooltip()
+      .addSlider(s => s.setLimits(40, 95, 5).setValue(this.plugin.settings.autoCompactThresholdPct)
         .onChange(async v => { this.plugin.settings.autoCompactThresholdPct = v; await this.plugin.saveSettings(); }));
 
     /* ----- Endpoints ----- */
@@ -1271,7 +1306,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         id: uid(), trigger: '/my-cmd', title: 'My command',
         template: 'Do something with ${selection}', custom: true,
       });
-      await this.plugin.saveSettings(); this.display();
+      await this.plugin.saveSettings(); this.refresh();
     }));
     for (const c of this.plugin.settings.customSlashCommands) this.renderSlashCmd(containerEl, c);
 
@@ -1279,7 +1314,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     this.renderHeading(containerEl, bi('Reusable prompts', '可复用 Prompt'), 'capabilities');
     new Setting(containerEl).addButton(b => b.setButtonText(bi('+ Add', '+ 新增')).onClick(async () => {
       this.plugin.settings.workflows.unshift({ id: uid(), title: bi('Untitled', '未命名'), prompt: '', createdAt: Date.now() });
-      await this.plugin.saveSettings(); this.display();
+      await this.plugin.saveSettings(); this.refresh();
     }));
     for (const w of this.plugin.settings.workflows) {
       const card = containerEl.createDiv({ cls: 'nc-endpoint-card' });
@@ -1288,7 +1323,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       const del = hdr.createEl('button', { text: bi('Delete', '删除'), cls: 'mod-warning' });
       del.onclick = async () => {
         this.plugin.settings.workflows = this.plugin.settings.workflows.filter(x => x.id !== w.id);
-        await this.plugin.saveSettings(); this.display();
+        await this.plugin.saveSettings(); this.refresh();
       };
       new Setting(card).setName(bi('Title', '标题')).addText(t => t.setValue(w.title).onChange(async v => { w.title = v; await this.plugin.saveSettings(); }));
       new Setting(card).setName(bi('Prompt', 'Prompt')).addTextArea(t => { t.inputEl.rows = 5; t.setValue(w.prompt).onChange(async v => { w.prompt = v; await this.plugin.saveSettings(); }); });
@@ -1298,7 +1333,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     this.renderHeading(containerEl, bi('Per-folder prompts', '文件夹 prompt'), 'advanced');
     new Setting(containerEl).addButton(b => b.setButtonText(bi('+ Add', '+ 新增')).onClick(async () => {
       this.plugin.settings.customPrompts.push({ id: uid(), name: bi('Untitled', '未命名'), systemPrompt: '', folderScope: '' });
-      await this.plugin.saveSettings(); this.display();
+      await this.plugin.saveSettings(); this.refresh();
     }));
     for (const p of this.plugin.settings.customPrompts) this.renderCustomPrompt(containerEl, p);
   }
@@ -1403,7 +1438,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       } catch (e) { console.warn('[Glossa] endpoint deletion: session ref cleanup failed', e); }
 
       await this.plugin.saveSettings();
-      this.display();
+      this.refresh();
     };
 
     const cliWarn = localCliWarning(ep.kind);
@@ -1488,7 +1523,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         });
       apiKeySetting.addButton(b => b
         .setButtonText(bi('Clear', '清除'))
-        .setWarning()
+        .setDestructive()
         .setDisabled(!ep.apiKey)
         .onClick(async () => {
           const { confirmModal } = await import('./ui/confirm_modal');
@@ -1501,7 +1536,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           if (!ok) return;
           ep.apiKey = '';
           await this.plugin.saveSettings();
-          this.display();
+          this.refresh();
         }));
 
       // Model with detect button + dropdown of detected
@@ -1542,12 +1577,12 @@ export class GlossaSettingTab extends PluginSettingTab {
         .addText(t => t.setValue(ep.cwd ?? '').onChange(async v => { ep.cwd = v; await this.plugin.saveSettings(); }))
         .addButton(b => b.setButtonText('Use vault').onClick(async () => {
           const vaultPath = (this.app.vault.adapter as AnyValue).basePath;
-          if (vaultPath) { ep.cwd = vaultPath; await this.plugin.saveSettings(); this.display(); new Notice('Set to vault root.'); }
+          if (vaultPath) { ep.cwd = vaultPath; await this.plugin.saveSettings(); this.refresh(); new Notice('Set to vault root.'); }
         }));
 
       new Setting(basic).setName(t('cli_full_agent'))
         .setDesc(t('cli_full_agent_desc'))
-        .addToggle(tg => tg.setValue(!!ep.cliFullAgent).onChange(async v => { ep.cliFullAgent = v; await this.plugin.saveSettings(); this.display(); }));
+        .addToggle(tg => tg.setValue(!!ep.cliFullAgent).onChange(async v => { ep.cliFullAgent = v; await this.plugin.saveSettings(); this.refresh(); }));
 
       if (ep.kind === 'codex-cli') {
         const appServerActive = ep.codexUseAppServer !== false;
@@ -1566,7 +1601,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           .addToggle(tg => tg.setValue(ep.codexUseAppServer !== false).onChange(async v => {
             ep.codexUseAppServer = v;
             await this.plugin.saveSettings();
-            this.display();
+            this.refresh();
           }));
 
         const sandboxSetting = new Setting(advanced)
@@ -1587,7 +1622,7 @@ export class GlossaSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
             const warn = codexSafetyWarning(ep);
             if (warn) new Notice(`Warning: ${warn}`, 10000);
-            this.display();
+            this.refresh();
           },
           t('codex_sandbox'),
         );
@@ -1610,7 +1645,7 @@ export class GlossaSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
             const warn = codexSafetyWarning(ep);
             if (warn) new Notice(`Warning: ${warn}`, 10000);
-            this.display();
+            this.refresh();
           },
           t('codex_approval'),
         );
@@ -1693,7 +1728,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     if (ep.kind === 'custom-api') {
       new Setting(advanced).setName(bi('Obsidian requestUrl', 'Obsidian requestUrl'))
         .setDesc(bi('Proxy-aware. No streaming.', '支持代理。不流式。'))
-        .addToggle(tg => tg.setValue(!!ep.useObsidianFetch).onChange(async v => { ep.useObsidianFetch = v; await this.plugin.saveSettings(); this.display(); }));
+        .addToggle(tg => tg.setValue(!!ep.useObsidianFetch).onChange(async v => { ep.useObsidianFetch = v; await this.plugin.saveSettings(); this.refresh(); }));
     }
 
     // Proxy override — only meaningful for CLI providers (HTTPS_PROXY env var) OR
@@ -1717,7 +1752,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         async value => {
           ep.proxyMode = value;
           await this.plugin.saveSettings();
-          this.display();
+          this.refresh();
         },
         bi('Proxy mode', '代理模式'),
       );
@@ -1740,7 +1775,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         if (!epDec) return;
         const list = normalizeModelList(await new CustomApiProvider(epDec).listModels());
         if (list.length === 0) { new Notice(bi('No models returned.', '未返回模型列表。')); }
-        else { ep.availableModels = list; await this.plugin.saveSettings(); new Notice(bi(`Found ${list.length} models.`, `找到 ${list.length} 个模型。`)); this.display(); }
+        else { ep.availableModels = list; await this.plugin.saveSettings(); new Notice(bi(`Found ${list.length} models.`, `找到 ${list.length} 个模型。`)); this.refresh(); }
       } catch (e) { new Notice(bi(`Failed: ${e.message}`, `失败：${e.message}`)); }
       finally { b.setButtonText(bi('↻ Detect', '↻ 探测')).setDisabled(false); }
     }));
@@ -1792,7 +1827,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     const del = hdr.createEl('button', { text: bi('Delete', '删除'), cls: 'mod-warning' });
     del.onclick = async () => {
       this.plugin.settings.customSlashCommands = this.plugin.settings.customSlashCommands.filter(x => x.id !== c.id);
-      await this.plugin.saveSettings(); this.display();
+      await this.plugin.saveSettings(); this.refresh();
     };
     new Setting(card).setName(bi('Trigger', '触发符')).addText(t => t.setValue(c.trigger).onChange(async v => { c.trigger = v.startsWith('/') ? v : '/' + v; await this.plugin.saveSettings(); }));
     new Setting(card).setName(bi('Title', '标题')).addText(t => t.setValue(c.title).onChange(async v => { c.title = v; await this.plugin.saveSettings(); }));
@@ -1806,7 +1841,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     const del = hdr.createEl('button', { text: bi('Delete', '删除'), cls: 'mod-warning' });
     del.onclick = async () => {
       this.plugin.settings.customPrompts = this.plugin.settings.customPrompts.filter(x => x.id !== p.id);
-      await this.plugin.saveSettings(); this.display();
+      await this.plugin.saveSettings(); this.refresh();
     };
     new Setting(card).setName(bi('Name', '名称')).addText(t => t.setValue(p.name).onChange(async v => { p.name = v; await this.plugin.saveSettings(); }));
     new Setting(card).setName(bi('Folder', '文件夹')).setDesc(bi('Path prefix.', '路径前缀。'))
@@ -1825,7 +1860,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       this.plugin.settings.endpoints.push(ep);
       if (!this.plugin.settings.activeEndpointId) this.plugin.settings.activeEndpointId = ep.id;
       await this.plugin.saveSettings();
-      this.display();
+      this.refresh();
     });
     m.open();
   }

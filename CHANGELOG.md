@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file. Format adhe
 
 ## [Unreleased]
 
+## [0.6.11] — 2026-07-17
+
+### Changed
+- Adopted the 1.13 declarative settings index while preserving Glossa's existing task-focused settings layout and refresh behavior.
+- Raised the minimum app version to 1.13.0 and replaced deprecated slider and destructive-button APIs.
+- Removed shared multi-file provenance attestations from the release workflow because the plugin directory verifier rejects that bundle format; release assets remain rebuilt, checked, and restricted to `main.js`, `manifest.json`, and `styles.css`.
+
+### Fixed
+- Replaced `Array.at()` usage in selection geometry with typed index access so the directory scanner no longer reports unsafe assignments, calls, member access, or arguments.
+- Re-enabled the official settings-definition lint rule so missing search definitions fail locally before release.
+
+### Checks
+- Added a release-gate regression test that rejects incompatible multi-file attestation steps.
+- Passed the official plugin lint rules with zero warnings together with strict TypeScript checks, tests, dependency audit, production build, source/CSS scan, and release metadata validation.
+
 ## [0.6.10] — 2026-07-17
 
 ### Added

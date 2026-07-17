@@ -85,9 +85,6 @@ function makeFixture(mutator) {
   writeFile(root, '.github/workflows/release.yml', [
     'name: Release',
     'steps:',
-    '  - name: Attest',
-    '    with:',
-    `      ${workflowAssetBlock('subject-path').replace(/\n/g, '\n      ')}`,
     '  - name: Release',
     '    with:',
     `      ${workflowAssetBlock('files').replace(/\n/g, '\n      ')}`,
@@ -377,9 +374,6 @@ exports.run = async function(t) {
     writeFile(root, '.github/workflows/release.yml', [
       'name: Release',
       'steps:',
-      '  - name: Attest',
-      '    with:',
-      `      ${workflowAssetBlock('subject-path').replace(/\n/g, '\n      ')}`,
       '  - name: Release',
       '    with:',
       `      ${workflowAssetBlock('files', 'src/main.ts').replace(/\n/g, '\n      ')}`,
@@ -388,6 +382,23 @@ exports.run = async function(t) {
   }, root => {
     const result = runReleaseCheck(root);
     t.ok(!result.ok && result.output.includes('must contain only main.js, manifest.json, styles.css'), 'extra release asset is rejected');
+  });
+
+  withFixture(root => {
+    writeFile(root, '.github/workflows/release.yml', [
+      'name: Release',
+      'steps:',
+      '  - uses: actions/attest@v4',
+      '    with:',
+      `      ${workflowAssetBlock('subject-path').replace(/\n/g, '\n      ')}`,
+      '  - name: Release',
+      '    with:',
+      `      ${workflowAssetBlock('files').replace(/\n/g, '\n      ')}`,
+      '',
+    ].join('\n'));
+  }, root => {
+    const result = runReleaseCheck(root);
+    t.ok(!result.ok && result.output.includes('must not create multi-asset attestations'), 'incompatible multi-asset attestations are rejected');
   });
 
   withFixture(root => {

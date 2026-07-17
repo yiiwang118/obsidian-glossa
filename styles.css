@@ -6703,6 +6703,12 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 
 /* Settings simplification pass */
+.nc-settings-definition-root.setting-item {
+  display: block;
+  padding: 0;
+  border: 0;
+}
+
 .nc-settings {
   --glossa-settings-gap: 10px;
 }

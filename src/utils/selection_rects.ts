@@ -47,7 +47,7 @@ export function mergeSelectionLineRects(
     .sort((left, right) => left.top - right.top || left.left - right.left);
   const lines: SelectionLine[] = [];
   for (const rect of rects) {
-    const line = lines.at(-1);
+    const line = lines.length > 0 ? lines[lines.length - 1] : undefined;
     const center = rect.top + rect.height / 2;
     const lineCenter = line ? (line.top + line.bottom) / 2 : 0;
     const lineHeight = line ? line.bottom - line.top : 0;
@@ -75,7 +75,7 @@ export function mergeSelectionLineRects(
     const lineHeight = line.bottom - line.top;
     const segments: SelectionRectBounds[] = [];
     for (const rect of line.rects.sort((left, right) => left.left - right.left)) {
-      const previous = segments.at(-1);
+      const previous = segments.length > 0 ? segments[segments.length - 1] : undefined;
       const joinGap = Math.max(8, lineHeight * 0.8);
       if (previous && rect.left <= previous.right + joinGap) {
         previous.right = Math.max(previous.right, rect.right);

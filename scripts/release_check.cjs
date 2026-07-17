@@ -82,8 +82,8 @@ const releaseAssets = ['main.js', 'manifest.json', 'styles.css'];
 requireReleaseAssets(releaseAssets);
 expectCiNonEmptyAssetChecks('.github/workflows/ci.yml', releaseAssets);
 expectWorkflowAssetBlock('.github/workflows/ci.yml', 'path', releaseAssets);
-expectWorkflowAssetBlock('.github/workflows/release.yml', 'subject-path', releaseAssets);
 expectWorkflowAssetBlock('.github/workflows/release.yml', 'files', releaseAssets);
+rejectIncompatibleReleaseAttestations('.github/workflows/release.yml');
 scanTrackedFilesForSecrets();
 
 function listTsFiles(dir) {
@@ -210,6 +210,20 @@ function expectWorkflowAssetBlock(file, key, expected) {
     const actual = block.filter(line => line && !line.startsWith('#'));
     if (actual.length !== expected.length || actual.some((line, index) => line !== expected[index])) {
       fail(`${file} ${key}: | must contain only ${expected.join(', ')}.`);
+    }
+  }
+}
+
+function rejectIncompatibleReleaseAttestations(file) {
+  const text = fs.readFileSync(file, 'utf8');
+  for (const pattern of [
+    /actions\/attest@/,
+    /^\s*subject-path:\s*/m,
+    /^\s*attestations:\s*write\s*$/m,
+    /^\s*artifact-metadata:\s*write\s*$/m,
+  ]) {
+    if (pattern.test(text)) {
+      fail(`${file} must not create multi-asset attestations; the plugin directory verifier rejects their shared bundle.`);
     }
   }
 }
