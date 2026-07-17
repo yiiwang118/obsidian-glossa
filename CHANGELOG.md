@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file. Format adhe
 
 ## [Unreleased]
 
+## [0.6.10] — 2026-07-17
+
+### Added
+- Added standalone selection translation in a focused floating panel with streaming output, automatic Chinese/English target selection, and a command that can be assigned any app hotkey.
+- Added a dedicated translation endpoint and model choice while retaining the option to follow the active sidebar model.
+
+### Changed
+- Replaced the chat-history `/translate` shortcut path with an independent translation surface that disables reasoning for lower first-token latency.
+- Improved recognition of English paper titles, lowercase technical terms, mixed-language snippets, and ambiguous Latin acronyms before choosing the target language.
+- Normalized visual PDF line wraps while preserving semantic paragraphs, Markdown structure, formulas, code, URLs, citations, and proper nouns.
+
+### Checks
+- Kept PDF translation markers, saved translations, and translation-history persistence out of the release while their interaction design remains under development on a separate branch.
+- Passed the official `eslint-plugin-obsidianmd` recommended rules with zero warnings alongside strict TypeScript lint, automated tests, dependency audit, production build, source/CSS review scan, secret scan, and release metadata validation.
+
 ## [0.6.9] — 2026-07-13
 
 ### Added
