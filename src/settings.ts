@@ -818,6 +818,84 @@ export class GlossaSettingTab extends PluginSettingTab {
       .addToggle(t => t
         .setValue(this.plugin.settings.autoAttachSelection)
         .onChange(async v => { this.plugin.settings.autoAttachSelection = v; await this.plugin.saveSettings(); }));
+    new Setting(containerEl)
+      .setName(bi('Quick translate selection', '快速翻译选区'))
+      .setDesc(bi(
+        'Double-press Enter to translate the current selection in a floating panel. Assign any additional shortcut to “Translate selection in popup” in the app hotkey settings.',
+        '连续按两次 Enter，在选区旁的浮层中翻译。还可以在软件快捷键设置中为“Translate selection in popup”绑定任意快捷键。',
+      ))
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.selectionTranslateDoubleEnterEnabled)
+        .onChange(async value => {
+          this.plugin.settings.selectionTranslateDoubleEnterEnabled = value;
+          await this.plugin.saveSettings();
+        }));
+    const translationEndpointSetting = new Setting(containerEl)
+      .setName(bi('Translation endpoint', '翻译端点'))
+      .setDesc(bi(
+        'Use the sidebar endpoint or choose a dedicated provider configuration for quick translation.',
+        '跟随侧栏端点，或为快速翻译单独选择一个服务端点。',
+      ));
+    createAlignedSelect(
+      translationEndpointSetting.controlEl,
+      this.selectPopup,
+      [
+        { value: '', label: bi('Follow sidebar endpoint', '跟随侧栏端点') },
+        ...this.plugin.settings.endpoints.map(endpoint => ({
+          value: endpoint.id,
+          label: endpoint.label,
+          hint: endpoint.model || endpoint.kind,
+        })),
+      ],
+      this.plugin.settings.translationEndpointId ?? '',
+      async value => {
+        this.plugin.settings.translationEndpointId = value || null;
+        this.plugin.settings.translationModel = '';
+        await this.plugin.saveSettings();
+        this.display();
+      },
+      bi('Translation endpoint', '翻译端点'),
+    );
+    const translationEndpoint = this.plugin.settings.endpoints.find(
+      endpoint => endpoint.id === this.plugin.settings.translationEndpointId,
+    ) ?? this.plugin.settings.endpoints.find(
+      endpoint => endpoint.id === this.plugin.settings.activeEndpointId,
+    ) ?? null;
+    const translationModels = translationEndpoint
+      ? normalizeModelList([
+        this.plugin.settings.translationModel,
+        translationEndpoint.model ?? '',
+        ...(translationEndpoint.availableModels ?? []),
+      ])
+      : [];
+    const translationModelSetting = new Setting(containerEl)
+      .setName(bi('Translation model', '翻译模型'))
+      .setDesc(bi(
+        'Choose any detected model on this endpoint. Quick translation disables reasoning for lower latency.',
+        '选择该端点已探测到的任意模型。快速翻译会关闭推理以降低延迟。',
+      ));
+    createAlignedSelect(
+      translationModelSetting.controlEl,
+      this.selectPopup,
+      [
+        {
+          value: '',
+          label: bi('Use endpoint default', '使用端点默认模型'),
+          hint: translationEndpoint?.model || undefined,
+        },
+        ...translationModels.map(model => ({ value: model, label: model })),
+      ],
+      this.plugin.settings.translationEndpointId ? this.plugin.settings.translationModel : '',
+      async value => {
+        this.plugin.settings.translationModel = value;
+        if (value && translationEndpoint) {
+          this.plugin.settings.translationEndpointId = translationEndpoint.id;
+        }
+        await this.plugin.saveSettings();
+        this.display();
+      },
+      bi('Translation model', '翻译模型'),
+    );
     new Setting(containerEl).setName(bi('Context warning threshold', '上下文警告阈值'))
       .setDesc(bi('Highlight the token counter after this estimated context size is reached.', '估算上下文达到该 token 数后，高亮顶部计数器。'))
       .addText(t => t.setValue(String(this.plugin.settings.warnTokenThreshold))

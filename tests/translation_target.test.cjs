@@ -28,6 +28,30 @@ exports.run = async function(t, loadModule) {
     'English prose in Chinese UI translates to Chinese',
   );
 
+  const englishPaperTitle = 'CURE: Critique-Driven Unified Reinforcement Learning for Test-Time Self-Improvement';
+  t.eq(
+    mod.inferSelectionLanguage(englishPaperTitle),
+    'en',
+    'Title Case paper titles are recognized as English',
+  );
+  t.eq(
+    mod.inferSelectionTranslationTarget(englishPaperTitle, 'en'),
+    'Chinese',
+    'English paper titles do not fall back to an English UI target',
+  );
+  t.eq(mod.inferSelectionLanguage('CURE'), 'unknown', 'isolated acronyms remain ambiguous');
+  t.eq(mod.inferSelectionLanguage('softmax-attention'), 'en', 'single lowercase technical terms are English');
+  t.eq(
+    mod.inferSelectionTranslationTarget('softmax-attention', 'en'),
+    'Chinese',
+    'Latin technical terms translate to Chinese even when the UI is English',
+  );
+  t.eq(
+    mod.inferSelectionTranslationTarget('CURE', 'en'),
+    'Chinese',
+    'ambiguous Latin acronyms never fall back to an English-to-English target',
+  );
+
   const chineseText = '这是一段中文说明，其中夹杂 Mixtral、MoE 和 HuggingFace 这样的技术名词。';
   t.eq(
     mod.inferSelectionTranslationTarget(chineseText, 'zh'),

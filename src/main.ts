@@ -16,6 +16,7 @@ import { compareSemver, normalizeVersion } from './utils/version';
 import { clearMediaCaches } from './utils/media_cache';
 import { clearRenderedPdfPageCache } from './utils/pdf_render';
 import { chatMessagesForStorage, purgeTransientChatPayloads } from './utils/chat_storage';
+import { SelectionTranslationController } from './features/selection_translation';
 
 export default class GlossaPlugin extends Plugin {
   settings: GlossaSettings;
@@ -34,6 +35,7 @@ export default class GlossaPlugin extends Plugin {
   mcp: AnyValue;
   updateInfo: UpdateInfo | null = null;
   private updateCheckInFlight: Promise<UpdateInfo | null> | null = null;
+  private selectionTranslation: SelectionTranslationController | null = null;
 
   async onload() {
     const raw = (await this.loadData()) ?? {};
@@ -119,6 +121,17 @@ export default class GlossaPlugin extends Plugin {
     addIcon('glossa-ribbon', GLOSSA_RIBBON_SVG);
 
     this.registerView(VIEW_TYPE_GLOSSA, (leaf) => new GlossaView(leaf, this));
+    this.selectionTranslation = new SelectionTranslationController(this);
+    activeDocument.addEventListener('keydown', this.selectionTranslation.handleKeyDown, true);
+    this.register(() => {
+      if (!this.selectionTranslation) return;
+      activeDocument.removeEventListener('keydown', this.selectionTranslation.handleKeyDown, true);
+      this.selectionTranslation.destroy();
+      this.selectionTranslation = null;
+    });
+    this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
+      this.selectionTranslation?.close();
+    }));
     const ribbonIconEl = this.addRibbonIcon('glossa-ribbon', 'Open ' + 'Glossa', () => this.activateView());
     ribbonIconEl.addClass('glossa-ribbon-icon');
 
@@ -131,6 +144,11 @@ export default class GlossaPlugin extends Plugin {
       callback: () => this.rebuildEmbeddings() });
     this.addCommand({ id: 'check-for-updates', name: 'Check for updates',
       callback: () => this.checkForUpdates({ force: true, notify: true }) });
+    this.addCommand({
+      id: 'translate-selection-popup',
+      name: 'Translate selection in popup',
+      callback: () => { void this.selectionTranslation?.translateCurrentSelection(); },
+    });
 
     for (const cmd of BUILTIN_SLASH_COMMANDS) {
       this.addCommand({

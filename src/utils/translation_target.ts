@@ -34,6 +34,11 @@ export function inferSelectionTranslationTarget(
   const source = inferSelectionLanguage(text);
   if (source === 'zh') return 'English';
   if (source === 'en') return 'Chinese';
+  const normalized = normalizeLanguageSample(text);
+  const cjk = countMatches(normalized, /[\u3400-\u9fff]/g);
+  const latin = countMatches(normalized, /[A-Za-z]/g);
+  if (latin > 0 && cjk === 0) return 'Chinese';
+  if (cjk > 0 && latin === 0) return 'English';
   return uiLanguage === 'zh' ? 'Chinese' : 'English';
 }
 
@@ -47,8 +52,10 @@ export function inferSelectionLanguage(text: string): SourceLanguage {
   let englishProseWords = 0;
   let englishProseChars = 0;
   let englishModelLikeWords = 0;
+  let latinLetterChars = 0;
 
   for (const word of latinWords) {
+    latinLetterChars += word.replace(/[^A-Za-z]/g, '').length;
     const lower = word.toLowerCase();
     const hasInternalCap = /[a-z][A-Z]|[A-Z]{2,}/.test(word);
     const isModelLike = hasInternalCap || word.length <= 2;
@@ -70,7 +77,9 @@ export function inferSelectionLanguage(text: string): SourceLanguage {
   const languageChars = cjk + englishProseChars;
 
   if (cjk >= 4 && englishProseChars === 0) return 'zh';
-  if (cjk === 0 && (englishStopWords >= 2 || englishProseWords >= 4)) return 'en';
+  const looksLikeEnglishTitle = latinWords.length >= 2 && latinLetterChars >= 8;
+  const looksLikeEnglishTerm = latinWords.length === 1 && /^[a-z][a-z'-]{2,}$/.test(latinWords[0]);
+  if (cjk === 0 && (englishStopWords >= 2 || englishProseWords >= 4 || looksLikeEnglishTitle || looksLikeEnglishTerm)) return 'en';
   if (languageChars < 4) return 'unknown';
 
   // Markdown snippets often contain English model names and URLs around Chinese

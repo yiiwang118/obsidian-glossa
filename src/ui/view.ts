@@ -9,6 +9,7 @@ import {
   resolveDroppedFile,
   makeCurrentFileItem,
   listFilesForPicker,
+  type SelectionInfo,
 } from '../context/sources';
 import { BUILTIN_SLASH_COMMANDS, applySlashTemplate } from '../commands/slash';
 import { Popup, type PopupItem } from './popup';
@@ -40,7 +41,6 @@ import {
   buildResponseLanguageHint,
   inferResponseLanguage,
   inferSelectionLanguage,
-  inferSelectionTranslationTarget,
   sourceLanguageLabel,
 } from '../utils/translation_target';
 import { buildTaskContinuityHint } from '../utils/task_continuity';
@@ -81,7 +81,6 @@ function normalizeModelList(models: string[]): string[] {
 
 const HIDDEN_TOOL_EVENTS = new Set(['attempt_completion']);
 const INPUT_TRIGGER_LOOKBACK = 96;
-const SELECTION_TRANSLATE_ENTER_WINDOW_MS = 520;
 
 function shouldRenderToolEvent(ev: ToolEvent): boolean {
   return !HIDDEN_TOOL_EVENTS.has(ev.name);
@@ -189,9 +188,7 @@ export class GlossaView extends ItemView {
   /** Wall-clock when the current streaming message started (for the
    *  .nc-msg-elapsed counter on the assistant role label). Reset per segment. */
   private streamingStartedAt = 0;
-  private currentSelection: { text: string; source: string; file?: TFile } | null = null;
-  private selectionTranslateEnterAt = 0;
-  private selectionTranslateEnterSig = '';
+  private currentSelection: SelectionInfo | null = null;
   /** Path of an auto-attached "current file" pill the user has explicitly
    *  dismissed via its × button. While this matches the active file's path,
    *  refreshAutoContext skips re-attaching it — otherwise active-leaf-change
@@ -254,7 +251,6 @@ export class GlossaView extends ItemView {
     this.registerEvent(this.app.workspace.on('file-open', () => { void this.refreshAutoContext(); }));
     this.registerEvent(this.app.workspace.on('editor-selection-change' as AnyValue, () => this.refreshSelection()));
     activeDocument.addEventListener('selectionchange', this.onDomSelectionChange);
-    activeDocument.addEventListener('keydown', this.onGlobalSelectionTranslateEnter, true);
 
     // Re-render any header / input chrome whose strings come from `t()` when
     // the user toggles language in settings — no plugin reload required.
@@ -294,74 +290,6 @@ export class GlossaView extends ItemView {
     this.refreshSelection();
   }, 120);
 
-  private onGlobalSelectionTranslateEnter = (e: KeyboardEvent) => {
-    if (e.key !== 'Enter' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.isComposing || (e as AnyValue).keyCode === 229) return;
-    if (this.streaming || this.popup.isOpen() || this.histPopEl) return;
-
-    const sel = this.currentSelection;
-    const selectedText = sel?.text.trim() ?? '';
-    if (!sel || !selectedText) {
-      this.selectionTranslateEnterAt = 0;
-      this.selectionTranslateEnterSig = '';
-      return;
-    }
-
-    const active = activeDocument.activeElement as HTMLElement | null;
-    const inComposer = active === this.inputEl;
-    if (this.inputEl.value.trim()) return;
-    if (!inComposer && this.shouldIgnoreSelectionTranslateKeyTarget(active)) return;
-
-    const sig = `${sel.source}\u0000${sel.file?.path ?? ''}\u0000${selectedText}`;
-    const now = Date.now();
-    const isSecondEnter = this.selectionTranslateEnterSig === sig
-      && now - this.selectionTranslateEnterAt <= SELECTION_TRANSLATE_ENTER_WINDOW_MS;
-
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (!isSecondEnter) {
-      this.selectionTranslateEnterAt = now;
-      this.selectionTranslateEnterSig = sig;
-      return;
-    }
-
-    this.selectionTranslateEnterAt = 0;
-    this.selectionTranslateEnterSig = '';
-    void this.submitSelectionTranslation(sel);
-  };
-
-  private shouldIgnoreSelectionTranslateKeyTarget(active: HTMLElement | null): boolean {
-    if (!active) return false;
-    if (activeDocument.querySelector('.modal-container')) return true;
-    const tag = active.tagName.toUpperCase();
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') return true;
-    if (active.closest('.menu, .suggestion-container, .nc-history-popover, .nc-popup')) return true;
-    if (this.rootEl?.contains(active)) {
-      return !!active.closest('button, a, input, textarea, select, [role="button"]');
-    }
-    return false;
-  }
-
-  private async submitSelectionTranslation(sel: { text: string; source: string; file?: TFile }) {
-    if (this.streaming || !this.inputEl) return;
-    if (this.inputEl.value.trim()) {
-      quickNotice(bi('Clear the input before quick-translating a selection.', '清空输入框后再快速翻译选区。'));
-      return;
-    }
-    this.currentSelection = sel;
-    const target = this.translationTargetForSelection(sel.text);
-    this.inputEl.value = `/translate ${target}`;
-    this.inputEl.selectionStart = this.inputEl.selectionEnd = this.inputEl.value.length;
-    this.recomputeInputHeight();
-    this.inputEl.focus();
-    await this.submit();
-  }
-
-  private translationTargetForSelection(text: string): 'Chinese' | 'English' {
-    return inferSelectionTranslationTarget(text, currentLanguage());
-  }
-
   private onMessagesScroll = () => {
     this.stickToBottom = this.isMessagesNearBottom();
     if (this.railScrollRaf) return;
@@ -390,7 +318,6 @@ export class GlossaView extends ItemView {
 
   async onClose() {
     activeDocument.removeEventListener('selectionchange', this.onDomSelectionChange);
-    activeDocument.removeEventListener('keydown', this.onGlobalSelectionTranslateEnter, true);
     this.popup.destroy();
     this.langUnsub?.();
     this.langUnsub = null;
@@ -793,6 +720,10 @@ export class GlossaView extends ItemView {
         this.updateTokenBadge();
       }
     }
+  }
+
+  getSelectionForTranslation(): SelectionInfo | null {
+    return this.currentSelection ? { ...this.currentSelection } : null;
   }
 
   private renderSelectionPreview() {

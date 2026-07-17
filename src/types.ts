@@ -361,6 +361,12 @@ export interface GlossaSettings {
   citationHoverDelayMs: number;
   /** When true, citation previews only trigger while Alt/Option is held. */
   citationHoverRequireModifier: boolean;
+  /** Keep the built-in double-Enter trigger for selection translation. */
+  selectionTranslateDoubleEnterEnabled: boolean;
+  /** Dedicated endpoint used by quick translation; null follows the active chat endpoint. */
+  translationEndpointId: string | null;
+  /** Model override within the dedicated translation endpoint; empty follows the endpoint model. */
+  translationModel: string;
 
   // updates
   updateCheckEnabled: boolean;
@@ -467,6 +473,9 @@ export const DEFAULT_SETTINGS: GlossaSettings = {
   citationHoverEnabled: false,
   citationHoverDelayMs: 700,
   citationHoverRequireModifier: false,
+  selectionTranslateDoubleEnterEnabled: true,
+  translationEndpointId: null,
+  translationModel: '',
   updateCheckEnabled: true,
   updateLastCheckedAt: 0,
   updateDismissedVersion: '',
