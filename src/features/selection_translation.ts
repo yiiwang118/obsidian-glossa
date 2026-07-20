@@ -50,6 +50,31 @@ interface TranslationPopupState {
   selectionRects: RectLike[];
   endpointId: string;
   modelId: string;
+  manualPosition: { left: number; top: number } | null;
+}
+
+interface FloatingPanelSize {
+  width: number;
+  height: number;
+}
+
+export function clampFloatingPanelPosition(
+  left: number,
+  top: number,
+  panel: FloatingPanelSize,
+  viewport: FloatingPanelSize,
+): { left: number; top: number } {
+  const edge = 12;
+  return {
+    left: Math.round(Math.min(
+      Math.max(edge, viewport.width - panel.width - edge),
+      Math.max(edge, left),
+    )),
+    top: Math.round(Math.min(
+      Math.max(edge, viewport.height - panel.height - edge),
+      Math.max(edge, top),
+    )),
+  };
 }
 
 export function selectionTranslationPosition(
@@ -275,7 +300,6 @@ export class SelectionTranslationController {
   private pendingPaintText = '';
   private resizeObserver: ResizeObserver | null = null;
   private cleanupPopupListeners: (() => void) | null = null;
-  private selectionHighlights: HTMLElement[] = [];
 
   constructor(private readonly host: SelectionTranslationHost) {}
 
@@ -330,8 +354,6 @@ export class SelectionTranslationController {
     this.cleanupPopupListeners = null;
     this.popup?.root.remove();
     this.popup = null;
-    this.selectionHighlights.forEach(highlight => highlight.remove());
-    this.selectionHighlights = [];
   }
 
   destroy(): void {
@@ -368,39 +390,8 @@ export class SelectionTranslationController {
     }
     const target = inferSelectionTranslationTarget(text, currentLanguage());
     const geometry = captureSelectionGeometry();
-    if (selection.source === 'pdf' && geometry) {
-      (activeDocument.getSelection?.() ?? window.getSelection())?.removeAllRanges();
-    }
     this.openPopup(selection, target, geometry?.anchor ?? fallbackAnchor(), geometry?.rects ?? []);
-    this.showSelectionHighlights(geometry?.rects ?? []);
     await this.runTranslation(selection, target);
-  }
-
-  private showSelectionHighlights(rects: readonly RectLike[]): void {
-    this.selectionHighlights.forEach(highlight => highlight.remove());
-    this.selectionHighlights = rects.map((rect) => {
-      const highlight = el('div', {
-        className: 'nc-selection-translation-highlight',
-        parent: activeDocument.body,
-        attrs: { 'aria-hidden': 'true' },
-      });
-      setStyle(highlight, {
-        left: `${rect.left}px`,
-        top: `${rect.top}px`,
-        width: `${rect.width}px`,
-        height: `${rect.height}px`,
-      });
-      return highlight;
-    });
-  }
-
-  private constrainPopupHeight(root: HTMLElement, anchor: RectLike): void {
-    root.style.removeProperty('max-height');
-    if (anchor.height <= 80) return;
-    const availableHeight = Math.max(anchor.top - 22, activeWindow.innerHeight - anchor.bottom - 22);
-    if (availableHeight >= 220 && availableHeight < 440) {
-      setStyle(root, { maxHeight: `${Math.floor(availableHeight)}px` });
-    }
   }
 
   private openPopup(
@@ -418,7 +409,6 @@ export class SelectionTranslationController {
       parent: activeDocument.body,
       attrs: { role: 'dialog', 'aria-label': bi('Selection translation', '选区翻译') },
     });
-    this.constrainPopupHeight(root, anchor);
     const header = el('div', { className: 'nc-selection-translation-head', parent: root });
     const brand = el('span', { className: 'nc-selection-translation-brand', parent: header });
     setTrustedSvg(brand, ICON.bot);
@@ -479,7 +469,20 @@ export class SelectionTranslationController {
       selectionRects,
       endpointId,
       modelId,
+      manualPosition: null,
     };
+    this.installPopupDrag(header);
+    const resizeHandle = el('div', {
+      className: 'nc-selection-translation-resize',
+      parent: root,
+      attrs: {
+        role: 'separator',
+        tabindex: '0',
+        'aria-label': bi('Resize translation window', '调整翻译窗口大小'),
+      },
+    });
+    resizeHandle.title = bi('Resize translation window', '调整翻译窗口大小');
+    this.installPopupResize(resizeHandle);
     this.installPopupListeners();
     this.resizeObserver = new ResizeObserver(() => this.positionPopup());
     this.resizeObserver.observe(root);
@@ -635,13 +638,134 @@ export class SelectionTranslationController {
     };
   }
 
+  private installPopupDrag(header: HTMLElement): void {
+    header.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      const popup = this.popup;
+      if (!popup) return;
+      const target = event.target as Node | null;
+      if (
+        (target?.instanceOf(HTMLElement) && target.closest('button, input, select, a'))
+        || target?.parentElement?.closest('button, input, select, a')
+      ) return;
+
+      event.preventDefault();
+      const rect = popup.root.getBoundingClientRect();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startLeft = rect.left;
+      const startTop = rect.top;
+      popup.manualPosition = { left: startLeft, top: startTop };
+      popup.root.addClass('is-dragging');
+      header.setPointerCapture(event.pointerId);
+
+      const move = (moveEvent: PointerEvent) => {
+        if (this.popup !== popup) return;
+        const position = clampFloatingPanelPosition(
+          startLeft + moveEvent.clientX - startX,
+          startTop + moveEvent.clientY - startY,
+          { width: popup.root.offsetWidth, height: popup.root.offsetHeight },
+          { width: activeWindow.innerWidth, height: activeWindow.innerHeight },
+        );
+        popup.manualPosition = position;
+        popup.root.dataset.placement = 'manual';
+        setStyle(popup.root, { left: `${position.left}px`, top: `${position.top}px` });
+      };
+      const finish = (finishEvent: PointerEvent) => {
+        popup.root.removeClass('is-dragging');
+        if (header.hasPointerCapture(finishEvent.pointerId)) {
+          header.releasePointerCapture(finishEvent.pointerId);
+        }
+        header.removeEventListener('pointermove', move);
+        header.removeEventListener('pointerup', finish);
+        header.removeEventListener('pointercancel', finish);
+      };
+      header.addEventListener('pointermove', move);
+      header.addEventListener('pointerup', finish);
+      header.addEventListener('pointercancel', finish);
+    });
+  }
+
+  private installPopupResize(handle: HTMLElement): void {
+    const resizeBy = (deltaWidth: number, deltaHeight: number) => {
+      const popup = this.popup;
+      if (!popup) return;
+      const rect = popup.root.getBoundingClientRect();
+      popup.manualPosition = { left: rect.left, top: rect.top };
+      const minWidth = Math.min(360, activeWindow.innerWidth - 24);
+      const minHeight = Math.min(280, activeWindow.innerHeight - 24);
+      const maxWidth = Math.max(minWidth, activeWindow.innerWidth - rect.left - 12);
+      const maxHeight = Math.max(minHeight, activeWindow.innerHeight - rect.top - 12);
+      const width = Math.round(Math.min(maxWidth, Math.max(minWidth, rect.width + deltaWidth)));
+      const height = Math.round(Math.min(maxHeight, Math.max(minHeight, rect.height + deltaHeight)));
+      popup.root.addClass('is-user-sized');
+      setStyle(popup.root, { width: `${width}px`, height: `${height}px` });
+      this.positionPopup();
+    };
+
+    handle.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      const popup = this.popup;
+      if (!popup) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = popup.root.getBoundingClientRect();
+      let previousX = event.clientX;
+      let previousY = event.clientY;
+      popup.manualPosition = { left: rect.left, top: rect.top };
+      popup.root.addClass('is-resizing');
+      handle.setPointerCapture(event.pointerId);
+
+      const move = (moveEvent: PointerEvent) => {
+        if (this.popup !== popup) return;
+        resizeBy(moveEvent.clientX - previousX, moveEvent.clientY - previousY);
+        previousX = moveEvent.clientX;
+        previousY = moveEvent.clientY;
+      };
+      const finish = (finishEvent: PointerEvent) => {
+        popup.root.removeClass('is-resizing');
+        if (handle.hasPointerCapture(finishEvent.pointerId)) {
+          handle.releasePointerCapture(finishEvent.pointerId);
+        }
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', finish);
+        handle.removeEventListener('pointercancel', finish);
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', finish);
+      handle.addEventListener('pointercancel', finish);
+    });
+    handle.addEventListener('keydown', (event) => {
+      const step = event.shiftKey ? 40 : 16;
+      if (event.key === 'ArrowLeft') resizeBy(-step, 0);
+      else if (event.key === 'ArrowRight') resizeBy(step, 0);
+      else if (event.key === 'ArrowUp') resizeBy(0, -step);
+      else if (event.key === 'ArrowDown') resizeBy(0, step);
+      else return;
+      event.preventDefault();
+      event.stopPropagation();
+    });
+  }
+
   private positionPopup(): void {
     const popup = this.popup;
     if (!popup?.root.isConnected) return;
     const rect = popup.root.getBoundingClientRect();
+    if (popup.manualPosition) {
+      const position = clampFloatingPanelPosition(
+        popup.manualPosition.left,
+        popup.manualPosition.top,
+        { width: rect.width || 560, height: rect.height || 300 },
+        { width: activeWindow.innerWidth, height: activeWindow.innerHeight },
+      );
+      popup.manualPosition = position;
+      popup.root.dataset.placement = 'manual';
+      setStyle(popup.root, { left: `${position.left}px`, top: `${position.top}px` });
+      return;
+    }
     const position = selectionTranslationPosition(
       popup.anchor,
-      { width: rect.width || 420, height: rect.height || 180 },
+      { width: rect.width || 560, height: rect.height || 300 },
       { width: activeWindow.innerWidth, height: activeWindow.innerHeight },
       popup.selectionRects,
     );
@@ -772,11 +896,13 @@ export class SelectionTranslationController {
     if (!popup) return;
     const displayText = normalizeTranslationOutput(text, popup.target);
     if (!displayText) return;
+    const followOutput = popup.body.scrollHeight - popup.body.scrollTop - popup.body.clientHeight < 32;
     if (this.paintFrame) window.cancelAnimationFrame(this.paintFrame);
     this.paintFrame = 0;
     this.pendingPaintText = '';
     popup.body.textContent = displayText;
     popup.body.classList.add('has-translation');
+    if (followOutput) popup.body.scrollTop = popup.body.scrollHeight;
     popup.root.classList.remove('is-loading');
     popup.root.classList.add('is-streaming');
     popup.status.textContent = bi('Receiving translation', '正在接收翻译');

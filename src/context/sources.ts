@@ -7,6 +7,7 @@ import { extractPdfTextFromArrayBuffer, formatPdfDiagnosticMarkdown, type PdfRea
 import { bytesToBase64 } from '../utils/image';
 import { extractVaultPdfCached, vaultImageDataUriCached } from '../utils/media_cache';
 import { inferSelectionLanguage } from '../utils/translation_target';
+import { refinedPdfDomSelectionText } from '../utils/pdf_selection';
 import type { ContextItem } from '../types';
 
 /* ============================================================
@@ -104,7 +105,12 @@ export function getCurrentSelection(app: App): SelectionInfo | null {
     if (glossa) return { text: rawDomText, source: glossa.source };
 
     const fileCtx = selectionFileContext(app, el);
-    if (fileCtx) return { text: rawDomText, source: fileCtx.source, file: fileCtx.file };
+    if (fileCtx) {
+      const text = fileCtx.source === 'pdf'
+        ? refinedPdfDomSelectionText(winSel, rawDomText)
+        : rawDomText;
+      return { text, source: fileCtx.source, file: fileCtx.file };
+    }
 
     return null;
   }

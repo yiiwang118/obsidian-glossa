@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
-import type { SettingDefinitionItem } from 'obsidian';
+import type { ButtonComponent, SettingDefinitionItem } from 'obsidian';
 import type GlossaPlugin from './main';
 import type { Endpoint, CustomPrompt, SlashCommand } from './types';
 import { reasoningOptionsForEndpoint } from './types';
@@ -23,6 +23,19 @@ import {
 const HTTP_PROXY_PLACEHOLDER = ['http', '://127.0.0.1:7890'].join('');
 const HTTPS_API_PLACEHOLDER = ['https', '://api.example.com/v1'].join('');
 const API_KEY_PLACEHOLDER = 'sk-' + '...';
+
+interface DestructiveButtonCompatibility {
+  setDestructive?: () => ButtonComponent;
+  setWarning?: () => ButtonComponent;
+}
+
+function setDestructiveButton(button: ButtonComponent): ButtonComponent {
+  const compatible = button as unknown as DestructiveButtonCompatibility;
+  if (typeof compatible.setDestructive === 'function') compatible.setDestructive();
+  else if (typeof compatible.setWarning === 'function') compatible.setWarning();
+  else button.buttonEl.addClass('mod-warning');
+  return button;
+}
 
 function normalizeModelList(models: string[]): string[] {
   return [...new Set(models.map(m => String(m).trim()).filter(Boolean))]
@@ -293,6 +306,10 @@ export class GlossaSettingTab extends PluginSettingTab {
     }];
   }
 
+  display(): void {
+    this.renderSettings(this.containerEl);
+  }
+
   private renderSettings(containerEl: HTMLElement): void {
     this.selectPopup.hide();
     const generation = ++this.renderGeneration;
@@ -362,7 +379,9 @@ export class GlossaSettingTab extends PluginSettingTab {
   }
 
   private refresh(): void {
-    this.update();
+    const compatible = this as unknown as { update?: () => void };
+    if (typeof compatible.update === 'function') compatible.update();
+    else this.renderSettings(this.containerEl);
   }
 
   hide(): void {
@@ -1061,7 +1080,7 @@ export class GlossaSettingTab extends PluginSettingTab {
           this.refresh();
         };
       }
-      new Setting(ruleGroup).addButton(b => b.setButtonText(bi('Clear all rules', '清除全部规则')).setDestructive().onClick(async () => {
+      new Setting(ruleGroup).addButton(b => setDestructiveButton(b.setButtonText(bi('Clear all rules', '清除全部规则'))).onClick(async () => {
         this.plugin.settings.permissionRules = [];
         await this.plugin.saveSettings();
         this.refresh();
@@ -1163,7 +1182,7 @@ export class GlossaSettingTab extends PluginSettingTab {
     );
     new Setting(maintenance).setName(bi('Purge checkpoints', '清空检查点'))
       .setDesc(bi('Delete every saved pre-edit snapshot. Existing notes are not changed.', '删除全部编辑前快照，不会修改现有笔记。'))
-      .addButton(b => b.setButtonText(bi('Purge', '清空')).setDestructive().onClick(async () => {
+      .addButton(b => setDestructiveButton(b.setButtonText(bi('Purge', '清空'))).onClick(async () => {
         b.setDisabled(true);
         const { confirmModal } = await import('./ui/confirm_modal');
         const ok = await confirmModal(this.app, {
@@ -1182,7 +1201,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       }));
     new Setting(maintenance).setName(bi('Purge embedding index', '清空嵌入索引'))
       .setDesc(bi('Delete the local semantic-search index. Source notes remain untouched.', '删除本地语义搜索索引，不影响源笔记。'))
-      .addButton(b => b.setButtonText(bi('Purge', '清空')).setDestructive().onClick(async () => {
+      .addButton(b => setDestructiveButton(b.setButtonText(bi('Purge', '清空'))).onClick(async () => {
         b.setDisabled(true);
         const { confirmModal } = await import('./ui/confirm_modal');
         const ok = await confirmModal(this.app, {
@@ -1521,9 +1540,8 @@ export class GlossaSettingTab extends PluginSettingTab {
              await this.plugin.saveSettings();
            });
         });
-      apiKeySetting.addButton(b => b
-        .setButtonText(bi('Clear', '清除'))
-        .setDestructive()
+      apiKeySetting.addButton(b => setDestructiveButton(b
+        .setButtonText(bi('Clear', '清除')))
         .setDisabled(!ep.apiKey)
         .onClick(async () => {
           const { confirmModal } = await import('./ui/confirm_modal');

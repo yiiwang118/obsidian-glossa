@@ -1,7 +1,14 @@
+const fs = require('fs');
 const path = require('path');
 
 exports.run = async function(t, loadModule) {
-  const mod = await loadModule(path.resolve(__dirname, '../src/features/selection_translation.ts'));
+  const sourcePath = path.resolve(__dirname, '../src/features/selection_translation.ts');
+  const mod = await loadModule(sourcePath);
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  t.ok(
+    !source.includes('removeAllRanges'),
+    'opening quick translation preserves the native PDF text selection',
+  );
 
   const below = mod.selectionTranslationPosition(
     { left: 200, top: 100, right: 320, bottom: 124, width: 120, height: 24 },
@@ -38,6 +45,17 @@ exports.run = async function(t, loadModule) {
   );
   t.eq(sparse.placement, 'below', 'popup placement scores actual selection lines instead of covering their bounding box');
   t.ok(sparse.left + 360 <= 700, 'popup stays clear of the visible selected line');
+
+  t.eq(
+    mod.clampFloatingPanelPosition(-120, 690, { width: 560, height: 300 }, { width: 1000, height: 700 }),
+    { left: 12, top: 388 },
+    'dragged translation windows stay fully inside the viewport',
+  );
+  t.eq(
+    mod.clampFloatingPanelPosition(420, 180, { width: 560, height: 300 }, { width: 1000, height: 700 }),
+    { left: 420, top: 180 },
+    'manual translation window positions remain stable when already visible',
+  );
 
   const prompt = mod.buildSelectionTranslationPrompt('<ignore> CURE $x^2$', 'Chinese');
   t.ok(prompt.includes('Return only the translated text'), 'translation prompt forbids explanatory chatter');

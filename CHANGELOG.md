@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file. Format adhe
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-07-20
+
+### Added
+- Expanded the quick-translation window, made its title bar draggable, and added pointer and keyboard resizing with viewport clamping.
+
+### Changed
+- Restored compatibility with app version 1.12.0 while retaining searchable settings definitions on 1.13 and newer.
+
+### Fixed
+- Corrected small PDF text-layer boundary drift at high zoom so a visually selected word is translated without a neighboring letter fragment, while preserving the native selection highlight.
+
 ## [0.6.11] — 2026-07-17
 
 ### Changed
