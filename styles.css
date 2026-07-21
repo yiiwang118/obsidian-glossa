@@ -884,6 +884,64 @@
 .nc-msg.user > .nc-selection-echo { background: transparent; border: 0; margin-top: 3px; padding: 0; }
 
 /* Quick translation stays outside chat history and follows the active selection. */
+.nc-selection-translation-action {
+  position: fixed;
+  z-index: calc(var(--layer-popover, 1000) + 1);
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 4px;
+  align-items: center;
+  justify-content: center;
+  color: #2776c7;
+  background: var(--background-primary);
+  border: 2px solid rgba(74, 118, 230, 0.62);
+  border-radius: 7px;
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.2), 0 2px 5px rgba(15, 23, 42, 0.14);
+  cursor: pointer;
+  animation: nc-selection-translation-action-in 120ms ease-out;
+}
+.nc-selection-translation-action:hover,
+.nc-selection-translation-action:focus-visible {
+  color: #185fa9;
+  background: rgba(74, 118, 230, 0.1);
+  border-color: rgba(74, 118, 230, 0.9);
+}
+.nc-selection-translation-action-mark {
+  display: inline-flex;
+  width: 27px;
+  height: 27px;
+  flex: 0 0 27px;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.nc-selection-translation-action-mark > svg {
+  width: 27px;
+  height: 27px;
+  min-width: 27px;
+  min-height: 27px;
+  max-width: 27px;
+  max-height: 27px;
+  flex: 0 0 27px;
+}
+.nc-selection-translation-action.is-auto-pending::after {
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  border: 2px solid transparent;
+  border-top-color: var(--interactive-accent);
+  border-radius: 50%;
+  animation: nc-spin 0.65s linear infinite;
+  content: '';
+  pointer-events: none;
+}
+@keyframes nc-selection-translation-action-in {
+  from { opacity: 0; transform: translateY(2px) scale(0.94); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 .nc-selection-translation-popover {
   position: fixed;
   z-index: var(--layer-popover, 1000);
@@ -979,6 +1037,60 @@
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
+  gap: 5px;
+}
+.nc-selection-translation-auto {
+  position: relative;
+  display: inline-flex;
+  min-height: 28px;
+  padding: 0 4px;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.nc-selection-translation-auto > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.nc-selection-translation-auto-track {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  flex: 0 0 28px;
+  background: var(--background-modifier-border-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  transition: background 120ms ease-out, border-color 120ms ease-out;
+}
+.nc-selection-translation-auto-track::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  background: var(--text-faint);
+  border-radius: 50%;
+  transition: left 120ms ease-out, background 120ms ease-out;
+  content: '';
+}
+.nc-selection-translation-auto > input:checked + .nc-selection-translation-auto-track {
+  background: rgba(74, 118, 230, 0.16);
+  border-color: var(--interactive-accent);
+}
+.nc-selection-translation-auto > input:checked + .nc-selection-translation-auto-track::after {
+  left: 14px;
+  background: var(--interactive-accent);
+}
+.nc-selection-translation-auto > input:focus-visible + .nc-selection-translation-auto-track {
+  outline: 2px solid var(--background-modifier-border-focus);
+  outline-offset: 2px;
 }
 .nc-selection-translation-close,
 .nc-selection-translation-popover .nc-selection-translation-tools > button {
@@ -1228,6 +1340,8 @@
   color: var(--text-normal);
 }
 @media (prefers-reduced-motion: reduce) {
+  .nc-selection-translation-action,
+  .nc-selection-translation-action.is-auto-pending::after,
   .nc-selection-translation-popover,
   .nc-selection-translation-spinner,
   .nc-selection-translation-popover.is-streaming .nc-selection-translation-body.has-translation::after,

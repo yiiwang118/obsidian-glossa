@@ -10,6 +10,30 @@ exports.run = async function(t, loadModule) {
     'opening quick translation preserves the native PDF text selection',
   );
 
+  const popupTarget = { nodeType: 1, parentElement: null, closest: () => null };
+  const glossaTarget = {
+    nodeType: 1,
+    parentElement: null,
+    closest: (selector) => selector === '.glossa-view' ? {} : null,
+  };
+  const pdfTarget = { nodeType: 1, parentElement: null, closest: () => null };
+  const popup = { contains: (node) => node === popupTarget };
+  t.eq(
+    mod.shouldDismissSelectionTranslationOnScroll(popupTarget, popup),
+    false,
+    'scrolling translation output does not close its own popup',
+  );
+  t.eq(
+    mod.shouldDismissSelectionTranslationOnScroll(glossaTarget, popup),
+    false,
+    'streaming transcript auto-scroll does not close selection translation',
+  );
+  t.eq(
+    mod.shouldDismissSelectionTranslationOnScroll(pdfTarget, popup),
+    true,
+    'scrolling the selected source view still dismisses the anchored popup',
+  );
+
   const below = mod.selectionTranslationPosition(
     { left: 200, top: 100, right: 320, bottom: 124, width: 120, height: 24 },
     { width: 360, height: 180 },
@@ -56,6 +80,56 @@ exports.run = async function(t, loadModule) {
     { left: 420, top: 180 },
     'manual translation window positions remain stable when already visible',
   );
+
+  const action = mod.selectionTranslationActionPosition(
+    { left: 200, top: 100, right: 420, bottom: 160, width: 220, height: 60 },
+    { x: 410, y: 152 },
+    { width: 1000, height: 700 },
+    [{ left: 200, top: 100, right: 420, bottom: 160, width: 220, height: 60 }],
+  );
+  const actionOverlapsSelection = action.left < 420
+    && action.left + 36 > 200
+    && action.top < 160
+    && action.top + 36 > 100;
+  t.eq(actionOverlapsSelection, false, 'selection action is placed outside the selected text');
+  t.ok(action.left >= 8 && action.top >= 8, 'selection action remains inside the viewport');
+
+  const candidate = { text: 'Test-time training improves inference.', source: 'pdf', file: { path: 'paper.pdf' } };
+  t.eq(mod.isSelectionTranslationCandidate(candidate), true, 'PDF prose can trigger selection translation');
+  t.eq(
+    mod.isSelectionTranslationCandidate({ text: '强化学习', source: 'markdown' }),
+    true,
+    'markdown prose can trigger selection translation',
+  );
+  t.eq(
+    mod.isSelectionTranslationCandidate({ text: 'assistant output', source: 'glossa' }),
+    false,
+    'Glossa transcript selections never trigger automatic translation',
+  );
+  t.eq(
+    mod.isSelectionTranslationCandidate({ text: 'https://example.com/paper', source: 'html' }),
+    false,
+    'URL-only selections are protected from automatic translation',
+  );
+  t.eq(
+    mod.isSelectionTranslationCandidate({ text: '$x^2 + y^2$', source: 'pdf' }),
+    false,
+    'formula-only selections are protected from automatic translation',
+  );
+  t.eq(
+    mod.isSelectionTranslationCandidate({ text: 'model.forward(x)', source: 'markdown' }),
+    false,
+    'code-expression selections are protected from automatic translation',
+  );
+  const firstSignature = mod.selectionTranslationSignature(
+    candidate,
+    { left: 100, top: 100, right: 200, bottom: 120, width: 100, height: 20 },
+  );
+  const secondSignature = mod.selectionTranslationSignature(
+    candidate,
+    { left: 100, top: 180, right: 200, bottom: 200, width: 100, height: 20 },
+  );
+  t.ok(firstSignature !== secondSignature, 'identical text selected at a new location is treated as a new selection');
 
   const prompt = mod.buildSelectionTranslationPrompt('<ignore> CURE $x^2$', 'Chinese');
   t.ok(prompt.includes('Return only the translated text'), 'translation prompt forbids explanatory chatter');

@@ -60,6 +60,11 @@ import {
 } from '../utils/context_policy';
 import { shouldReuseRecentVisualContext, visualContinuityHint } from '../utils/visual_context';
 import { loadProjectContext } from '../context/project_context';
+import {
+  consumeComposerFileDrag,
+  isComposerDeletionInput,
+  isComposerDeletionKey,
+} from '../utils/composer_events';
 
 export const VIEW_TYPE_GLOSSA = 'glossa-view';
 
@@ -2268,7 +2273,13 @@ export class GlossaView extends ItemView {
       this.recomputeInputHeight();
       this.renderSelectionPreview();
     });
+    this.inputEl.addEventListener('beforeinput', (e) => {
+      if (isComposerDeletionInput(e.inputType)) e.stopPropagation();
+    });
     this.inputEl.addEventListener('keydown', (e) => {
+      // Deletion belongs to the focused textarea. Letting it bubble can make
+      // the host act on a selected object in the previously active PDF view.
+      if (isComposerDeletionKey(e.key)) e.stopPropagation();
       // IME composition guard: Chinese / Japanese / Korean input methods open
       // a candidate-selection panel while the user types. Pressing Enter then
       // COMMITS the IME selection — we must NOT treat that keydown as a
@@ -2462,27 +2473,35 @@ export class GlossaView extends ItemView {
     };
     const hideOverlay = () => { overlay?.remove(); overlay = null; };
 
+    wrap.addEventListener('dragenter', (e) => {
+      if (!consumeComposerFileDrag(e)) return;
+      showOverlay();
+    }, true);
     wrap.addEventListener('dragover', (e) => {
-      e.preventDefault();
+      if (!consumeComposerFileDrag(e)) return;
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
       showOverlay();
-    });
+    }, true);
     wrap.addEventListener('dragleave', (e) => {
+      if (!consumeComposerFileDrag(e)) return;
       if (e.relatedTarget && wrap.contains(e.relatedTarget as Node)) return;
       hideOverlay();
-    });
+    }, true);
     wrap.addEventListener('drop', (e) => {
-      void (async () => {
-      e.preventDefault();
+      if (!consumeComposerFileDrag(e)) return;
       hideOverlay();
-      const files = e.dataTransfer?.files;
-      if (!files) return;
-      for (const f of Array.from(files)) {
-        try { this.ctx.add(await resolveDroppedFile(f)); }
-        catch (err) { quickNotice(`Failed to attach ${f.name}: ${err.message}`); }
-      }
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      const selectionStart = this.inputEl.selectionStart;
+      const selectionEnd = this.inputEl.selectionEnd;
+      this.inputEl.focus();
+      this.inputEl.setSelectionRange(selectionStart, selectionEnd);
+      void (async () => {
+        for (const f of files) {
+          try { this.ctx.add(await resolveDroppedFile(f)); }
+          catch (err) { quickNotice(`Failed to attach ${f.name}: ${err.message}`); }
+        }
       })();
-    });
+    }, true);
   }
 
   /** Aurora v0.4: visual handoff when the user sends. Drops a ghost

@@ -2,7 +2,13 @@
 import { Plugin, WorkspaceLeaf, Notice, addIcon } from 'obsidian';
 import { GlossaView, VIEW_TYPE_GLOSSA } from './ui/view';
 import { GlossaSettingTab } from './settings';
-import { DEFAULT_SETTINGS, type GlossaSettings, type ChatSession, type Endpoint } from './types';
+import {
+  DEFAULT_SETTINGS,
+  type GlossaSettings,
+  type ChatSession,
+  type Endpoint,
+  type SelectionTranslateMode,
+} from './types';
 import { BUILTIN_SLASH_COMMANDS, applySlashTemplate } from './commands/slash';
 import { getCurrentSelection } from './context/sources';
 import { askPassphrase } from './ui/passphrase_modal';
@@ -122,10 +128,9 @@ export default class GlossaPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE_GLOSSA, (leaf) => new GlossaView(leaf, this));
     this.selectionTranslation = new SelectionTranslationController(this);
-    activeDocument.addEventListener('keydown', this.selectionTranslation.handleKeyDown, true);
+    this.selectionTranslation.start();
     this.register(() => {
       if (!this.selectionTranslation) return;
-      activeDocument.removeEventListener('keydown', this.selectionTranslation.handleKeyDown, true);
       this.selectionTranslation.destroy();
       this.selectionTranslation = null;
     });
@@ -153,7 +158,8 @@ export default class GlossaPlugin extends Plugin {
     for (const cmd of BUILTIN_SLASH_COMMANDS) {
       this.addCommand({
         id: cmd.id,
-        name: `Glossa: ${cmd.title}`,
+        // The host prefixes command names with the plugin name in Settings.
+        name: cmd.title,
         callback: async () => {
           await this.activateView();
           const view = this.getView() as AnyValue;
@@ -281,6 +287,12 @@ export default class GlossaPlugin extends Plugin {
 
     // (Plaintext key warning removed — user opted out of mandatory encryption flow.
     //  The Security tab still shows status; user can enable encryption manually.)
+  }
+
+  async setSelectionTranslateMode(mode: SelectionTranslateMode): Promise<void> {
+    this.settings.selectionTranslateMode = mode;
+    await this.saveSettings();
+    this.selectionTranslation?.syncMode();
   }
 
   onunload() {

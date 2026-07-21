@@ -2,7 +2,7 @@
 import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
 import type { ButtonComponent, SettingDefinitionItem } from 'obsidian';
 import type GlossaPlugin from './main';
-import type { Endpoint, CustomPrompt, SlashCommand } from './types';
+import type { Endpoint, CustomPrompt, SlashCommand, SelectionTranslateMode } from './types';
 import { reasoningOptionsForEndpoint } from './types';
 import { uid, setStyle, setTrustedSvg } from './utils/dom';
 import { CustomApiProvider } from './providers/custom_api';
@@ -872,6 +872,36 @@ export class GlossaSettingTab extends PluginSettingTab {
       .addToggle(t => t
         .setValue(this.plugin.settings.autoAttachSelection)
         .onChange(async v => { this.plugin.settings.autoAttachSelection = v; await this.plugin.saveSettings(); }));
+    const selectionTranslationModeSetting = new Setting(containerEl)
+      .setName(bi('Selection translation trigger', '选区翻译触发方式'))
+      .setDesc(bi(
+        'Choose whether selecting document text does nothing, shows a Glossa button, or translates automatically after the selection stays unchanged for 350 ms.',
+        '选择文档文本后可不处理、显示 Glossa 按钮，或在选区稳定 350 毫秒后自动翻译。',
+      ));
+    createAlignedSelect<SelectionTranslateMode>(
+      selectionTranslationModeSetting.controlEl,
+      this.selectPopup,
+      [
+        {
+          value: 'off',
+          label: bi('Off', '关闭'),
+          hint: bi('Use a hotkey or double Enter only', '仅使用快捷键或双击 Enter'),
+        },
+        {
+          value: 'button',
+          label: bi('Show button', '显示按钮'),
+          hint: bi('Recommended', '推荐'),
+        },
+        {
+          value: 'auto',
+          label: bi('Auto translate', '自动翻译'),
+          hint: bi('Translate each new stable selection', '翻译每个新的稳定选区'),
+        },
+      ],
+      this.plugin.settings.selectionTranslateMode,
+      async value => this.plugin.setSelectionTranslateMode(value),
+      bi('Selection translation trigger', '选区翻译触发方式'),
+    );
     new Setting(containerEl)
       .setName(bi('Quick translate selection', '快速翻译选区'))
       .setDesc(bi(

@@ -4,6 +4,7 @@ import type { SourceLanguage } from './utils/translation_target';
 // runtime now uses RunMode ('plan' / 'act') everywhere. MODE_LABELS /
 // MODE_DESCRIPTIONS were dead — referenced nowhere — and have been removed.
 export type Mode = 'chat' | 'edit' | 'agent' | 'compose' | 'ask';
+export type SelectionTranslateMode = 'off' | 'button' | 'auto';
 
 export interface TokenUsage {
   input?: number;
@@ -363,6 +364,8 @@ export interface GlossaSettings {
   citationHoverRequireModifier: boolean;
   /** Keep the built-in double-Enter trigger for selection translation. */
   selectionTranslateDoubleEnterEnabled: boolean;
+  /** Mouse-only selection translation behavior for document and PDF content. */
+  selectionTranslateMode: SelectionTranslateMode;
   /** Dedicated endpoint used by quick translation; null follows the active chat endpoint. */
   translationEndpointId: string | null;
   /** Model override within the dedicated translation endpoint; empty follows the endpoint model. */
@@ -474,6 +477,7 @@ export const DEFAULT_SETTINGS: GlossaSettings = {
   citationHoverDelayMs: 700,
   citationHoverRequireModifier: false,
   selectionTranslateDoubleEnterEnabled: true,
+  selectionTranslateMode: 'button',
   translationEndpointId: null,
   translationModel: '',
   updateCheckEnabled: true,

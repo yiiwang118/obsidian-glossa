@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file. Format adhe
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-07-22
+
+### Added
+- Added three selection-translation trigger modes: off, a click-to-translate Glossa button, and automatic translation after a new PDF, Markdown, or HTML selection remains stable for 350 ms.
+- Added a compact Auto toggle to the translation window so automatic selection translation can be enabled without opening settings.
+
+### Changed
+- Made the selection action clearer with a larger independently sized Glossa mark, stronger contrast, and an explicit pending indicator before automatic translation starts.
+- Added independent GitHub artifact attestations for `main.js` and `styles.css`, followed by in-workflow `gh attestation verify` checks before release upload.
+
+### Fixed
+- Prevented image drops on the sidebar composer from leaking into the active PDF view, and isolated textarea deletion so Backspace or Delete cannot act on a stale host drop target instead of the draft.
+- Kept selection translation open while the Glossa transcript auto-scrolls during a concurrent streamed response; scrolling the selected document still dismisses the anchored panel.
+- Removed the duplicated `Glossa: Glossa:` prefix from built-in command names in the hotkey settings page without changing command IDs or existing bindings.
+
+### Checks
+- Extended the release gate to reject missing, duplicated, globbed, shared multi-file, or unverified attestations while continuing to require only the three standard plugin assets in each GitHub Release.
+
 ## [0.7.0] — 2026-07-20
 
 ### Added

@@ -84,7 +84,23 @@ function makeFixture(mutator) {
   writeFile(root, '.github/workflows/ci.yml', `name: CI\nsteps:\n  - name: Verify build output\n    run: |\n      test -s main.js\n      test -s manifest.json\n      test -s styles.css\n  - name: Upload\n    with:\n      ${workflowAssetBlock('path').replace(/\n/g, '\n      ')}\n`);
   writeFile(root, '.github/workflows/release.yml', [
     'name: Release',
+    'permissions:',
+    '  contents: write',
+    '  id-token: write',
+    '  attestations: write',
     'steps:',
+    '  - name: Attest main.js',
+    '    uses: actions/attest@v4',
+    '    with:',
+    '      subject-path: main.js',
+    '  - name: Attest styles.css',
+    '    uses: actions/attest@v4',
+    '    with:',
+    '      subject-path: styles.css',
+    '  - name: Verify attestations',
+    '    run: |',
+    '      gh attestation verify main.js --repo "$GITHUB_REPOSITORY"',
+    '      gh attestation verify styles.css --repo "$GITHUB_REPOSITORY"',
     '  - name: Release',
     '    with:',
     `      ${workflowAssetBlock('files').replace(/\n/g, '\n      ')}`,
@@ -387,6 +403,10 @@ exports.run = async function(t) {
   withFixture(root => {
     writeFile(root, '.github/workflows/release.yml', [
       'name: Release',
+      'permissions:',
+      '  contents: write',
+      '  id-token: write',
+      '  attestations: write',
       'steps:',
       '  - uses: actions/attest@v4',
       '    with:',
@@ -398,7 +418,38 @@ exports.run = async function(t) {
     ].join('\n'));
   }, root => {
     const result = runReleaseCheck(root);
-    t.ok(!result.ok && result.output.includes('must not create multi-asset attestations'), 'incompatible multi-asset attestations are rejected');
+    t.ok(
+      !result.ok && result.output.includes('must attest each release asset independently'),
+      'incompatible multi-asset attestations are rejected',
+    );
+  });
+
+  withFixture(root => {
+    const workflow = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
+    writeFile(root, '.github/workflows/release.yml', workflow.replace(
+      /  - name: Attest styles\.css[\s\S]*?      subject-path: styles\.css\n/,
+      '',
+    ));
+  }, root => {
+    const result = runReleaseCheck(root);
+    t.ok(
+      !result.ok && result.output.includes('must independently attest exactly main.js, styles.css'),
+      'a missing release asset attestation is rejected',
+    );
+  });
+
+  withFixture(root => {
+    const workflow = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
+    writeFile(root, '.github/workflows/release.yml', workflow.replace(
+      '      gh attestation verify styles.css --repo "$GITHUB_REPOSITORY"\n',
+      '',
+    ));
+  }, root => {
+    const result = runReleaseCheck(root);
+    t.ok(
+      !result.ok && result.output.includes('must verify the styles.css attestation'),
+      'an unverified release attestation is rejected',
+    );
   });
 
   withFixture(root => {

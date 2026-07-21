@@ -83,7 +83,7 @@ requireReleaseAssets(releaseAssets);
 expectCiNonEmptyAssetChecks('.github/workflows/ci.yml', releaseAssets);
 expectWorkflowAssetBlock('.github/workflows/ci.yml', 'path', releaseAssets);
 expectWorkflowAssetBlock('.github/workflows/release.yml', 'files', releaseAssets);
-rejectIncompatibleReleaseAttestations('.github/workflows/release.yml');
+expectIndependentReleaseAttestations('.github/workflows/release.yml', ['main.js', 'styles.css']);
 scanTrackedFilesForSecrets();
 
 function listTsFiles(dir) {
@@ -214,16 +214,55 @@ function expectWorkflowAssetBlock(file, key, expected) {
   }
 }
 
-function rejectIncompatibleReleaseAttestations(file) {
+function expectIndependentReleaseAttestations(file, expectedSubjects) {
   const text = fs.readFileSync(file, 'utf8');
-  for (const pattern of [
-    /actions\/attest@/,
-    /^\s*subject-path:\s*/m,
-    /^\s*attestations:\s*write\s*$/m,
-    /^\s*artifact-metadata:\s*write\s*$/m,
+  for (const [permission, value] of [
+    ['id-token', 'write'],
+    ['attestations', 'write'],
   ]) {
-    if (pattern.test(text)) {
-      fail(`${file} must not create multi-asset attestations; the plugin directory verifier rejects their shared bundle.`);
+    const pattern = new RegExp(`^\\s*${escapeRegExp(permission)}:\\s*${value}\\s*$`, 'm');
+    if (!pattern.test(text)) fail(`${file} must grant ${permission}: ${value} for artifact attestations.`);
+  }
+  if (/actions\/attest-build-provenance@/.test(text)) {
+    fail(`${file} must use actions/attest@v4 for current GitHub artifact attestations.`);
+  }
+
+  const lines = text.split(/\r?\n/);
+  const subjects = [];
+  for (let index = 0; index < lines.length; index++) {
+    const actionMatch = /^(\s*)(?:-\s*)?uses:\s*actions\/attest@v4\s*$/.exec(lines[index]);
+    if (!actionMatch) continue;
+    const actionIndent = actionMatch[1].length;
+    let subject = null;
+    for (let cursor = index + 1; cursor < lines.length; cursor++) {
+      const line = lines[cursor];
+      const indent = line.match(/^\s*/)?.[0].length ?? 0;
+      if (line.trim().startsWith('- ') && indent < actionIndent) break;
+      const subjectMatch = /^\s*subject-path:\s*(.*?)\s*$/.exec(line);
+      if (subjectMatch) {
+        if (subject !== null) fail(`${file} attestation step must contain exactly one subject-path.`);
+        subject = subjectMatch[1].replace(/^['"]|['"]$/g, '');
+      }
+    }
+    if (!subject || subject === '|' || subject === '>') {
+      fail(`${file} must attest each release asset independently with a scalar subject-path.`);
+    }
+    if (/[,*?\[\]\n]/.test(subject) || /\s/.test(subject)) {
+      fail(`${file} attestation subject-path must name one file, not a glob or multi-file value.`);
+    }
+    subjects.push(subject);
+  }
+
+  if (subjects.length !== expectedSubjects.length
+    || subjects.some((subject, index) => subject !== expectedSubjects[index])) {
+    fail(`${file} must independently attest exactly ${expectedSubjects.join(', ')} in that order.`);
+  }
+  for (const subject of expectedSubjects) {
+    const verifyPattern = new RegExp(
+      `gh\\s+attestation\\s+verify\\s+${escapeRegExp(subject)}\\s+--repo\\s+`,
+    );
+    if (!verifyPattern.test(text)) {
+      fail(`${file} must verify the ${subject} attestation before creating the release.`);
     }
   }
 }

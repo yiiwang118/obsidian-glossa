@@ -1,5 +1,5 @@
 import { Menu, type App } from 'obsidian';
-import type { Endpoint, GlossaSettings } from '../types';
+import type { Endpoint, GlossaSettings, SelectionTranslateMode } from '../types';
 import type { SelectionInfo } from '../context/sources';
 import { getCurrentSelection } from '../context/sources';
 import { buildProvider } from '../providers/registry';
@@ -12,7 +12,9 @@ import { quickNotice } from '../utils/notice';
 import { clipSelectionRects, mergeSelectionLineRects } from '../utils/selection_rects';
 
 const DOUBLE_ENTER_WINDOW_MS = 520;
+const SELECTION_STABLE_MS = 350;
 const MAX_SELECTION_CHARS = 24_000;
+const ACTION_SIZE = 36;
 const TEXT_NODE_TYPE = 3;
 const ELEMENT_NODE_TYPE = 1;
 
@@ -58,6 +60,11 @@ interface FloatingPanelSize {
   height: number;
 }
 
+interface PointLike {
+  x: number;
+  y: number;
+}
+
 export function clampFloatingPanelPosition(
   left: number,
   top: number,
@@ -75,6 +82,25 @@ export function clampFloatingPanelPosition(
       Math.max(edge, top),
     )),
   };
+}
+
+function scrollEventNode(target: EventTarget | null): Node | null {
+  if (!target || typeof target !== 'object') return null;
+  const candidate = target as Node;
+  return typeof candidate.nodeType === 'number' ? candidate : null;
+}
+
+/** Ignore scrolls produced by the translation panel or Glossa's streaming transcript. */
+export function shouldDismissSelectionTranslationOnScroll(
+  target: EventTarget | null,
+  popup: HTMLElement,
+): boolean {
+  const node = scrollEventNode(target);
+  if (node && popup.contains(node)) return false;
+  const element = node?.nodeType === ELEMENT_NODE_TYPE
+    ? node as HTMLElement
+    : node?.parentElement ?? null;
+  return !element?.closest('.glossa-view');
 }
 
 export function selectionTranslationPosition(
@@ -118,6 +144,40 @@ export function selectionTranslationPosition(
     score(candidate) < score(current) ? candidate : current
   ));
   return { left: Math.round(best.left), top: Math.round(best.top), placement: best.placement };
+}
+
+export function selectionTranslationActionPosition(
+  anchor: RectLike,
+  pointer: PointLike | null,
+  viewport: FloatingPanelSize,
+  avoidRects: readonly RectLike[] = [anchor],
+): { left: number; top: number } {
+  const edge = 8;
+  const gap = 9;
+  const maxLeft = Math.max(edge, viewport.width - ACTION_SIZE - edge);
+  const maxTop = Math.max(edge, viewport.height - ACTION_SIZE - edge);
+  const clampLeft = (value: number) => Math.min(maxLeft, Math.max(edge, value));
+  const clampTop = (value: number) => Math.min(maxTop, Math.max(edge, value));
+  const origin = pointer ?? { x: anchor.right, y: anchor.bottom };
+  const candidates = [
+    { left: clampLeft(origin.x + gap), top: clampTop(origin.y + gap) },
+    { left: clampLeft(origin.x + gap), top: clampTop(origin.y - ACTION_SIZE - gap) },
+    { left: clampLeft(origin.x - ACTION_SIZE - gap), top: clampTop(origin.y + gap) },
+    { left: clampLeft(origin.x - ACTION_SIZE - gap), top: clampTop(origin.y - ACTION_SIZE - gap) },
+    { left: clampLeft(anchor.right + gap), top: clampTop(anchor.bottom + gap) },
+    { left: clampLeft(anchor.right + gap), top: clampTop(anchor.top - ACTION_SIZE - gap) },
+  ];
+  const score = (candidate: { left: number; top: number }): number => {
+    const right = candidate.left + ACTION_SIZE;
+    const bottom = candidate.top + ACTION_SIZE;
+    const overlap = avoidRects.reduce((total, rect) => {
+      const width = Math.max(0, Math.min(right, rect.right) - Math.max(candidate.left, rect.left));
+      const height = Math.max(0, Math.min(bottom, rect.bottom) - Math.max(candidate.top, rect.top));
+      return total + width * height;
+    }, 0);
+    return overlap * 1000 + Math.hypot(candidate.left - origin.x, candidate.top - origin.y);
+  };
+  return candidates.reduce((best, candidate) => score(candidate) < score(best) ? candidate : best);
 }
 
 export function buildSelectionTranslationPrompt(
@@ -290,11 +350,40 @@ function sourceLabel(selection: SelectionInfo): string {
   return bi('Auto', '自动');
 }
 
+const URL_ONLY_RE = /^(?:https?:\/\/|www\.)\S+$/iu;
+const WRAPPED_CODE_OR_MATH_RE = /^(?:`[^`\n]+`|```[\s\S]*```|~~~[\s\S]*~~~|\${1,2}[\s\S]*\${1,2}|\\\([\s\S]*\\\)|\\\[[\s\S]*\\\])$/u;
+const CODE_EXPRESSION_RE = /^[A-Za-z_$][\w$]*(?:(?:\.|::)[A-Za-z_$][\w$]*|\([^\n)]*\)|\[[^\n\]]*\])+$/u;
+
+export function isSelectionTranslationCandidate(selection: SelectionInfo | null): selection is SelectionInfo {
+  if (!selection || !['pdf', 'markdown', 'html'].includes(selection.source)) return false;
+  const text = selection.text.trim();
+  if (!text || text.length > MAX_SELECTION_CHARS) return false;
+  if (/^[\p{P}\p{S}\p{N}\s]+$/u.test(text) || URL_ONLY_RE.test(text)) return false;
+  if (WRAPPED_CODE_OR_MATH_RE.test(text) || CODE_EXPRESSION_RE.test(text)) return false;
+  const operators = text.match(/[=+*/^_{}\\<>≤≥∑∫]/gu)?.length ?? 0;
+  const proseWords = text.match(/[A-Za-z]{3,}|[\u3400-\u9fff]{2,}/gu)?.length ?? 0;
+  return operators === 0 || proseWords > 0;
+}
+
+export function selectionTranslationSignature(selection: SelectionInfo, anchor: RectLike): string {
+  const position = [anchor.left, anchor.top, anchor.right, anchor.bottom]
+    .map(value => Math.round(value))
+    .join(',');
+  return [selection.source, selection.file?.path ?? '', selection.text.trim(), position].join('\u0000');
+}
+
 export class SelectionTranslationController {
   private popup: TranslationPopupState | null = null;
+  private selectionAction: HTMLButtonElement | null = null;
   private abortController: AbortController | null = null;
   private enterAt = 0;
   private enterSignature = '';
+  private selectionTimer = 0;
+  private pendingSelectionSignature = '';
+  private handledSelectionSignature = '';
+  private latestPointer: { x: number; y: number; at: number } | null = null;
+  private pointerIsDown = false;
+  private listenersStarted = false;
   private requestSequence = 0;
   private paintFrame = 0;
   private pendingPaintText = '';
@@ -303,7 +392,33 @@ export class SelectionTranslationController {
 
   constructor(private readonly host: SelectionTranslationHost) {}
 
+  start(): void {
+    if (this.listenersStarted) return;
+    this.listenersStarted = true;
+    activeDocument.addEventListener('keydown', this.handleKeyDown, true);
+    activeDocument.addEventListener('selectionchange', this.handleSelectionChange);
+    activeDocument.addEventListener('pointerdown', this.handlePointerDown, true);
+    activeDocument.addEventListener('pointerup', this.handlePointerUp, true);
+    activeDocument.addEventListener('pointercancel', this.handlePointerCancel, true);
+    activeDocument.addEventListener('scroll', this.handleDocumentScroll, true);
+    activeWindow.addEventListener('resize', this.handleViewportResize);
+  }
+
+  syncMode(): void {
+    this.cancelSelectionIntent();
+    this.hideSelectionAction();
+    this.rememberCurrentSelection();
+  }
+
   handleKeyDown = (event: KeyboardEvent): void => {
+    this.latestPointer = null;
+    if (event.key === 'Escape' && this.selectionAction) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.cancelSelectionIntent();
+      this.hideSelectionAction();
+      return;
+    }
     if (!this.host.settings.selectionTranslateDoubleEnterEnabled) return;
     if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.isComposing || this.popup) return;
@@ -322,6 +437,9 @@ export class SelectionTranslationController {
 
     event.preventDefault();
     event.stopPropagation();
+    this.cancelSelectionIntent();
+    this.hideSelectionAction();
+    this.rememberSelection(selection);
     if (!isSecond) {
       this.enterAt = now;
       this.enterSignature = signature;
@@ -338,10 +456,15 @@ export class SelectionTranslationController {
       quickNotice(bi('Select text to translate first.', '请先选中需要翻译的文本。'));
       return;
     }
+    this.cancelSelectionIntent();
+    this.hideSelectionAction();
+    this.rememberSelection(selection);
     await this.translateSelection(selection);
   }
 
   close(): void {
+    this.cancelSelectionIntent();
+    this.hideSelectionAction();
     this.requestSequence += 1;
     this.abortController?.abort();
     this.abortController = null;
@@ -357,12 +480,215 @@ export class SelectionTranslationController {
   }
 
   destroy(): void {
+    if (this.listenersStarted) {
+      activeDocument.removeEventListener('keydown', this.handleKeyDown, true);
+      activeDocument.removeEventListener('selectionchange', this.handleSelectionChange);
+      activeDocument.removeEventListener('pointerdown', this.handlePointerDown, true);
+      activeDocument.removeEventListener('pointerup', this.handlePointerUp, true);
+      activeDocument.removeEventListener('pointercancel', this.handlePointerCancel, true);
+      activeDocument.removeEventListener('scroll', this.handleDocumentScroll, true);
+      activeWindow.removeEventListener('resize', this.handleViewportResize);
+      this.listenersStarted = false;
+    }
     this.close();
     this.resetEnterState();
+    this.handledSelectionSignature = '';
   }
 
   private resolveSelection(): SelectionInfo | null {
     return getCurrentSelection(this.host.app) ?? this.host.getView()?.getSelectionForTranslation() ?? null;
+  }
+
+  private selectionMode(): SelectionTranslateMode {
+    const mode = this.host.settings.selectionTranslateMode;
+    return mode === 'off' || mode === 'auto' ? mode : 'button';
+  }
+
+  private handleSelectionChange = (): void => {
+    if (this.pointerIsDown) return;
+    this.scheduleSelectionIntent();
+  };
+
+  private handlePointerDown = (event: PointerEvent): void => {
+    const target = event.target as Node | null;
+    if (
+      (target && this.selectionAction?.contains(target))
+      || (target && this.popup?.root.contains(target))
+    ) return;
+    this.pointerIsDown = event.button === 0;
+    this.cancelSelectionIntent();
+    this.hideSelectionAction();
+  };
+
+  private handlePointerUp = (event: PointerEvent): void => {
+    if (!this.pointerIsDown || event.button !== 0) return;
+    this.pointerIsDown = false;
+    this.latestPointer = { x: event.clientX, y: event.clientY, at: Date.now() };
+    this.scheduleSelectionIntent();
+  };
+
+  private handlePointerCancel = (): void => {
+    this.pointerIsDown = false;
+    this.cancelSelectionIntent();
+    this.hideSelectionAction();
+  };
+
+  private handleDocumentScroll = (event: Event): void => {
+    const owned = this.selectionAction;
+    if (owned && !shouldDismissSelectionTranslationOnScroll(event.target, owned)) return;
+    this.cancelSelectionIntent();
+    this.hideSelectionAction();
+  };
+
+  private handleViewportResize = (): void => {
+    this.cancelSelectionIntent();
+    this.hideSelectionAction();
+  };
+
+  private scheduleSelectionIntent(): void {
+    if (this.pointerIsDown) return;
+    if (this.selectionInteractionBlocked()) {
+      this.cancelSelectionIntent();
+      this.hideSelectionAction();
+      return;
+    }
+    const mode = this.selectionMode();
+    const selection = getCurrentSelection(this.host.app);
+    if (mode === 'off' || !isSelectionTranslationCandidate(selection)) {
+      this.cancelSelectionIntent();
+      this.hideSelectionAction();
+      this.handledSelectionSignature = '';
+      return;
+    }
+
+    const geometry = captureSelectionGeometry();
+    const anchor = geometry?.anchor ?? fallbackAnchor();
+    const signature = selectionTranslationSignature(selection, anchor);
+    if (signature === this.pendingSelectionSignature || signature === this.handledSelectionSignature) return;
+
+    this.cancelSelectionIntent();
+    this.hideSelectionAction();
+    this.pendingSelectionSignature = signature;
+    if (mode === 'auto') {
+      this.showSelectionAction(anchor, geometry?.rects ?? [anchor], signature, true);
+    }
+    this.selectionTimer = window.setTimeout(() => {
+      this.selectionTimer = 0;
+      const current = getCurrentSelection(this.host.app);
+      if (!isSelectionTranslationCandidate(current) || this.selectionInteractionBlocked()) {
+        this.pendingSelectionSignature = '';
+        this.hideSelectionAction();
+        return;
+      }
+      const currentGeometry = captureSelectionGeometry();
+      const currentAnchor = currentGeometry?.anchor ?? fallbackAnchor();
+      const currentSignature = selectionTranslationSignature(current, currentAnchor);
+      if (currentSignature !== signature) {
+        this.pendingSelectionSignature = '';
+        this.hideSelectionAction();
+        this.scheduleSelectionIntent();
+        return;
+      }
+
+      this.pendingSelectionSignature = '';
+      this.handledSelectionSignature = signature;
+      if (this.selectionMode() === 'auto') {
+        this.hideSelectionAction();
+        void this.translateSelection(current);
+      } else if (this.selectionMode() === 'button') {
+        this.showSelectionAction(
+          currentAnchor,
+          currentGeometry?.rects ?? [currentAnchor],
+          signature,
+          false,
+        );
+      } else {
+        this.hideSelectionAction();
+      }
+    }, SELECTION_STABLE_MS);
+  }
+
+  private showSelectionAction(
+    anchor: RectLike,
+    selectionRects: RectLike[],
+    signature: string,
+    autoPending: boolean,
+  ): void {
+    this.hideSelectionAction();
+    const action = el('button', {
+      className: `nc-selection-translation-action${autoPending ? ' is-auto-pending' : ''}`,
+      parent: activeDocument.body,
+      type: 'button',
+      attrs: {
+        'aria-label': autoPending
+          ? bi('Automatic translation pending', '等待自动翻译')
+          : bi('Translate selection', '翻译选区'),
+      },
+    });
+    const actionMark = el('span', { className: 'nc-selection-translation-action-mark', parent: action });
+    setTrustedSvg(actionMark, ICON.bot);
+    action.title = autoPending
+      ? bi('Automatic translation starts when the selection settles', '选区稳定后自动翻译')
+      : bi('Translate selection', '翻译选区');
+    const pointer = this.latestPointer && Date.now() - this.latestPointer.at < 1500
+      ? { x: this.latestPointer.x, y: this.latestPointer.y }
+      : null;
+    const position = selectionTranslationActionPosition(
+      anchor,
+      pointer,
+      { width: activeWindow.innerWidth, height: activeWindow.innerHeight },
+      selectionRects,
+    );
+    setStyle(action, { left: `${position.left}px`, top: `${position.top}px` });
+    action.onpointerdown = event => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    action.onclick = event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const current = getCurrentSelection(this.host.app);
+      const currentGeometry = captureSelectionGeometry();
+      const currentAnchor = currentGeometry?.anchor ?? fallbackAnchor();
+      if (
+        !isSelectionTranslationCandidate(current)
+        || selectionTranslationSignature(current, currentAnchor) !== signature
+      ) {
+        this.cancelSelectionIntent();
+        this.hideSelectionAction();
+        return;
+      }
+      this.cancelSelectionIntent();
+      this.handledSelectionSignature = signature;
+      this.hideSelectionAction();
+      void this.translateSelection(current);
+    };
+    this.selectionAction = action;
+  }
+
+  private cancelSelectionIntent(): void {
+    if (this.selectionTimer) window.clearTimeout(this.selectionTimer);
+    this.selectionTimer = 0;
+    this.pendingSelectionSignature = '';
+  }
+
+  private hideSelectionAction(): void {
+    this.selectionAction?.remove();
+    this.selectionAction = null;
+  }
+
+  private rememberCurrentSelection(): void {
+    const selection = getCurrentSelection(this.host.app);
+    if (isSelectionTranslationCandidate(selection)) this.rememberSelection(selection);
+  }
+
+  private rememberSelection(selection: SelectionInfo): void {
+    const anchor = captureSelectionGeometry()?.anchor ?? fallbackAnchor();
+    this.handledSelectionSignature = selectionTranslationSignature(selection, anchor);
+  }
+
+  private selectionInteractionBlocked(): boolean {
+    return !!activeDocument.querySelector('.modal-container, .suggestion-container');
   }
 
   private shouldIgnoreKeyTarget(active: HTMLElement | null): boolean {
@@ -419,6 +745,26 @@ export class SelectionTranslationController {
     el('span', { text: '→', parent: route });
     el('span', { text: targetLabel(target), parent: route });
     const tools = el('div', { className: 'nc-selection-translation-tools', parent: header });
+    const autoToggle = el('label', {
+      className: 'nc-selection-translation-auto',
+      parent: tools,
+      attrs: { title: bi('Automatically translate each new selection', '自动翻译每个新选区') },
+    });
+    const autoInput = el('input', {
+      parent: autoToggle,
+      type: 'checkbox',
+      attrs: { 'aria-label': bi('Automatically translate new selections', '自动翻译新选区') },
+    });
+    autoInput.checked = this.selectionMode() === 'auto';
+    el('span', { className: 'nc-selection-translation-auto-track', parent: autoToggle });
+    el('span', {
+      className: 'nc-selection-translation-auto-label',
+      text: bi('Auto', '自动'),
+      parent: autoToggle,
+    });
+    autoInput.onchange = () => {
+      void this.setAutoTranslationEnabled(autoInput.checked, selection);
+    };
     const close = el('button', {
       className: 'clickable-icon nc-selection-translation-close',
       parent: tools,
@@ -496,6 +842,14 @@ export class SelectionTranslationController {
     return dedicated ?? this.host.settings.endpoints.find(
       endpoint => endpoint.id === this.host.settings.activeEndpointId,
     ) ?? null;
+  }
+
+  private async setAutoTranslationEnabled(enabled: boolean, selection: SelectionInfo): Promise<void> {
+    this.cancelSelectionIntent();
+    this.hideSelectionAction();
+    this.host.settings.selectionTranslateMode = enabled ? 'auto' : 'button';
+    this.rememberSelection(selection);
+    await this.host.saveSettings();
   }
 
   private translationModel(endpoint: Endpoint | null): string {
@@ -621,8 +975,7 @@ export class SelectionTranslationController {
       this.close();
     };
     const onScroll = (event: Event) => {
-      const target = event.target as Node | null;
-      if (target && popup.contains(target)) return;
+      if (!shouldDismissSelectionTranslationOnScroll(event.target, popup)) return;
       this.close();
     };
     const onResize = () => this.positionPopup();
@@ -645,8 +998,8 @@ export class SelectionTranslationController {
       if (!popup) return;
       const target = event.target as Node | null;
       if (
-        (target?.instanceOf(HTMLElement) && target.closest('button, input, select, a'))
-        || target?.parentElement?.closest('button, input, select, a')
+        (target?.instanceOf(HTMLElement) && target.closest('button, input, select, a, label'))
+        || target?.parentElement?.closest('button, input, select, a, label')
       ) return;
 
       event.preventDefault();
