@@ -134,9 +134,6 @@ export default class GlossaPlugin extends Plugin {
       this.selectionTranslation.destroy();
       this.selectionTranslation = null;
     });
-    this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
-      this.selectionTranslation?.close();
-    }));
     const ribbonIconEl = this.addRibbonIcon('glossa-ribbon', 'Open ' + 'Glossa', () => this.activateView());
     ribbonIconEl.addClass('glossa-ribbon-icon');
 

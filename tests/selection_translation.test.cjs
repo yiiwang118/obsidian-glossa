@@ -5,33 +5,55 @@ exports.run = async function(t, loadModule) {
   const sourcePath = path.resolve(__dirname, '../src/features/selection_translation.ts');
   const mod = await loadModule(sourcePath);
   const source = fs.readFileSync(sourcePath, 'utf8');
+  const mainSource = fs.readFileSync(path.resolve(__dirname, '../src/main.ts'), 'utf8');
   t.ok(
     !source.includes('removeAllRanges'),
     'opening quick translation preserves the native PDF text selection',
+  );
+  t.ok(
+    !/active-leaf-change[\s\S]{0,160}selectionTranslation\?\.close/.test(mainSource),
+    'changing focus to a side-panel leaf does not close selection translation',
   );
 
   const popupTarget = { nodeType: 1, parentElement: null, closest: () => null };
   const glossaTarget = {
     nodeType: 1,
     parentElement: null,
-    closest: (selector) => selector === '.glossa-view' ? {} : null,
+    closest: (selector) => selector.includes('.glossa-view') ? {} : null,
   };
   const pdfTarget = { nodeType: 1, parentElement: null, closest: () => null };
   const popup = { contains: (node) => node === popupTarget };
   t.eq(
-    mod.shouldDismissSelectionTranslationOnScroll(popupTarget, popup),
+    mod.shouldRepositionSelectionTranslationOnScroll(popupTarget, popup),
     false,
-    'scrolling translation output does not close its own popup',
+    'scrolling translation output does not move its own popup',
   );
   t.eq(
-    mod.shouldDismissSelectionTranslationOnScroll(glossaTarget, popup),
+    mod.shouldRepositionSelectionTranslationOnScroll(glossaTarget, popup),
     false,
-    'streaming transcript auto-scroll does not close selection translation',
+    'streaming transcript auto-scroll does not move selection translation',
   );
   t.eq(
-    mod.shouldDismissSelectionTranslationOnScroll(pdfTarget, popup),
+    mod.shouldRepositionSelectionTranslationOnScroll(pdfTarget, popup),
     true,
-    'scrolling the selected source view still dismisses the anchored popup',
+    'scrolling the selected source view repositions the anchored popup',
+  );
+
+  const sidePanelTarget = {
+    nodeType: 1,
+    parentElement: null,
+    closest: selector => selector.includes('.mod-right-split') ? {} : null,
+  };
+  const documentTarget = { nodeType: 1, parentElement: null, closest: () => null };
+  t.eq(
+    mod.shouldDismissSelectionTranslationOnPointerDown(sidePanelTarget, popup),
+    false,
+    'clicking a left or right side panel keeps selection translation open',
+  );
+  t.eq(
+    mod.shouldDismissSelectionTranslationOnPointerDown(documentTarget, popup),
+    true,
+    'clicking the document outside the popup dismisses selection translation',
   );
 
   const below = mod.selectionTranslationPosition(
@@ -69,6 +91,13 @@ exports.run = async function(t, loadModule) {
   );
   t.eq(sparse.placement, 'below', 'popup placement scores actual selection lines instead of covering their bounding box');
   t.ok(sparse.left + 360 <= 700, 'popup stays clear of the visible selected line');
+
+  const pinnedTop = mod.selectionTranslationPosition(
+    { left: 180, top: -140, right: 520, bottom: -20, width: 340, height: 120 },
+    { width: 360, height: 220 },
+    { width: 1000, height: 700 },
+  );
+  t.eq(pinnedTop.top, 12, 'popup remains pinned to the viewport top after its selection scrolls past');
 
   t.eq(
     mod.clampFloatingPanelPosition(-120, 690, { width: 560, height: 300 }, { width: 1000, height: 700 }),
@@ -135,6 +164,48 @@ exports.run = async function(t, loadModule) {
   t.ok(prompt.includes('Return only the translated text'), 'translation prompt forbids explanatory chatter');
   t.ok(prompt.includes(JSON.stringify('<ignore> CURE $x^2$')), 'selected text is encoded as inert JSON source material');
   t.ok(prompt.includes('standard Chinese technical translation'), 'Chinese prompt protects short technical terms');
+  t.ok(prompt.includes('Obsidian-compatible LaTeX'), 'translation prompt requests vault-native mathematical notation');
+  t.ok(prompt.includes('Use $...$ for inline math'), 'translation prompt specifies inline and display math delimiters');
+  t.ok(prompt.includes('Never invent or change mathematical meaning'), 'formula reconstruction is constrained by source evidence');
+
+  const flattenedFormula = 'Let xi ∈ {xt+1, ..., xt+k}; accept when Md(x)[i-1] ≤ Mt(x)[i-1].';
+  t.eq(
+    mod.selectionLikelyContainsFlattenedMath(flattenedFormula),
+    true,
+    'flattened PDF variables, sets, and inequalities trigger mandatory math formatting',
+  );
+  t.eq(
+    mod.translationNeedsMathRetry(flattenedFormula, '令 xi ∈ {xt+1, ..., xt+k}。'),
+    true,
+    'formula-bearing translations without LaTeX delimiters receive one corrective retry',
+  );
+  t.eq(
+    mod.translationNeedsMathRetry(flattenedFormula, '令 $x_i \\in \\{x_{t+1}, \\ldots, x_{t+k}\\}$。'),
+    false,
+    'properly delimited LaTeX avoids the corrective request',
+  );
+  t.eq(
+    mod.translationNeedsMathRetry('This is ordinary prose.', '这是普通文本。'),
+    false,
+    'ordinary prose never pays for a math-format retry',
+  );
+
+  const renderedMath = '目标函数为 $L(\\theta)$。\n\n$$\n\\mathcal{J}(\\theta)=\\sum_{t=1}^{T} A_t\n$$';
+  t.eq(
+    mod.selectionTranslationMathMarkdown(renderedMath, 'Chinese'),
+    renderedMath,
+    'complete inline and display math is eligible for final native rendering',
+  );
+  t.eq(
+    mod.selectionTranslationMathMarkdown('普通翻译没有数学公式。', 'Chinese'),
+    null,
+    'plain translations stay on the zero-overhead text rendering path',
+  );
+  t.eq(
+    mod.selectionTranslationMathMarkdown('未完成公式 $L(\\theta', 'Chinese'),
+    null,
+    'incomplete streamed math remains plain text instead of losing content',
+  );
 
   t.eq(mod.translationNeedsRetry('softmax-attention', 'softmax-attention', 'Chinese'), true, 'unchanged technical terms trigger one corrective retry');
   t.eq(mod.translationNeedsRetry('softmax-attention', 'softmax 注意力', 'Chinese'), false, 'Chinese technical translation passes target validation');

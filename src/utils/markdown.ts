@@ -247,7 +247,7 @@ function basenameFromUrl(url: string): string {
   return last || 'unsupported source';
 }
 
-function hasMarkdownMath(src: string): boolean {
+export function hasMarkdownMath(src: string): boolean {
   if (!src) return false;
   let inFenced = false;
   let inInline = false;

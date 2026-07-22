@@ -1189,6 +1189,16 @@
   user-select: text;
   -webkit-user-select: text;
 }
+.nc-selection-translation-body.is-markdown-rendered {
+  white-space: normal;
+}
+.nc-selection-translation-body.is-markdown-rendered > :first-child { margin-top: 0; }
+.nc-selection-translation-body.is-markdown-rendered > :last-child { margin-bottom: 0; }
+.nc-selection-translation-body.is-markdown-rendered .math-block {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 .nc-selection-translation-popover.is-user-sized .nc-selection-translation-body {
   max-height: none;
   flex: 1 1 auto;

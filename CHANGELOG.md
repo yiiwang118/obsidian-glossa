@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file. Format adhe
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-07-22
+
+### Changed
+- Quick translation now asks models to preserve or reconstruct clear mathematical notation with Obsidian-compatible `$...$` and `$$...$$` delimiters.
+- Completed math is rendered once through the host Markdown renderer after streaming, while ordinary prose retains the direct text path with no additional rendering work.
+- Math-bearing responses that omit delimiters receive at most one formatting retry; correctly formatted output and ordinary prose do not add requests.
+
+### Fixed
+- Kept quick translation open while its source document scrolls, pinned the panel to the viewport top after the source selection scrolls past, and preserved dismissal for an explicit click back into document content.
+- Prevented clicks in left or right sidebars, the Glossa sidebar, ribbons, and menus from dismissing the translation panel.
+- Upgraded the transitive `fast-uri` development dependency to 3.1.4, clearing the dependency audit.
+
 ## [0.7.1] — 2026-07-22
 
 ### Added
