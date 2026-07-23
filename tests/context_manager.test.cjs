@@ -33,4 +33,8 @@ exports.run = async function(t, loadModule) {
   const deduped = manager.asPromptBlock(1000, 1200, { suppressAutoCurrent: true });
   t.ok(!deduped.text.includes('这是一篇当前打开的中文笔记'), 'already embedded current source can be suppressed to avoid duplication');
   t.ok(deduped.text.includes('The framework connects'), 'suppressing duplicate current source preserves explicit attachments');
+
+  manager.add({ id: 'image-1', kind: 'image', label: 'Screenshot-1.png', detail: '42KB / image/png', content: 'data:image/png;base64,AAAA', tokens: 42, pinned: false });
+  manager.add({ id: 'image-2', kind: 'image', label: 'Screenshot-2.png', detail: '42KB / image/png', content: 'data:image/png;base64,BBBB', tokens: 42, pinned: false });
+  t.eq(manager.imagesForAPI().map(image => image.name), ['Screenshot-1.png', 'Screenshot-2.png'], 'same-size screenshots with different names are both retained');
 };

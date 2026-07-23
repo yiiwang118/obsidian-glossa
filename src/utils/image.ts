@@ -48,6 +48,22 @@ export interface ImageInspectionResult {
 
 const DEFAULT_MIME = 'image/png';
 const MAX_SAMPLE_POINTS = 16;
+export const MAX_ATTACHMENT_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_PASTED_IMAGE_DIMENSION = 4096;
+const MAX_PASTED_IMAGE_ENCODE_ATTEMPTS = 10;
+
+const ATTACHMENT_IMAGE_EXTENSION: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
+export interface PreparedPastedImage {
+  file: File;
+  originalBytes: number;
+  compressed: boolean;
+}
 
 export function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -56,6 +72,52 @@ export function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
   return btoa(binary);
+}
+
+/** Normalize clipboard images for the providers' existing 5 MB attachment cap. */
+export async function preparePastedImage(
+  file: File,
+  baseName: string,
+  maxBytes = MAX_ATTACHMENT_IMAGE_BYTES,
+): Promise<PreparedPastedImage> {
+  const originalBytes = file.size;
+  const inputMime = file.type.toLowerCase() === 'image/jpg' ? 'image/jpeg' : file.type.toLowerCase();
+  const nativeExtension = ATTACHMENT_IMAGE_EXTENSION[inputMime];
+  if (nativeExtension && file.size <= maxBytes) {
+    return {
+      file: new File([file], `${baseName}.${nativeExtension}`, {
+        type: inputMime,
+        lastModified: file.lastModified,
+      }),
+      originalBytes,
+      compressed: false,
+    };
+  }
+
+  const image = await decodeImageBlob(file);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  if (!sourceWidth || !sourceHeight) throw new Error('Could not read pasted image dimensions.');
+
+  const initialScale = Math.min(1, MAX_PASTED_IMAGE_DIMENSION / Math.max(sourceWidth, sourceHeight));
+  let width = Math.max(1, Math.round(sourceWidth * initialScale));
+  let height = Math.max(1, Math.round(sourceHeight * initialScale));
+  let lastSize = originalBytes;
+
+  for (let attempt = 0; attempt < MAX_PASTED_IMAGE_ENCODE_ATTEMPTS; attempt++) {
+    const blob = await encodeImageBlob(image, width, height, 'image/webp', 0.92);
+    lastSize = blob.size;
+    if (blob.size <= maxBytes) {
+      return {
+        file: new File([blob], `${baseName}.webp`, { type: 'image/webp', lastModified: Date.now() }),
+        originalBytes,
+        compressed: true,
+      };
+    }
+    width = Math.max(1, Math.floor(width * 0.85));
+    height = Math.max(1, Math.floor(height * 0.85));
+  }
+  throw new Error(`Could not compress pasted image below 5 MB (last attempt ${(lastSize / 1024 / 1024).toFixed(1)} MB).`);
 }
 
 export function normalizeImageInspectMode(mode: unknown): ImageInspectMode {
@@ -238,8 +300,11 @@ function cropCanvas(ctx: CanvasRenderingContext2D, region: ImageRegion): { mime:
 }
 
 function decodeImage(bytes: Uint8Array, mime: string): Promise<HTMLImageElement> {
+  return decodeImageBlob(new Blob([bytes.slice()], { type: mime || DEFAULT_MIME }));
+}
+
+function decodeImageBlob(blob: Blob): Promise<HTMLImageElement> {
   const win = activeDocument.defaultView ?? window;
-  const blob = new Blob([bytes.slice()], { type: mime || DEFAULT_MIME });
   const url = win.URL.createObjectURL(blob);
   const img = activeWindow.createEl('img');
   return new Promise((resolve, reject) => {
@@ -247,6 +312,27 @@ function decodeImage(bytes: Uint8Array, mime: string): Promise<HTMLImageElement>
     img.onload = () => { cleanup(); resolve(img); };
     img.onerror = () => { cleanup(); reject(new Error('browser image decoder failed')); };
     img.src = url;
+  });
+}
+
+function encodeImageBlob(
+  image: HTMLImageElement,
+  width: number,
+  height: number,
+  mime: string,
+  quality: number,
+): Promise<Blob> {
+  const canvas = activeWindow.createEl('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return Promise.reject(new Error('Could not create a canvas context for pasted image compression.'));
+  ctx.drawImage(image, 0, 0, width, height);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => {
+      if (blob) resolve(blob);
+      else reject(new Error('Could not encode pasted image as WebP.'));
+    }, mime, quality);
   });
 }
 
