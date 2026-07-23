@@ -14,7 +14,7 @@ export class ContextManager {
 
   add(item: ContextItem) {
     // dedupe by detail+kind (same file twice → no-op)
-    if (this.items.some(x => x.kind === item.kind && x.detail === item.detail && !x.isCurrent)) return;
+    if (this.items.some(x => x.kind === item.kind && x.label === item.label && x.detail === item.detail && !x.isCurrent)) return;
     this.items.push(item);
     this.emit();
   }

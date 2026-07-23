@@ -60,10 +60,13 @@ import {
 } from '../utils/context_policy';
 import { shouldReuseRecentVisualContext, visualContinuityHint } from '../utils/visual_context';
 import { loadProjectContext } from '../context/project_context';
+import { preparePastedImage } from '../utils/image';
 import {
+  consumeComposerImagePaste,
   consumeComposerFileDrag,
   isComposerDeletionInput,
   isComposerDeletionKey,
+  screenshotBaseName,
 } from '../utils/composer_events';
 
 export const VIEW_TYPE_GLOSSA = 'glossa-view';
@@ -2276,6 +2279,25 @@ export class GlossaView extends ItemView {
     this.inputEl.addEventListener('beforeinput', (e) => {
       if (isComposerDeletionInput(e.inputType)) e.stopPropagation();
     });
+    this.inputEl.addEventListener('paste', (e) => {
+      const files = consumeComposerImagePaste(e);
+      if (files.length === 0) return;
+      const pastedAt = new Date();
+      void (async () => {
+        for (let index = 0; index < files.length; index++) {
+          const file = files[index];
+          try {
+            const prepared = await preparePastedImage(file, screenshotBaseName(pastedAt, index));
+            this.ctx.add(await resolveDroppedFile(prepared.file));
+            if (prepared.compressed) {
+              quickNotice(`Screenshot compressed from ${(prepared.originalBytes / 1024 / 1024).toFixed(1)} MB to ${(prepared.file.size / 1024 / 1024).toFixed(1)} MB.`);
+            }
+          } catch (err) {
+            quickNotice(`Failed to paste screenshot: ${err.message ?? err}`);
+          }
+        }
+      })();
+    }, true);
     this.inputEl.addEventListener('keydown', (e) => {
       // Deletion belongs to the focused textarea. Letting it bubble can make
       // the host act on a selected object in the previously active PDF view.
@@ -2289,12 +2311,12 @@ export class GlossaView extends ItemView {
       if (this.popup.onKey(e)) { e.preventDefault(); return; }
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        if (this.inputEl.value.trim() && !this.streaming) void this.submit();
+        if (this.canSubmitComposer() && !this.streaming) void this.submit();
         return;
       }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        if (this.inputEl.value.trim() && !this.streaming) void this.submit();
+        if (this.canSubmitComposer() && !this.streaming) void this.submit();
         return;
       }
       if (e.key === 'ArrowUp' && this.caretAtTop()) {
@@ -2560,6 +2582,11 @@ export class GlossaView extends ItemView {
         window.setTimeout(() => this.inputWrap?.classList.remove('streamed'), 900);
       }
     }
+  }
+
+  private canSubmitComposer(): boolean {
+    return !!this.inputEl.value.trim()
+      || this.ctx.list().some(item => item.kind === 'image' && !item.isCurrent);
   }
 
   private updateModelBtn() {
@@ -3067,7 +3094,8 @@ export class GlossaView extends ItemView {
   private async submit() {
     if (this.streaming) return;
     const raw = this.inputEl.value.trim();
-    if (!raw) return;
+    const hasExplicitImage = this.ctx.list().some(item => item.kind === 'image' && !item.isCurrent);
+    if (!raw && !hasExplicitImage) return;
 
     // Clear the input IMMEDIATELY so Enter feels snappy. If a downstream
     // pre-flight check fails (no endpoint, locked keys), we restore the
@@ -3092,7 +3120,7 @@ export class GlossaView extends ItemView {
     // Both happen at submit time so the textarea itself never grew.
     const slashExpansion = await this.expandSlashTrigger(raw);
     const markerExpansion = await this.resolveSlashMarkers(slashExpansion.text);
-    const text = markerExpansion.text;
+    const text = markerExpansion.text || (hasExplicitImage ? 'Analyze the attached image(s).' : '');
     const ep = this.activeEndpoint();
     if (!ep) { restoreInput(); quickNotice('No endpoint configured. Open settings.'); return; }
 

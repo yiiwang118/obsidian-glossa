@@ -23,4 +23,65 @@ exports.run = async (t, loadModule) => {
     { x: 1, y: 3, label: 'a' },
     { x: 99, y: 0, label: 'b' },
   ], 'image samples: rounds, clamps, and filters points');
+
+  const png = new File([new Uint8Array([1, 2, 3])], 'image.png', {
+    type: 'image/png',
+    lastModified: 7,
+  });
+  const preparedPng = await mod.preparePastedImage(png, 'Screenshot-20260723-120000');
+  t.eq({
+    name: preparedPng.file.name,
+    type: preparedPng.file.type,
+    size: preparedPng.file.size,
+    compressed: preparedPng.compressed,
+    originalBytes: preparedPng.originalBytes,
+  }, {
+    name: 'Screenshot-20260723-120000.png',
+    type: 'image/png',
+    size: 3,
+    compressed: false,
+    originalBytes: 3,
+  }, 'pasted image: supported images under the cap keep their bytes and format');
+
+  const previousDocument = global.activeDocument;
+  const previousWindow = global.activeWindow;
+  let encodeAttempts = 0;
+  global.activeDocument = {
+    defaultView: {
+      URL: {
+        createObjectURL: () => 'blob:test',
+        revokeObjectURL: () => {},
+      },
+    },
+  };
+  global.activeWindow = {
+    createEl(tag) {
+      if (tag === 'img') {
+        const image = { naturalWidth: 8000, naturalHeight: 4000, width: 8000, height: 4000 };
+        Object.defineProperty(image, 'src', { set: () => queueMicrotask(() => image.onload()) });
+        return image;
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext: () => ({ drawImage: () => {} }),
+        toBlob(callback, mime) {
+          encodeAttempts++;
+          const size = this.width > 3500 ? 6 * 1024 * 1024 : 1024 * 1024;
+          callback(new Blob([new Uint8Array(size)], { type: mime }));
+        },
+      };
+    },
+  };
+  try {
+    const bitmap = new File([new Uint8Array([1, 2, 3, 4])], 'clipboard.bmp', { type: 'image/bmp' });
+    const preparedBitmap = await mod.preparePastedImage(bitmap, 'Screenshot-20260723-120001');
+    t.eq(preparedBitmap.file.type, 'image/webp', 'pasted image: unsupported formats are converted to WebP');
+    t.eq(preparedBitmap.file.name, 'Screenshot-20260723-120001.webp', 'pasted image: converted files receive a WebP name');
+    t.eq(encodeAttempts, 2, 'pasted image: output above the cap triggers a smaller second encode');
+    t.ok(preparedBitmap.file.size <= mod.MAX_ATTACHMENT_IMAGE_BYTES, 'pasted image: compressed output respects the attachment cap');
+  } finally {
+    global.activeDocument = previousDocument;
+    global.activeWindow = previousWindow;
+  }
 };

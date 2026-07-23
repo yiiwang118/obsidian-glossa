@@ -4,7 +4,7 @@ import { estimateTokens } from '../utils/tokens';
 import { uid } from '../utils/dom';
 import { fetchWithSafeRedirects, parseHttpUrl } from '../utils/safe_web';
 import { extractPdfTextFromArrayBuffer, formatPdfDiagnosticMarkdown, type PdfReadTask } from '../utils/pdf';
-import { bytesToBase64 } from '../utils/image';
+import { bytesToBase64, MAX_ATTACHMENT_IMAGE_BYTES } from '../utils/image';
 import { extractVaultPdfCached, vaultImageDataUriCached } from '../utils/media_cache';
 import { inferSelectionLanguage } from '../utils/translation_target';
 import { refinedPdfDomSelectionText } from '../utils/pdf_selection';
@@ -157,7 +157,7 @@ export async function resolveFile(
   if (IMAGE_EXT.test(ext)) {
     try {
       const size = file.stat?.size ?? 0;
-      if (size > MAX_IMAGE_BYTES) {
+      if (size > MAX_ATTACHMENT_IMAGE_BYTES) {
         return {
           id: uid(), kind: 'file', label: file.basename + '.' + ext,
           detail: file.path,
@@ -411,11 +411,9 @@ export async function resolveDroppedFile(f: File): Promise<ContextItem> {
   };
 }
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;     // 5 MB hard cap
-
 export async function resolveImageFile(f: File, resolvedMime = supportedImageMime(f)): Promise<ContextItem> {
   if (!resolvedMime) throw new Error('Unsupported image type. Use PNG, JPEG, GIF, or WebP.');
-  if (f.size > MAX_IMAGE_BYTES) {
+  if (f.size > MAX_ATTACHMENT_IMAGE_BYTES) {
     throw new Error(`Image too large (${(f.size / 1024 / 1024).toFixed(1)} MB > 5 MB cap). Resize and retry.`);
   }
   const buf = await f.arrayBuffer();
