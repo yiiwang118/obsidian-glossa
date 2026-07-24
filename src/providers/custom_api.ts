@@ -2,7 +2,7 @@
 import { requestUrl } from 'obsidian';
 import { isDeepSeekEndpoint, mapOpenAIReasoningEffort, type Endpoint } from '../types';
 import { nativeStreamingHttpRequest } from '../utils/native_http';
-import type { LLMProvider, ChatRequest, ChatChunk } from './types';
+import type { LLMProvider, ChatRequest, ChatChunk, ToolContentBlock } from './types';
 
 /** Strip the SYSTEM_PROMPT_DYNAMIC_BOUNDARY marker used by buildSystemPrompt() for the
  *  Anthropic two-zone cache split. Non-cacheable endpoints get a clean single string. */
@@ -158,7 +158,7 @@ export class CustomApiProvider implements LLMProvider {
           if (m.toolContentBlocks?.length) {
             const blocks: AnyValue[] = [];
             if (m.content) blocks.push({ type: 'text', text: m.content });
-            for (const b of m.toolContentBlocks) blocks.push(b);
+            for (const b of m.toolContentBlocks) blocks.push(toAnthropicContentBlock(b));
             resultContent = blocks;
           }
           const trBlock: AnyValue = { type: 'tool_result', tool_use_id: m.toolCallId, content: resultContent };
@@ -451,7 +451,7 @@ export class CustomApiProvider implements LLMProvider {
           // Send blocks PLUS the text as a leading text block for context
           const blocks: AnyValue[] = [];
           if (m.content) blocks.push({ type: 'text', text: m.content });
-          for (const b of m.toolContentBlocks) blocks.push(b);
+          for (const b of m.toolContentBlocks) blocks.push(toAnthropicContentBlock(b));
           resultContent = blocks;
         } else {
           resultContent = m.content;
@@ -547,7 +547,7 @@ export class CustomApiProvider implements LLMProvider {
     const decoder = new TextDecoder();
     let buf = ''; let bufText = '';
     const toolBuffers = new Map<number, { id: string; name: string; argsStr: string }>();
-    let usage: AnyValue;
+    let usage: AnthropicStreamUsage | undefined;
 
     let lastChunkAt = Date.now();
     let timedOut = false;
@@ -587,7 +587,8 @@ export class CustomApiProvider implements LLMProvider {
                 else if (ev.delta?.type === 'input_json_delta') {
                   const slot = toolBuffers.get(ev.index); if (slot) slot.argsStr += ev.delta.partial_json ?? '';
                 }
-              } else if (ev.type === 'message_delta' && ev.usage) usage = ev.usage;
+              }
+              usage = mergeAnthropicStreamUsage(usage, ev);
             }
           }
         }
@@ -623,6 +624,44 @@ export class CustomApiProvider implements LLMProvider {
   }
 }
 
+interface AnthropicStreamUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+/** Anthropic reports input usage at message_start and output usage at message_delta. */
+export function mergeAnthropicStreamUsage(
+  current: AnthropicStreamUsage | undefined,
+  event: unknown,
+): AnthropicStreamUsage | undefined {
+  if (!event || typeof event !== 'object' || Array.isArray(event)) return current;
+  const record = event as Record<string, unknown>;
+  let candidate: unknown;
+  if (record.type === 'message_start') {
+    const message = record.message;
+    if (message && typeof message === 'object' && !Array.isArray(message)) {
+      candidate = (message as Record<string, unknown>).usage;
+    }
+  } else if (record.type === 'message_delta') {
+    candidate = record.usage;
+  }
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return current;
+  const usage = candidate as Record<string, unknown>;
+  const next: AnthropicStreamUsage = { ...(current ?? {}) };
+  for (const key of [
+    'input_tokens',
+    'output_tokens',
+    'cache_read_input_tokens',
+    'cache_creation_input_tokens',
+  ] as const) {
+    const value = usage[key];
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) next[key] = value;
+  }
+  return next;
+}
+
 /** Build canonical OpenAI-compatible messages once for streaming and
  * requestUrl transports. Rich image tool results are hoisted only after the
  * complete consecutive tool-result group, preserving the required
@@ -638,17 +677,17 @@ export function buildOpenAICompatibleMessages(req: ChatRequest): AnyValue[] {
     }
   }
 
-  let pendingToolImages: AnyValue[] = [];
-  const flushToolImages = () => {
-    if (!pendingToolImages.length) return;
+  let pendingToolMedia: AnyValue[] = [];
+  const flushToolMedia = () => {
+    if (!pendingToolMedia.length) return;
     messages.push({
       role: 'user',
       content: [
-        { type: 'text', text: 'Visual content returned by the preceding tool call(s).' },
-        ...pendingToolImages,
+        { type: 'text', text: 'Rich content returned by the preceding tool call(s).' },
+        ...pendingToolMedia,
       ],
     });
-    pendingToolImages = [];
+    pendingToolMedia = [];
   };
 
   for (let index = 0; index < req.messages.length; index++) {
@@ -656,16 +695,25 @@ export function buildOpenAICompatibleMessages(req: ChatRequest): AnyValue[] {
     if (message.role === 'tool') {
       messages.push({ role: 'tool', tool_call_id: message.toolCallId, content: message.content });
       for (const block of message.toolContentBlocks ?? []) {
-        if (block.type !== 'image') continue;
-        pendingToolImages.push({
-          type: 'image_url',
-          image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` },
-        });
+        if (block.type === 'image') {
+          pendingToolMedia.push({
+            type: 'image_url',
+            image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` },
+          });
+        } else if (block.type === 'document') {
+          pendingToolMedia.push({
+            type: 'file',
+            file: {
+              filename: block.name,
+              file_data: `data:application/pdf;base64,${block.source.data}`,
+            },
+          });
+        }
       }
       continue;
     }
 
-    flushToolImages();
+    flushToolMedia();
     if (message.role === 'assistant' && message.toolCalls?.length) {
       const assistant: AnyValue = {
         role: 'assistant',
@@ -694,8 +742,17 @@ export function buildOpenAICompatibleMessages(req: ChatRequest): AnyValue[] {
     }
     messages.push({ role: message.role, content: message.content });
   }
-  flushToolImages();
+  flushToolMedia();
   return messages;
+}
+
+function toAnthropicContentBlock(block: ToolContentBlock): AnyValue {
+  if (block.type !== 'document') return block;
+  return {
+    type: 'document',
+    source: block.source,
+    title: block.name,
+  };
 }
 
 const ANTHROPIC_KNOWN_MODELS = [

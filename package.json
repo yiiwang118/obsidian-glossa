@@ -1,6 +1,6 @@
 {
   "name": "glossa",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Local-first AI sidebar for context-aware chat, precise note editing, PDF and image analysis, and web research.",
   "main": "main.js",
   "scripts": {
@@ -45,5 +45,8 @@
     "tslib": "^2.6.0",
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.63.0"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
   }
 }

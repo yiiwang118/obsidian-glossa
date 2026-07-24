@@ -11,6 +11,8 @@ exports.run = async (t, loadModule) => {
   const session = { id: 's', title: 't', createdAt: 0, updatedAt: 0, mode: 'chat', endpointId: null,
     messages: [m, { id: 'y', role: 'assistant', content: 'a much longer response that uses more tokens', timestamp: 0 }] };
   t.ok(mod.estimateSessionTokens(session) > mod.estimateMessageTokens(m), 'session estimate > single msg');
+  session.messages.push({ id: 'usage', role: 'assistant', content: 'done', timestamp: 1, usage: { input: 99_000, lastInput: 42_000 } });
+  t.eq(mod.latestProviderInputTokens(session), 42_000, 'compaction prefers the provider-reported final prompt size');
 
   // applyCompact: replaces prefix, records snapshot
   const messages = [];

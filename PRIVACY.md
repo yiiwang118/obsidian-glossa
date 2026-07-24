@@ -15,6 +15,8 @@ What follows is a map of network calls and stored data for the community review 
 | `@url` mention attaching a web page | That URL | HTTP GET | You typed an `@http...` reference | Yes — don't attach |
 | Endpoint connection test | The selected Custom API endpoint (`/models` or a 1-token ping) | API key as required by that endpoint | You click "Test" / "Test active endpoint" in settings | Yes — don't click |
 
+Pasting a screenshot reads image data only from that explicit paste event. Glossa does not poll, monitor, or read ambient clipboard contents. The pasted image remains a local composer attachment until you send the message; sending then follows the first row above.
+
 **The author of Glossa does not run any of these endpoints.** Glossa only calls configured provider URLs and public web URLs you attach or approve.
 
 ## Local subprocesses and shell environment

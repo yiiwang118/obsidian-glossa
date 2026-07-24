@@ -22,6 +22,7 @@ interface ToolChineseCopy {
 const TOOL_ZH: Record<string, ToolChineseCopy> = {
   read_note: { label: '读取笔记', description: '读取指定笔记的内容，可按行、标题或块精确定位。' },
   read_files: { label: '批量读取', description: '在一次调用中读取多个明确指定的文件，减少重复往返。' },
+  list_files: { label: '浏览目录', description: '列出指定 vault 目录内的文件路径，支持递归、glob 和数量限制。' },
   get_active_file: { label: '当前文件', description: '获取当前编辑器中打开的文件，帮助理解“这篇”“当前笔记”等指代。' },
   get_selection: { label: '读取选中内容', description: '获取当前编辑器或阅读视图中的选中文本。' },
   query_metadata: { label: '查询元数据', description: '读取文件属性、标签、标题和缓存元数据，不修改内容。' },

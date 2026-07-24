@@ -4,6 +4,8 @@ import { setStyle } from '../../utils/dom';
 import { formatPdfDiagnosticMarkdown, type PdfExtractionResult, type PdfReadTask } from '../../utils/pdf';
 import { extractVaultPdfCached } from '../../utils/media_cache';
 import { renderVaultPdfPagesCached, type RenderedPdfPages } from '../../utils/pdf_render';
+import { slicePdfPages } from '../../utils/pdf_slice';
+import { bytesToBase64 } from '../../utils/image';
 import type { ToolContentBlock } from '../../providers/types';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
@@ -116,6 +118,16 @@ export const readPdf: ToolImpl = buildTool({
       }
       const maxPages = clampToolNumber(args.max_pages, 1, 500, READ_PDF_MAX_PAGES);
       const maxChars = clampToolNumber(args.max_chars, 1_000, 500_000, READ_PDF_CHAR_CAP);
+      let nativeFallback = '';
+      if (ctx?.nativePdfInput && shouldUseNativePdf(mode)) {
+        try {
+          const raw = await app.vault.readBinary(f);
+          const sliced = await slicePdfPages(raw, args.pages, maxPages);
+          return nativePdfToolResult(path, sliced);
+        } catch (error) {
+          nativeFallback = `\n\nNative PDF fallback: ${error instanceof Error ? error.message : String(error)}`;
+        }
+      }
       const { value: res } = await extractVaultPdfCached(app, f, {
         pages: args.pages,
         maxPages,
@@ -129,7 +141,7 @@ export const readPdf: ToolImpl = buildTool({
       const body = shouldUseSearchSnippets(res, args.query)
         ? formatSearchSnippets(res)
         : res.text;
-      const text = `PDF: ${path} (${res.pageCount} pages, read ${res.pageLabel}, ${res.chars} chars)\n\n${diagnostic}\n\n---\n${body || '[No extracted text returned for this mode]'}${warnings}`;
+      const text = `PDF: ${path} (${res.pageCount} pages, read ${res.pageLabel}, ${res.chars} chars)\n\n${diagnostic}\n\n---\n${body || '[No extracted text returned for this mode]'}${warnings}${nativeFallback}`;
       if (!needsVisualEvidence(res, mode)) return text;
       const pages = res.pagesRead.slice(0, 2).join(',') || '1';
       const { value: rendered } = await renderVaultPdfPagesCached(app, f, pages, {
@@ -172,6 +184,26 @@ function visualPageRange(value: unknown): string {
 function needsVisualEvidence(res: PdfExtractionResult, mode: PdfReadTask): boolean {
   if (mode !== 'auto' && mode !== 'inspect' && mode !== 'summarize') return false;
   return res.diagnostic.textLayer === 'absent' || res.diagnostic.documentKind === 'complex-layout';
+}
+
+function shouldUseNativePdf(mode: PdfReadTask): boolean {
+  return mode === 'auto' || mode === 'summarize' || mode === 'pages' || mode === 'full';
+}
+
+export function nativePdfToolResult(
+  path: string,
+  sliced: { bytes: Uint8Array; totalPages: number; pageLabel: string; pages: number[] },
+): { text: string; contentBlocks: ToolContentBlock[] } {
+  const baseName = path.split('/').pop()?.replace(/\.pdf$/i, '') || 'document';
+  const name = `${baseName}-pages-${sliced.pageLabel.replace(/[^0-9,-]+/g, '_')}.pdf`;
+  return {
+    text: `PDF native pages: ${path} (${sliced.totalPages} total pages, attached ${sliced.pageLabel}). Read the attached PDF directly. Cropped pages 1-${sliced.pages.length} correspond to source pages ${sliced.pages.join(', ')}.`,
+    contentBlocks: [{
+      type: 'document',
+      name,
+      source: { type: 'base64', media_type: 'application/pdf', data: bytesToBase64(sliced.bytes) },
+    }],
+  };
 }
 
 export function visualPdfToolResult(path: string, rendered: RenderedPdfPages): { text: string; contentBlocks: ToolContentBlock[] } {

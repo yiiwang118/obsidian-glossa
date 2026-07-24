@@ -8,6 +8,7 @@
  */
 import { readNote } from './tools/read_note';
 import { readFiles } from './tools/read_files';
+import { listFiles } from './tools/list_files';
 import { discoverSkillsTool } from './tools/discover_skills';
 import { runSkill } from './tools/run_skill';
 import { getActiveFile } from './tools/get_active_file';
@@ -80,6 +81,7 @@ export type {
 export const TOOLS: Record<string, ToolImpl> = {
   read_note: readNote,
   read_files: readFiles,
+  list_files: listFiles,
   get_active_file: getActiveFile,
   get_selection: getSelection,
   query_metadata: queryMetadata,

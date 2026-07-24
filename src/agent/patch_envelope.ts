@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
+import { applyTextEdits, type AppliedTextEdit } from './text_edit_engine';
 /**
  * Codex-style `apply_patch` envelope parser + applier.
  * Ported from /codex-rs/apply-patch (parser.rs, seek_sequence.rs) to TypeScript.
@@ -181,40 +182,25 @@ export function seekSequence(source: string[], pattern: string[], start: number,
 
 /** Apply parsed chunks to source text. Returns the new content.
  *  Throws if any chunk fails to anchor. */
-export function applyUpdate(source: string, chunks: UpdateChunk[]): string {
-  const srcLines = source.split('\n');
-  let cursor = 0;
-  // Build output incrementally by copying spans + replacements
-  const out: string[] = [];
-
-  for (const chunk of chunks) {
-    let searchFrom = cursor;
-    // If a context header is provided, jump cursor to first line whose TRIMMED
-    // form equals or starts with the context. Previously this used `includes`
-    // which made `@@ func foo` match an unrelated line like `// some_foo_name`,
-    // landing the hunk at the wrong location and silently corrupting the file.
-    if (chunk.context) {
-      const needle = chunk.context.trim();
-      const ctxIdx = srcLines.findIndex((l, idx) => {
-        if (idx < cursor) return false;
-        const t = l.trim();
-        return t === needle || t.startsWith(needle);
-      });
-      if (ctxIdx >= 0) searchFrom = ctxIdx;
-    }
-    const idx = seekSequence(srcLines, chunk.oldLines, searchFrom, chunk.isEndOfFile);
-    if (idx < 0) {
-      throw new Error(`hunk did not match (${chunk.oldLines.length} lines)${chunk.context ? ` near "${chunk.context}"` : ''}`);
-    }
-    // Copy unchanged lines before match
-    for (let i = cursor; i < idx; i++) out.push(srcLines[i]);
-    // Emit replacement
-    for (const l of chunk.newLines) out.push(l);
-    cursor = idx + chunk.oldLines.length;
+export function applyUpdateDetailed(source: string, chunks: UpdateChunk[]): { content: string; edits: AppliedTextEdit[] } {
+  const empty = chunks.findIndex(chunk => chunk.oldLines.length === 0);
+  if (empty >= 0) {
+    throw new Error(`hunk ${empty + 1} has no context or removed lines; include a unique unchanged line so insertion is anchored safely`);
   }
-  // Tail
-  for (let i = cursor; i < srcLines.length; i++) out.push(srcLines[i]);
-  return out.join('\n');
+  const result = applyTextEdits(source, chunks.map(chunk => ({
+    oldText: chunk.oldLines.join('\n'),
+    newText: chunk.newLines.join('\n'),
+    anchor: chunk.isEndOfFile ? 'end' : 'any',
+  })));
+  if (result.ok === false) {
+    const chunk = chunks[result.operationIndex ?? 0];
+    throw new Error(`hunk ${(result.operationIndex ?? 0) + 1} did not match${chunk?.context ? ` near "${chunk.context}"` : ''}: ${result.error}`);
+  }
+  return { content: result.content, edits: result.edits };
+}
+
+export function applyUpdate(source: string, chunks: UpdateChunk[]): string {
+  return applyUpdateDetailed(source, chunks).content;
 }
 
 /** True if the given string looks like a codex envelope (starts with "*** Begin Patch"). */

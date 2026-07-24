@@ -45,7 +45,7 @@ function scanText(file, text, checks) {
 
 const bundleChecks = [
   { label: 'source map marker', pattern: /sourceMappingURL|sourcesContent/ },
-  { label: 'clipboard access marker', pattern: /navigator\.clipboard|clipboardData|(?:electron|obsidian)\.clipboard|\bclipboard\.(?:read|write|readText|writeText)\b/i },
+  { label: 'ambient clipboard access marker', pattern: /navigator\.clipboard|(?:electron|obsidian)\.clipboard|\bclipboard\.(?:read|write|readText|writeText)\b/i },
   { label: 'Node filesystem require marker', pattern: /require\(["'](?:node:)?fs["']\)/ },
   { label: 'Node child_process require marker', pattern: /child_process|spawn\(|execFile|execSync/ },
   { label: 'Node os/system identity marker', pattern: /require\(["'](?:node:)?os["']\)|os\.hostname|os\.userInfo|networkInterfaces/ },
@@ -53,7 +53,7 @@ const bundleChecks = [
   { label: 'vault enumeration marker', pattern: /getMarkdownFiles|getFiles\(|vault\.getFiles/ },
   { label: 'command dispatch marker', pattern: /executeCommandById|commands\.executeCommand|Command palette ID/i },
   { label: 'MCP marketplace marker', pattern: /MCP_CATALOG|mcp_marketplace/ },
-  { label: 'unsafe HTML sink marker', pattern: /\.innerHTML\b|\.outerHTML\b|insertAdjacentHTML|createContextualFragment|document\.write|srcdoc/i },
+  { label: 'unsafe HTML sink marker', pattern: /\.innerHTML\b|\.outerHTML\b|insertAdjacentHTML|createContextualFragment|document\.write|\.srcdoc\b|\bsrcdoc\s*=/ },
   { label: 'dynamic code execution marker', pattern: /\beval\s*\(|new\s+Function\s*\(|\bFunction\s*\(/ },
   { label: 'string timer execution marker', pattern: /set(?:Timeout|Interval)\s*\(\s*["'`]/ },
 ];
@@ -66,7 +66,7 @@ const sourceChecks = [
   { label: 'process.env source marker', pattern: /\bprocess\.env\b/ },
   { label: 'vault enumeration source marker', pattern: /\b(?:getMarkdownFiles|getFiles)\s*\(/ },
   { label: 'command dispatch source marker', pattern: /\bexecuteCommandById\b|\bcommands\.executeCommand\b|Command palette ID/i },
-  { label: 'unsafe HTML sink marker', pattern: /\.innerHTML\b|\.outerHTML\b|insertAdjacentHTML|createContextualFragment|document\.write|srcdoc/i },
+  { label: 'unsafe HTML sink marker', pattern: /\.innerHTML\b|\.outerHTML\b|insertAdjacentHTML|createContextualFragment|document\.write|\.srcdoc\b|\bsrcdoc\s*=/ },
   { label: 'dynamic code execution marker', pattern: /\beval\s*\(|new\s+Function\s*\(|\bFunction\s*\(/ },
   { label: 'string timer execution marker', pattern: /set(?:Timeout|Interval)\s*\(\s*["'`]/ },
 ];

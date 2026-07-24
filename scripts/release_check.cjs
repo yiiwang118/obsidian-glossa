@@ -367,7 +367,6 @@ for (const file of listTsFiles('src')) {
     ['globalThis', /\bglobalThis\b/],
     ['instanceof HTMLElement', /\binstanceof\s+HTMLElement\b/],
     ['navigator.clipboard', /\bnavigator\.clipboard\b/],
-    ['clipboardData', /\bclipboardData\b/],
   ]) {
     if (pattern.test(source)) fail(`${file} contains review-blocked source pattern: ${label}.`);
   }

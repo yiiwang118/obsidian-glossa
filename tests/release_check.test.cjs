@@ -383,7 +383,7 @@ exports.run = async function(t) {
     writeFile(root, 'src/clean.ts', 'export const value = event.clipboardData;\n');
   }, root => {
     const result = runReleaseCheck(root);
-    t.ok(!result.ok && result.output.includes('review-blocked source pattern: clipboardData'), 'clipboardData source pattern is rejected');
+    t.ok(result.ok, 'event-scoped ClipboardEvent data is allowed');
   });
 
   withFixture(root => {

@@ -70,7 +70,20 @@ exports.run = async function(t, loadModule) {
   t.eq(mod.consumeComposerImagePaste(textPaste), [], 'ordinary text paste has no image attachments');
   t.eq(textPasteCalls, [], 'ordinary text paste keeps its native behavior');
 
-  const fixedTime = new Date(2026, 6, 22, 15, 4, 5);
-  t.eq(mod.screenshotBaseName(fixedTime, 0), 'Screenshot-20260722-150405', 'first screenshot gets a stable timestamp name');
-  t.eq(mod.screenshotBaseName(fixedTime, 1), 'Screenshot-20260722-150405-2', 'multiple screenshots get distinct names');
+  const fixedTime = new Date(2026, 6, 22, 15, 4, 5, 27);
+  t.eq(mod.screenshotBaseName(fixedTime, 0), 'Screenshot-20260722-150405-027', 'first screenshot gets a millisecond timestamp name');
+  t.eq(mod.screenshotBaseName(fixedTime, 1), 'Screenshot-20260722-150405-027-2', 'multiple screenshots get distinct names');
+
+  const pending = new mod.PendingComposerAttachments();
+  let release;
+  const deferred = new Promise(resolve => { release = resolve; });
+  pending.track(deferred);
+  t.eq(pending.size, 1, 'pending attachments are visible to the submit guard');
+  let waited = false;
+  const waiting = pending.wait().then(() => { waited = true; });
+  await Promise.resolve();
+  t.eq(waited, false, 'submit waits while screenshot preparation is pending');
+  release();
+  await waiting;
+  t.eq(pending.size, 0, 'finished attachment tasks leave the pending set');
 };

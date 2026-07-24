@@ -82,9 +82,9 @@ exports.run = async function(t, loadModule) {
 
   const initial = tools.listToolSpecs();
   const initialNames = new Set(initial.map(spec => spec.name));
-  t.eq(initial.length, 16, 'initial model surface contains only core tools plus context control');
+  t.eq(initial.length, 17, 'initial model surface contains only core tools plus folder discovery and context control');
   t.ok(JSON.stringify(initial).length < 16000, 'initial tool schemas stay below the context budget target');
-  t.ok(initialNames.has('read_note') && initialNames.has('apply_patch') && initialNames.has('context_prune'), 'core read, edit, and context tools remain immediately available');
+  t.ok(initialNames.has('read_note') && initialNames.has('list_files') && initialNames.has('apply_patch') && initialNames.has('context_prune'), 'core browse, read, edit, and context tools remain immediately available');
   t.ok(!initialNames.has('get_backlinks') && !initialNames.has('patch_canvas'), 'specialized tools are deferred');
 
   const allVisible = new Set(tools.listToolSpecs({ includeDeferred: true }).map(spec => spec.name));

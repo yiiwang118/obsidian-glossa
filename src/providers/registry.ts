@@ -42,4 +42,12 @@ export function buildProvider(ep: Endpoint, globalProxy: string, fallbackCwd?: s
   (p as AnyValue).__fallbackCwd = fallbackCwd;
   return p;
 }
+
+/** Conservative capability gate for the document-block path. */
+export function supportsNativePdfInput(ep: Endpoint): boolean {
+  if (ep.kind !== 'custom-api') return false;
+  const model = (ep.model ?? '').toLowerCase();
+  if (ep.apiStyle === 'anthropic') return model.includes('claude');
+  return model.includes('claude') || model.includes('gemini');
+}
 /* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

@@ -3,7 +3,7 @@ import { App } from 'obsidian';
 import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, isReadOnlyTool, normalizeToolResult, validateToolInput, type ToolImpl, type ToolRunResult } from './tools';
 import { askApproval, type ApprovalResult } from './approval';
 import { CheckpointManager, pathsTouchedByTool } from './checkpoint';
-import type { LLMProvider, MessageInput, ToolSpec } from '../providers/types';
+import type { LLMProvider, MessageInput, ToolContentBlock, ToolSpec } from '../providers/types';
 import type { TokenUsage, ToolEvent, PermissionLevel, PermissionRule } from '../types';
 import { matchPermissionRule, modelContextWindow } from '../types';
 import { uid } from '../utils/dom';
@@ -19,6 +19,8 @@ import {
   formatContextPruneOutcome,
   resolveContextPruneRequest,
 } from '../utils/context_pruning';
+import { batchSameFileEdits } from './tool_call_batching';
+import { workspaceScopeViolation } from './workspace_scope';
 
 /** Pick tools allowed under a given permission level. listToolSpecs() already
  *  excludes deferred tools (those reachable only via tool_search) and bridge
@@ -76,6 +78,8 @@ export interface AgentLoopOptions {
   neverApproveTools: string[];
   /** Persisted "always allow / always deny" rules consulted before prompting the user. */
   permissionRules?: PermissionRule[];
+  /** Hard vault-relative folders the Agent may inspect or mutate. Empty means the full vault. */
+  workspaceFolders?: string[];
   /** Called whenever a NEW rule should be persisted (from an "Always allow…" choice). */
   onPermissionRulePersist?: (rule: PermissionRule) => void | Promise<void>;
   /** Called for every approval decision (allow / deny / auto-*) so the caller can
@@ -84,6 +88,8 @@ export interface AgentLoopOptions {
   model?: string;
   signal?: AbortSignal;
   attachedImages?: { dataUri: string; name?: string }[];
+  /** Active provider/model can accept native PDF document blocks. */
+  nativePdfInput?: boolean;
 
   /** Optional injections from plugin: */
   checkpoint?: CheckpointManager;
@@ -399,6 +405,10 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
             totalUsage.cacheRead = (totalUsage.cacheRead ?? 0) + (ch.usage.cacheRead ?? 0);
             totalUsage.cacheWrite = (totalUsage.cacheWrite ?? 0) + (ch.usage.cacheWrite ?? 0);
             totalUsage.costUSD = (totalUsage.costUSD ?? 0) + (ch.usage.costUSD ?? 0);
+            if (typeof ch.usage.input === 'number' && ch.usage.input >= 0) {
+              totalUsage.lastInput = ch.usage.input;
+              totalUsage.peakInput = Math.max(totalUsage.peakInput ?? 0, ch.usage.input);
+            }
           }
         } else if (ch.type === 'error') {
           opts.onError(ch.error);
@@ -491,13 +501,15 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       mcpEntry?: { client: AnyValue; originalName: string } | null;
       effectiveArgs: AnyValue;
       rewriteToWriteNote: boolean;
-      /** If set, the call is already resolved (denied, unknown tool, etc.) — skip execution. */
-      resolved?: { status: 'error' | 'denied'; result: string };
+      /** If set, the call is already resolved (denied, grouped, unknown, etc.) — skip execution. */
+      resolved?: { status: 'success' | 'error' | 'denied'; result: string };
     }
+    const fileEditBatching = batchSameFileEdits(toolCalls);
     const prepared: Prepared[] = [];
     for (const call of toolCalls) {
       const tool = getTool(call.name);
       const mcpEntry = !tool ? opts.mcp?.findClient(call.name) : null;
+      let effectiveArgs = fileEditBatching.leaderArgs.get(call.id) ?? call.args;
 
       // ── backfillObservableInput ────────────────────────────────────────
       // For observers (permission rules, audit log, approval modal, UI card)
@@ -507,14 +519,14 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       // `backfillObservableInput` pattern: e.g. `expandPath()` on file_path
       // so a deny-rule of `path:Notes/foo.md` can't be bypassed by passing
       // `~/Notes/foo.md` or `./Notes/foo.md`.
-      let observableArgs: AnyValue = call.args;
-      if (tool?.backfillObservableInput && call.args && typeof call.args === 'object') {
+      let observableArgs: AnyValue = effectiveArgs;
+      if (tool?.backfillObservableInput && effectiveArgs && typeof effectiveArgs === 'object') {
         try {
-          observableArgs = { ...call.args };
+          observableArgs = { ...effectiveArgs };
           tool.backfillObservableInput(observableArgs);
         } catch (e) {
           console.warn(`[tool] backfillObservableInput threw for ${call.name}`, e);
-          observableArgs = call.args;
+          observableArgs = effectiveArgs;
         }
       }
 
@@ -542,6 +554,30 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           continue;
         }
       }
+      const scopeError = workspaceScopeViolation(
+        call.name,
+        effectiveArgs,
+        opts.workspaceFolders ?? [],
+        (opts.app.workspace as AnyValue).getActiveFile?.()?.path,
+      );
+      if (scopeError) {
+        prepared.push({
+          call, ev, tool, mcpEntry, effectiveArgs, rewriteToWriteNote: false,
+          resolved: { status: 'denied', result: `Denied by Agent workspace: ${scopeError}` },
+        });
+        continue;
+      }
+      const groupedLeaderId = fileEditBatching.followerToLeader.get(call.id);
+      if (groupedLeaderId) {
+        prepared.push({
+          call, ev, tool, mcpEntry, effectiveArgs: call.args, rewriteToWriteNote: false,
+          resolved: {
+            status: 'success',
+            result: `Grouped into file_edit call ${groupedLeaderId}. That call owns the single diff, approval, and file write; use its result as authoritative.`,
+          },
+        });
+        continue;
+      }
       const repeatedFailureBlock = failureGuard.blockReason(call.name);
       if (repeatedFailureBlock) {
         prepared.push({ call, ev, tool, mcpEntry, effectiveArgs: call.args, rewriteToWriteNote: false,
@@ -562,26 +598,6 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
             `You are looping. Either call a DIFFERENT tool or provide the final answer with what you have so far.` } });
         continue;
       }
-      // Batching guard — 3+ file_edit calls to the SAME file in one turn
-      // means the model is doing single-spot edits one at a time. We count
-      // distinct file_edit signatures that target this file by scanning the
-      // Map (cheap since it's keyed by tool name + args).
-      if (call.name === 'file_edit' && typeof call.args?.file_path === 'string') {
-        const fpFragment = `"file_path":${JSON.stringify(call.args.file_path)}`;
-        let sameFileEdits = 0;
-        for (const [sig, c] of sigCount) {
-          if (sig.startsWith('file_edit:') && sig.includes(fpFragment)) sameFileEdits += c;
-        }
-        if (sameFileEdits >= 3) {
-          prepared.push({ call, ev, tool, mcpEntry, effectiveArgs: call.args, rewriteToWriteNote: false,
-            resolved: { status: 'error', result:
-              `Refused: you've already issued ${sameFileEdits} file_edit calls on "${call.args.file_path}" in this turn. ` +
-              `Batch the remaining changes: use file_edit with replace_all:true if the same old_string repeats, ` +
-              `or one apply_patch envelope with multiple hunks. Do not call file_edit on this file again until you've batched.` } });
-          continue;
-        }
-      }
-      let effectiveArgs = call.args;
       let forceApproval = false;
       let toolPermissionAllows = false;
       if (tool?.checkPermissions) {
@@ -679,7 +695,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           run: async () => '',
         });
         const askFn = opts.approver ?? ((t: ToolImpl, a: AnyValue) => askApproval(opts.app, t, a));
-        const res = await askFn(previewTool, call.args);
+        const res = await askFn(previewTool, effectiveArgs);
         if (!res.ok) {
           opts.onPermissionDecision?.({
             at: Date.now(), tool: call.name, args: JSON.stringify(call.args ?? {}).slice(0, 200),
@@ -731,11 +747,12 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     /* --- Phase 3: execute. For each prepared entry, run snapshot → tool → record result. */
     const runOne = async (p: Prepared) => {
       const { call, ev, tool, mcpEntry, effectiveArgs, rewriteToWriteNote, resolved } = p;
+      let modelContentBlocks: ToolContentBlock[] | undefined;
       if (resolved) {
         ev.status = resolved.status; ev.result = resolved.result; ev.endedAt = Date.now();
         opts.onToolEnd(ev);
         messages.push({ role: 'tool', toolCallId: call.id, toolName: call.name,
-          toolIsError: true, content: resolved.result });
+          toolIsError: resolved.status !== 'success', content: resolved.result });
         return;
       }
       // Snapshot files before running + activate any conditional skill whose
@@ -780,7 +797,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         // with the user's Stop button
         // instead of running to completion in the background. Tools that
         // don't read the signal are unchanged.
-        const toolCtx = { signal: opts.signal };
+        const toolCtx = { signal: opts.signal, nativePdfInput: opts.nativePdfInput };
         if (rewriteToWriteNote) {
           const writeTool = getTool('write_note');
           if (!writeTool) throw new Error('write_note tool not found');
@@ -880,7 +897,12 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         ev.status = returnedError ? 'error' : 'success';
         ev.result = norm.text;                        // UI gets the full text
         (ev as AnyValue)._modelBoundResult = modelBoundText; // model gets preview
-        ev.contentBlocks = norm.contentBlocks;
+        modelContentBlocks = norm.contentBlocks;
+        // PDF payloads can be many megabytes. Keep them in this live run so the
+        // next model step can inspect them, but do not persist them in chats.json.
+        // A later turn can call read_pdf again from the compact path/page result.
+        const persistentBlocks = norm.contentBlocks?.filter(block => block.type !== 'document');
+        ev.contentBlocks = persistentBlocks?.length ? persistentBlocks : undefined;
       } catch (e) {
         ev.status = 'error'; ev.result = e.message ?? String(e);
       }
@@ -898,7 +920,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         toolCallId: call.id,
         toolName: call.name,
         content: modelBound,
-        toolContentBlocks: ev.contentBlocks,
+        toolContentBlocks: modelContentBlocks,
         toolIsError: ev.status === 'error',
       });
     };

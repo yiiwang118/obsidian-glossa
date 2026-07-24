@@ -21,6 +21,11 @@ export const TOOL_META: Record<string, ToolMeta> = {
     color: '#5b9bff', category: 'read',
     summarize: a => `${Array.isArray(a.requests) ? a.requests.length : 0} files`,
   },
+  list_files: {
+    icon: ICON.folder, label: 'List files', verb: 'Browsing folder',
+    color: '#5b9bff', category: 'read',
+    summarize: a => a.folder || '/',
+  },
   get_active_file: {
     icon: ICON.file, label: 'Active file', verb: 'Loading active',
     color: '#5b9bff', category: 'read',

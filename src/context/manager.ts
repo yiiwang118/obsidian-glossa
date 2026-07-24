@@ -13,8 +13,12 @@ export class ContextManager {
   totalTokens(): number { return this.items.reduce((a, x) => a + x.tokens, 0); }
 
   add(item: ContextItem) {
-    // dedupe by detail+kind (same file twice → no-op)
-    if (this.items.some(x => x.kind === item.kind && x.label === item.label && x.detail === item.detail && !x.isCurrent)) return;
+    // Clipboard screenshots can share a generated name and byte size while
+    // containing different pixels, so image identity is the exact payload.
+    const duplicate = item.kind === 'image'
+      ? this.items.some(x => x.kind === 'image' && x.content === item.content && !x.isCurrent)
+      : this.items.some(x => x.kind === item.kind && x.label === item.label && x.detail === item.detail && !x.isCurrent);
+    if (duplicate) return;
     this.items.push(item);
     this.emit();
   }

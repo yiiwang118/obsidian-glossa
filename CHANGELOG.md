@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file. Format adhe
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-07-25
+
+### Added
+- Added the `list_files` discovery tool requested in [Issue #1](https://github.com/yiiwang118/obsidian-glossa/issues/1), with full vault-relative paths, recursive and glob filters, bounded results, and direct handoff to note, PDF, and edit tools.
+- Added optional Agent workspace folders so discovery, reads, and writes can be limited to explicit vault subdirectories instead of granting ambient vault-wide access.
+- Added provider-reported prompt usage and a context breakdown for system instructions, tool schemas, history, and attachments; automatic compaction now prefers the provider's real input-token count.
+- Added cropped native-PDF delivery for compatible models and optional compact outgoing-link context in `read_note`.
+
+### Changed
+- Unified `file_edit` and patch application on a pure text-edit engine that preserves BOMs, CRLF/LF style, and trailing newlines while handling NFKC, smart punctuation, combining marks, and line-end whitespace conservatively.
+- Combined same-turn edits to one file into one diff, one approval, and one write. Multi-file patches now materialize and fingerprint every result before writing, reject conflicts up front, and roll back all touched files if any write fails.
+- Restricted fuzzy replacement to a final, unique, high-confidence fallback and report the selected match mode instead of silently guessing.
+
+### Fixed
+- Made pasted screenshots wait for attachment preparation before submit, blocked duplicate submissions, and prevented asynchronous paste or provider callbacks from leaking into a newly selected chat.
+- Preserved filename-aware attachment identity while deduplicating exact image payloads.
+
+### Checks
+- Added regression coverage for exact, normalized, and fuzzy edits; overlap and stale-content rejection; newline and Unicode preservation; transaction rollback; same-turn batching; workspace scope; PDF slicing; outgoing links; provider usage; and screenshot-paste races.
+
 ## [0.7.2] — 2026-07-22
 
 ### Changed

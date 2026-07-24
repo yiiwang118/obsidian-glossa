@@ -78,6 +78,6 @@ exports.run = async (t, loadModule) => {
   t.ok(mod.listFiles.spec.name === 'list_files', 'list_files: spec name unchanged');
   t.ok(mod.listFiles.spec.parameters.properties.glob, 'list_files: spec has glob param');
   t.ok(mod.listFiles.spec.parameters.properties.limit, 'list_files: spec has limit param');
-  t.ok(mod.listFiles.spec.description.includes('FULL vault-relative paths'),
+  t.ok(mod.listFiles.spec.description.toLowerCase().includes('full vault-relative paths'),
        'list_files: description promises full paths');
 };

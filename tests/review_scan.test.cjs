@@ -39,6 +39,14 @@ exports.run = async function(t) {
     const unsafeHtml = runScan(root);
     t.ok(!unsafeHtml.ok && unsafeHtml.output.includes('unsafe HTML sink marker'), 'bundle unsafe HTML sink is rejected');
 
+    fs.writeFileSync(path.join(root, 'main.js'), 'const srcDoc = { pages: [] };\nconsole.log(srcDoc.pages);\n');
+    const pdfVariable = runScan(root);
+    t.ok(pdfVariable.ok, 'ordinary srcDoc PDF variable is not mistaken for the HTML srcdoc sink');
+
+    fs.writeFileSync(path.join(root, 'main.js'), 'frame.srcdoc = "<p>unsafe</p>";\n');
+    const srcdocSink = runScan(root);
+    t.ok(!srcdocSink.ok && srcdocSink.output.includes('unsafe HTML sink marker'), 'bundle srcdoc assignment is rejected');
+
     fs.writeFileSync(path.join(root, 'main.js'), 'window.setTimeout(() => console.log("ok"), 1);\n');
     fs.writeFileSync(path.join(root, 'styles.css'), '.x:has(.y) { color: red; }\n');
     const cssHas = runScan(root);

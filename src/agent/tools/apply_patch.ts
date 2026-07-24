@@ -1,7 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
-import { parseEnvelope, applyUpdate, looksLikeEnvelope, summarizeOps, seekSequence, type FileOp } from '../patch_envelope';
-import { assertVaultPath, buildTool, vaultFolderOf, type ToolImpl } from './_shared';
+import { parseEnvelope, looksLikeEnvelope, summarizeOps, type FileOp } from '../patch_envelope';
+import { commitPatchTransaction, materializePatchTransaction, obsidianPatchFileStore } from '../patch_transaction';
+import { applyTextEdits, describeTextMatches, textFingerprint, type TextEditOperation } from '../text_edit_engine';
+import { assertVaultPath, buildTool, type ToolImpl } from './_shared';
 
 export const applyPatch: ToolImpl = buildTool({
   isReadOnly: () => false,
@@ -27,19 +29,12 @@ export const applyPatch: ToolImpl = buildTool({
     if (typeof a.patch === 'string' && looksLikeEnvelope(a.patch)) {
       try {
         const ops = parseEnvelope(a.patch);
+        const plan = await materializePatchTransaction(ops, obsidianPatchFileStore(app));
+        a.__expectedFingerprints = Object.fromEntries(plan.snapshots.map(snapshot => [snapshot.path, snapshot.fingerprint]));
         const lines: string[] = [summarizeOps(ops), ''];
-        for (const op of ops) {
-          if (op.kind === 'update') {
-            const f = app.vault.getAbstractFileByPath(op.path);
-            if (!(f instanceof TFile)) { lines.push(`✗ ${op.path}: file not found`); continue; }
-            const text = await app.vault.read(f);
-            const srcLines = text.split('\n');
-            for (let h = 0; h < op.chunks.length; h++) {
-              const c = op.chunks[h];
-              const idx = seekSequence(srcLines, c.oldLines, 0, c.isEndOfFile);
-              lines.push(`hunk ${h + 1}${c.context ? ` @ ${c.context}` : ''}: ${idx >= 0 ? `✓ matched at line ${idx + 1}` : '✗ NOT MATCHED'}`);
-            }
-          }
+        for (const operation of plan.operations) {
+          lines.push(`${operation.kind} ${operation.sourcePath}${operation.targetPath !== operation.sourcePath ? ` → ${operation.targetPath}` : ''}`);
+          if (operation.matchSummary) lines.push(`  ${operation.matchSummary}`);
         }
         return lines.join('\n');
       } catch (e) {
@@ -49,20 +44,19 @@ export const applyPatch: ToolImpl = buildTool({
     const f = app.vault.getAbstractFileByPath(a.path);
     if (!(f instanceof TFile)) return `(file not found: ${a.path})`;
     const text = await app.vault.read(f);
-    const lines: string[] = [`File: ${a.path}\n`];
-    for (let i = 0; i < (a.edits ?? []).length; i++) {
-      const ed = a.edits[i];
-      const found = text.includes(ed.search);
-      lines.push(`Edit ${i + 1} ${found ? '✓' : '✗ NOT MATCHED'}:`);
-      lines.push(`  - ${ed.search.slice(0, 200)}`);
-      lines.push(`  + ${ed.replace.slice(0, 200)}`);
-      lines.push('');
+    const edits = a.edits ?? [];
+    const result = applyTextEdits(text, edits.map((edit: AnyValue) => ({ oldText: edit.search, newText: edit.replace })));
+    if (result.ok === false) return `File: ${a.path}\n\n✗ Edit ${(result.operationIndex ?? 0) + 1}: ${result.error}`;
+    a.__expectedFingerprint = result.fingerprint;
+    const lines: string[] = [`File: ${a.path}`, `Match: ${describeTextMatches(result.edits)}`, ''];
+    for (let i = 0; i < edits.length; i++) {
+      lines.push(`Edit ${i + 1}:`, `  - ${edits[i].search.slice(0, 200)}`, `  + ${edits[i].replace.slice(0, 200)}`, '');
     }
     return lines.join('\n');
   },
   spec: {
     name: 'apply_patch',
-    description: 'Apply one atomic patch across one or more vault files. Prefer patch envelope mode for multiple hunks/files: wrap Add File, Delete File, Update File, and optional Move to operations between *** Begin Patch and *** End Patch; prefix hunk lines with space, -, or + and include unique context. Legacy path+edits mode performs ordered exact replacements in one file. Requires user approval.',
+    description: 'Apply an atomic one- or multi-file patch. All final content and fingerprints are checked before writing; conflicts, stale files, ambiguous hunks, or failures abort and roll back. Match mode is disclosed. Prefer an envelope for multiple files. Requires approval.',
     parameters: {
       type: 'object',
       properties: {
@@ -101,36 +95,27 @@ export const applyPatch: ToolImpl = buildTool({
           catch (e) { return `Error: ${op.kind} → move target invalid — ${e.message}`; }
         }
       }
-      const touched: string[] = [];
-      for (const op of ops) {
-        try {
-          if (op.kind === 'add') {
-            const folder = vaultFolderOf(op.path);
-            if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
-            if (app.vault.getAbstractFileByPath(op.path)) return `Error: Add File: ${op.path} already exists.`;
-            await app.vault.create(op.path, op.contents);
-            touched.push(`+${op.path}`);
-          } else if (op.kind === 'delete') {
-            const f = app.vault.getAbstractFileByPath(op.path);
-            if (!(f instanceof TFile)) return `Error: Delete File: ${op.path} not found.`;
-            await app.fileManager.trashFile(f);
-            touched.push(`-${op.path}`);
-          } else {
-            const f = app.vault.getAbstractFileByPath(op.path);
-            if (!(f instanceof TFile)) return `Error: Update File: ${op.path} not found.`;
-            const text = await app.vault.read(f);
-            const next = applyUpdate(text, op.chunks);
-            await app.vault.modify(f, next);
-            if (op.movePath && op.movePath !== op.path) {
-              await app.fileManager.renameFile(f, op.movePath);
-            }
-            touched.push(`~${op.movePath ?? op.path}`);
+      const store = obsidianPatchFileStore(app);
+      let plan;
+      try { plan = await materializePatchTransaction(ops, store); }
+      catch (e) { return `Error: patch preflight failed: ${e.message}`; }
+      const expected = args.__expectedFingerprints;
+      if (expected && typeof expected === 'object') {
+        for (const snapshot of plan.snapshots) {
+          if (Object.prototype.hasOwnProperty.call(expected, snapshot.path) && expected[snapshot.path] !== snapshot.fingerprint) {
+            return `Error: ${snapshot.path} changed after preview; patch was not started.`;
           }
-        } catch (e) {
-          return `Error in ${op.kind} ${('path' in op) ? op.path : ''}: ${e.message}`;
         }
       }
-      return `Applied patch (${ops.length} file op${ops.length === 1 ? '' : 's'}): ${touched.join(', ')}`;
+      const committed = await commitPatchTransaction(plan, store);
+      if (committed.ok === false) {
+        const rollback = committed.rolledBack
+          ? 'All partial writes were rolled back.'
+          : `Rollback incomplete: ${committed.rollbackErrors.join('; ')}`;
+        return `Error: patch commit failed: ${committed.error}. ${rollback}`;
+      }
+      const matches = plan.operations.flatMap(operation => operation.matchSummary ? [`${operation.targetPath}: ${operation.matchSummary}`] : []);
+      return `Applied atomic patch (${ops.length} file op${ops.length === 1 ? '' : 's'}): ${committed.touched.join(', ')}${matches.length ? `. Matches: ${matches.join(' | ')}` : ''}`;
     }
 
     let path: string;
@@ -140,18 +125,20 @@ export const applyPatch: ToolImpl = buildTool({
     if (!Array.isArray(edits) || edits.length === 0) return 'Error: provide either `patch` (envelope) or `edits` array.';
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;
-    let text = await app.vault.read(f);
+    const text = await app.vault.read(f);
+    const expected = typeof args.__expectedFingerprint === 'string' ? args.__expectedFingerprint : '';
+    if (expected && textFingerprint(text) !== expected) return `Error: ${path} changed after preview; no changes were applied.`;
+    const operations: TextEditOperation[] = [];
     for (let i = 0; i < edits.length; i++) {
       const ed = edits[i];
       if (typeof ed.search !== 'string' || ed.search.length === 0) return `Error: edit ${i + 1}: "search" must be a non-empty string.`;
       if (typeof ed.replace !== 'string') return `Error: edit ${i + 1}: "replace" must be a string.`;
-      const occurrences = text.split(ed.search).length - 1;
-      if (occurrences === 0) return `Error: edit ${i + 1}: "search" not found.`;
-      if (occurrences > 1) return `Error: edit ${i + 1}: "search" matches ${occurrences} places — be more specific.`;
-      text = text.replace(ed.search, ed.replace);
+      operations.push({ oldText: ed.search, newText: ed.replace });
     }
-    await app.vault.modify(f, text);
-    return `Patched ${path} (${edits.length} edits).`;
+    const result = applyTextEdits(text, operations);
+    if (result.ok === false) return `Error: edit ${(result.operationIndex ?? 0) + 1}: ${result.error}`;
+    await app.vault.modify(f, result.content);
+    return `Patched ${path} once (${edits.length} edits; ${describeTextMatches(result.edits)}).`;
   },
 });
 /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

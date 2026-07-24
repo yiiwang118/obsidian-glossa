@@ -36,5 +36,11 @@ exports.run = async function(t, loadModule) {
 
   manager.add({ id: 'image-1', kind: 'image', label: 'Screenshot-1.png', detail: '42KB / image/png', content: 'data:image/png;base64,AAAA', tokens: 42, pinned: false });
   manager.add({ id: 'image-2', kind: 'image', label: 'Screenshot-2.png', detail: '42KB / image/png', content: 'data:image/png;base64,BBBB', tokens: 42, pinned: false });
+  manager.add({ id: 'image-duplicate', kind: 'image', label: 'Another-name.png', detail: '99KB / image/png', content: 'data:image/png;base64,AAAA', tokens: 99, pinned: false });
   t.eq(manager.imagesForAPI().map(image => image.name), ['Screenshot-1.png', 'Screenshot-2.png'], 'same-size screenshots with different names are both retained');
+
+  manager.add({ id: 'file-a', kind: 'file', label: 'A.md', detail: '1 KB', content: 'A', tokens: 1, pinned: false });
+  manager.add({ id: 'file-b', kind: 'file', label: 'B.md', detail: '1 KB', content: 'B', tokens: 1, pinned: false });
+  t.eq(manager.list().filter(item => item.id === 'file-a' || item.id === 'file-b').length, 2,
+    'non-image attachments with the same detail retain the original filename-aware dedupe behavior');
 };

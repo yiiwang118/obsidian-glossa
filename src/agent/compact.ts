@@ -40,6 +40,15 @@ export function estimateSessionTokens(session: ChatSession): number {
   return n;
 }
 
+/** Most recent provider-reported prompt size, preferred over character estimates. */
+export function latestProviderInputTokens(session: ChatSession): number | null {
+  for (let index = session.messages.length - 1; index >= 0; index--) {
+    const value = session.messages[index].usage?.lastInput;
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+  }
+  return null;
+}
+
 const SUMMARY_SYSTEM_PROMPT = `You are summarising an in-progress chat session for context compression. Produce a dense, factual restart record so another assistant can resume without guessing.
 
 The transcript may contain blocks marked [PRIOR SUMMARY — …]. Those are summaries from a previous compaction round; treat their content as fully authoritative for everything they cover, and CARRY THEIR INFORMATION FORWARD into your new summary without loss. Merge it with the newer turns.

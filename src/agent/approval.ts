@@ -3,6 +3,8 @@ import { App, Modal, Notice, TFile } from 'obsidian';
 import type { ToolImpl } from './tools';
 import { diffStats, lineDiff, applySelectedDiff, renderDiffInto } from '../utils/diff';
 import { looksLikeEnvelope, previewEnvelope } from './patch_envelope';
+import { applyTextEdits, describeTextMatches } from './text_edit_engine';
+import { materializePatchTransaction, obsidianPatchFileStore } from './patch_transaction';
 import { setStyle } from '../utils/dom';
 
 export interface ApprovalResult {
@@ -105,20 +107,29 @@ class ApprovalModal extends Modal {
         newText = a.content ?? '';
       } else if (name === 'file_edit') {
         label = a.file_path ?? '';
-        if (a.old_string === '') {
+        const rawEdits = Array.isArray(a.edits)
+          ? a.edits
+          : [{ old_string: a.old_string, new_string: a.new_string, replace_all: a.replace_all }];
+        if (rawEdits.length === 1 && rawEdits[0].old_string === '') {
           const f = this.app.vault.getAbstractFileByPath(a.file_path);
           if (f instanceof TFile) { warnings.push('⚠ File already exists — file_edit with empty old_string is for NEW files only.'); return this.renderWarnings(label, warnings); }
-          oldText = ''; newText = a.new_string ?? '';
+          oldText = ''; newText = rawEdits[0].new_string ?? '';
         } else {
           const f = this.app.vault.getAbstractFileByPath(a.file_path);
           if (!(f instanceof TFile)) { warnings.push(`File not found: ${a.file_path}. Tool will fail.`); return this.renderWarnings(label, warnings); }
           oldText = await this.app.vault.read(f);
-          const occ = typeof a.old_string === 'string' ? oldText.split(a.old_string).length - 1 : 0;
-          if (occ === 0) { warnings.push(`old_string not found in ${a.file_path}.`); return this.renderWarnings(label, warnings); }
-          if (occ > 1 && !a.replace_all) { warnings.push(`old_string matches ${occ} places — pass replace_all:true or provide more context.`); return this.renderWarnings(label, warnings); }
-          newText = a.replace_all
-            ? oldText.split(a.old_string).join(a.new_string ?? '')
-            : oldText.replace(a.old_string, a.new_string ?? '');
+          const result = applyTextEdits(oldText, rawEdits.map((edit: AnyValue) => ({
+            oldText: edit.old_string,
+            newText: edit.new_string,
+            replaceAll: edit.replace_all === true,
+          })));
+          if (result.ok === false) {
+            warnings.push(`Edit ${(result.operationIndex ?? 0) + 1}: ${result.error}`);
+            return this.renderWarnings(label, warnings);
+          }
+          newText = result.content;
+          warnings.push(`Match: ${describeTextMatches(result.edits)}`);
+          a.__expectedFingerprint = result.fingerprint;
         }
       } else if (name === 'edit_section') {
         const f = this.app.vault.getAbstractFileByPath(a.path);
@@ -137,18 +148,18 @@ class ApprovalModal extends Modal {
         const f = this.app.vault.getAbstractFileByPath(a.path);
         if (!(f instanceof TFile)) { warnings.push(`File not found: ${a.path}. Tool will fail.`); return this.renderWarnings(label, warnings); }
         oldText = await this.app.vault.read(f);
-        let cur = oldText;
         const edits = a.edits ?? [];
-        let badEdit = -1;
-        for (let i = 0; i < edits.length; i++) {
-          const ed = edits[i];
-          const occ = cur.split(ed.search).length - 1;
-          if (occ === 0) { warnings.push(`Edit ${i + 1}: "search" not found in current state. Tool will fail.`); badEdit = i; break; }
-          if (occ > 1)  { warnings.push(`Edit ${i + 1}: "search" matches ${occ} places — tool requires unique match and will REJECT. Make it more specific.`); badEdit = i; break; }
-          cur = cur.replace(ed.search, ed.replace);
+        const result = applyTextEdits(oldText, edits.map((edit: AnyValue) => ({
+          oldText: edit.search,
+          newText: edit.replace,
+        })));
+        if (result.ok === false) {
+          warnings.push(`Edit ${(result.operationIndex ?? 0) + 1}: ${result.error}`);
+          return this.renderWarnings(label, warnings);
         }
-        if (badEdit >= 0) return this.renderWarnings(label, warnings);
-        newText = cur;
+        newText = result.content;
+        warnings.push(`Match: ${describeTextMatches(result.edits)}`);
+        a.__expectedFingerprint = result.fingerprint;
       } else if (name === 'append_to_note') {
         const f = this.app.vault.getAbstractFileByPath(a.path);
         if (f instanceof TFile) oldText = await this.app.vault.read(f);
@@ -270,6 +281,18 @@ class ApprovalModal extends Modal {
       // flag the buildResult / keydown paths check rather than relying on a
       // window.setTimeout(0) that loses the race against a fast Enter press.
       (this as AnyValue).__blockApprove = 'Envelope invalid.';
+      return wrap;
+    }
+
+    try {
+      const plan = await materializePatchTransaction(ops, obsidianPatchFileStore(this.app));
+      this.args.__expectedFingerprints = Object.fromEntries(
+        plan.snapshots.map(snapshot => [snapshot.path, snapshot.fingerprint]),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      wrap.createDiv({ cls: 'nc-approval-warning', text: `Preflight failed: ${message}` });
+      (this as AnyValue).__blockApprove = 'Envelope preflight failed.';
       return wrap;
     }
 

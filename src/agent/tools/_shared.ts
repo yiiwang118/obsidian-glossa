@@ -57,7 +57,7 @@ export interface ToolImpl {
    *  UI has moved on. The arg is OPTIONAL: tools that don't honor it are
    *  fine (the existing AbortController on opts.signal still cancels the
    *  STREAM from the provider; this just lets tools cooperate). */
-  run: (app: App, args: AnyValue, ctx?: { signal?: AbortSignal }) => Promise<string | ToolRunResult>;
+  run: (app: App, args: AnyValue, ctx?: { signal?: AbortSignal; nativePdfInput?: boolean }) => Promise<string | ToolRunResult>;
 
   // ── Extended fields (introduced for buildTool factory) ────────────────────
   /** Backward-compat: alternate names this tool answers to (e.g. after a rename). */

@@ -23,6 +23,7 @@
 
 1. 输入框的 paste 事件只提取 `image/*` 剪贴板项目。
 2. 图片经过命名、格式检查和必要的压缩。
+   发送操作会等待这一异步步骤完成，避免附件进入下一轮对话。
 3. 图片作为 `ContextItem(kind: image)` 加入现有上下文栏。
 4. 发送时继续通过现有 `imagesForAPI()` 和 `attachedImages` 链路进入多模态请求。
 5. 纯图片消息会在模型请求中补充 `Analyze the attached image(s).`，但聊天气泡只显示图片附件。
@@ -42,38 +43,14 @@
   - 统一 5 MB 图片附件上限。
   - 增加截图格式规范化和 Canvas/WebP 压缩。
 - `src/context/manager.ts`
-  - 去重时加入附件名称，避免同尺寸的不同截图被误判为同一张。
+  - 图片按实际数据去重，避免同尺寸或同名截图互相覆盖。
 - `tests/composer_events.test.cjs` 和 `tests/context_manager.test.cjs`
   - 覆盖图片粘贴、文字粘贴、多图命名和同尺寸图片去重。
-
-## 本地试用
-
-当前仓库位于：
-
-```text
-E:\obsidian-glossa
-```
-
-当前使用的 vault 插件目录为：
-
-```text
-F:\paper\.obsidian\plugins\glossa
-```
-
-在 PowerShell 中运行：
-
-```powershell
-Set-Location E:\obsidian-glossa
-$env:GLOSSA_PLUGIN_DIR = 'F:\paper\.obsidian\plugins\glossa'
-npm.cmd run build
-```
-
-随后在 Obsidian 中关闭再开启 Glossa 插件，或完全重启 Obsidian。打开 Glossa 侧栏，使用 `Win+Shift+S` 截图，在输入框按 `Ctrl+V`，确认出现图片缩略图后即可发送。
 
 ## 验证结果
 
 - TypeScript 类型检查通过。
-- 全量测试通过：672 passed，0 failed。
+- 全量测试通过，0 failed。
 - review lint 和等价 strict/directives lint 通过。
 - 生产构建通过。
 - `review:scan` 和 `release:check --allow-dirty` 通过。

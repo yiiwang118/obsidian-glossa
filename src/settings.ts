@@ -1043,6 +1043,21 @@ export class GlossaSettingTab extends PluginSettingTab {
       .setDesc(bi('Load nearby AGENTS.md, CLAUDE.md, or .codex.md files as project instructions for the active task.', '把当前任务附近的 AGENTS.md、CLAUDE.md 或 .codex.md 作为项目规则加载。'))
       .addToggle(t => t.setValue(this.plugin.settings.loadProjectContext)
         .onChange(async v => { this.plugin.settings.loadProjectContext = v; await this.plugin.saveSettings(); }));
+    new Setting(containerEl).setName(bi('Agent workspace folders', 'Agent 工作区目录'))
+      .setDesc(bi(
+        'Optional vault-relative folders, one per line. Agent tools cannot read, enumerate, or modify paths outside them. Leave empty for the full vault.',
+        '可选的 vault 相对目录，每行一个。Agent 工具不能读取、枚举或修改这些目录之外的路径；留空表示整个 vault。',
+      ))
+      .addTextArea(area => area
+        .setPlaceholder('Projects/current\npapers/rl')
+        .setValue(this.plugin.settings.agentWorkspaceFolders.join('\n'))
+        .onChange(async value => {
+          this.plugin.settings.agentWorkspaceFolders = Array.from(new Set(value
+            .split(/\r?\n/)
+            .map(folder => folder.trim().replace(/^\/+|\/+$/g, ''))
+            .filter(Boolean)));
+          await this.plugin.saveSettings();
+        }));
 
     this.renderCapabilities(containerEl, generation);
 

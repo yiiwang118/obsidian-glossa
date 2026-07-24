@@ -15,14 +15,14 @@ import { BUILTIN_SLASH_COMMANDS, applySlashTemplate } from '../commands/slash';
 import { Popup, type PopupItem } from './popup';
 import { ICON, AURORA_ORB_SVG } from './icons';
 import { el, clear, uid, debounce, setStyle, setVars, setTrustedSvg } from '../utils/dom';
-import { formatTokenCount } from '../utils/tokens';
-import { buildProvider } from '../providers/registry';
+import { estimateTokens, formatTokenCount } from '../utils/tokens';
+import { buildProvider, supportsNativePdfInput } from '../providers/registry';
 import type { ChatMessage, ContextItem, ContextItemRef, ChatSession, Endpoint, ToolEvent, PlanItem } from '../types';
 import { modelContextWindow, reasoningOptionsForEndpoint } from '../types';
 import { CustomApiProvider } from '../providers/custom_api';
 import type { MessageInput } from '../providers/types';
 import { runAgentLoop } from '../agent/loop';
-import { compactSession, applyCompact, estimateSessionTokens, undoCompact as undoCompactInSession } from '../agent/compact';
+import { compactSession, applyCompact, estimateSessionTokens, latestProviderInputTokens, undoCompact as undoCompactInSession } from '../agent/compact';
 import {
   metaFor,
   activityDescriptionFor,
@@ -32,7 +32,7 @@ import {
   renderToolUseErrorMessage as toolErrorMessage,
 } from '../agent/tool_meta';
 import { quickNotice } from '../utils/notice';
-import type { ToolImpl } from '../agent/tools';
+import { listToolSpecs, type ToolImpl } from '../agent/tools';
 import type { ApprovalResult } from '../agent/approval';
 import { renderDiffInto } from '../utils/diff';
 import { renderInto, decorateCodeBlocks, trimIncompleteMath } from '../utils/markdown';
@@ -66,6 +66,7 @@ import {
   consumeComposerFileDrag,
   isComposerDeletionInput,
   isComposerDeletionKey,
+  PendingComposerAttachments,
   screenshotBaseName,
 } from '../utils/composer_events';
 
@@ -127,6 +128,14 @@ interface ThreadRailItem {
   time: number;
   messageEl: HTMLElement;
   markerEl: HTMLElement;
+}
+
+interface ContextTokenBreakdown {
+  system: number;
+  tools: number;
+  history: number;
+  attachments: number;
+  providerInput?: number;
 }
 
 export class GlossaView extends ItemView {
@@ -209,6 +218,9 @@ export class GlossaView extends ItemView {
   private sessionInputTokens = 0;
   private sessionOutputTokens = 0;
   private currentActivityStartedAt = 0;
+  private readonly pendingComposerAttachments = new PendingComposerAttachments();
+  private submitInFlight = false;
+  private contextTokenBreakdown: ContextTokenBreakdown | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: GlossaPlugin) {
     super(leaf);
@@ -364,6 +376,8 @@ export class GlossaView extends ItemView {
     actSeg.onclick  = () => pickMode('act');
 
     this.tokenBadge = el('span', { className: 'nc-token-badge', parent: header, title: t('token_total') });
+    makeButtonLike(this.tokenBadge, bi('Context usage details', '上下文用量明细'));
+    this.tokenBadge.onclick = () => this.openContextUsageMenu();
     this.updateTokenBadge();
 
     this.updatePillEl = el('button', { className: 'nc-update-pill', parent: header, type: 'button' });
@@ -593,12 +607,51 @@ export class GlossaView extends ItemView {
 
   private updateTokenBadge() {
     if (!this.tokenBadge) return;
+    if (this.contextTokenBreakdown) {
+      const breakdown = this.contextTokenBreakdown;
+      const estimated = breakdown.system + breakdown.tools + breakdown.history + breakdown.attachments;
+      const total = breakdown.providerInput ?? estimated;
+      this.tokenBadge.textContent = formatTokenCount(total);
+      this.tokenBadge.title = [
+        `System: ${formatTokenCount(breakdown.system)}`,
+        `Tools: ${formatTokenCount(breakdown.tools)}`,
+        `History: ${formatTokenCount(breakdown.history)}`,
+        `Attachments: ${formatTokenCount(breakdown.attachments)}`,
+        `Estimated total: ${formatTokenCount(estimated)}`,
+        breakdown.providerInput !== undefined ? `Provider reported: ${formatTokenCount(breakdown.providerInput)}` : '',
+      ].filter(Boolean).join('\n');
+      this.tokenBadge.toggleClass('warn', total > this.plugin.settings.warnTokenThreshold);
+      return;
+    }
     const ctxN = this.ctx.totalTokens();
     const selN = this.currentSelection ? Math.max(1, Math.ceil(this.currentSelection.text.length / 4)) : 0;
     const total = ctxN + selN;
     this.tokenBadge.textContent = formatTokenCount(total);
     this.tokenBadge.title = `Context: ${ctxN} tok${selN ? ` + Selection: ${selN} tok` : ''} = ${total}`;
     this.tokenBadge.toggleClass('warn', total > this.plugin.settings.warnTokenThreshold);
+  }
+
+  private openContextUsageMenu() {
+    const breakdown = this.contextTokenBreakdown;
+    if (!breakdown) return;
+    const menu = new Menu();
+    const rows: [string, number][] = [
+      [bi('System prompt', '系统提示'), breakdown.system],
+      [bi('Tool schemas', '工具定义'), breakdown.tools],
+      [bi('History and message', '历史与消息'), breakdown.history],
+      [bi('Attachments', '附件'), breakdown.attachments],
+    ];
+    for (const [label, value] of rows) {
+      menu.addItem(item => item.setTitle(`${label}  ${formatTokenCount(value)}`).setDisabled(true));
+    }
+    if (breakdown.providerInput !== undefined) {
+      menu.addSeparator();
+      menu.addItem(item => item
+        .setTitle(`${bi('Provider prompt total', '供应商 prompt 总量')}  ${formatTokenCount(breakdown.providerInput ?? 0)}`)
+        .setDisabled(true));
+    }
+    const rect = this.tokenBadge.getBoundingClientRect();
+    menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 });
   }
 
   private effectiveContextWindow(model: string | undefined | null = this.activeEndpoint()?.model): {
@@ -2283,12 +2336,15 @@ export class GlossaView extends ItemView {
       const files = consumeComposerImagePaste(e);
       if (files.length === 0) return;
       const pastedAt = new Date();
-      void (async () => {
+      const pasteSessionToken = this.sessionToken;
+      const task = (async () => {
         for (let index = 0; index < files.length; index++) {
           const file = files[index];
           try {
             const prepared = await preparePastedImage(file, screenshotBaseName(pastedAt, index));
-            this.ctx.add(await resolveDroppedFile(prepared.file));
+            const item = await resolveDroppedFile(prepared.file);
+            if (pasteSessionToken !== this.sessionToken) return;
+            this.ctx.add(item);
             if (prepared.compressed) {
               quickNotice(`Screenshot compressed from ${(prepared.originalBytes / 1024 / 1024).toFixed(1)} MB to ${(prepared.file.size / 1024 / 1024).toFixed(1)} MB.`);
             }
@@ -2297,6 +2353,14 @@ export class GlossaView extends ItemView {
           }
         }
       })();
+      this.inputWrap.classList.add('is-preparing-attachment');
+      void this.pendingComposerAttachments.track(task).finally(() => {
+        if (this.pendingComposerAttachments.size === 0) {
+          this.inputWrap.classList.remove('is-preparing-attachment');
+        }
+        this.updateSubmitBtn();
+      });
+      this.updateSubmitBtn();
     }, true);
     this.inputEl.addEventListener('keydown', (e) => {
       // Deletion belongs to the focused textarea. Letting it bubble can make
@@ -2586,7 +2650,8 @@ export class GlossaView extends ItemView {
 
   private canSubmitComposer(): boolean {
     return !!this.inputEl.value.trim()
-      || this.ctx.list().some(item => item.kind === 'image' && !item.isCurrent);
+      || this.ctx.list().some(item => item.kind === 'image' && !item.isCurrent)
+      || this.pendingComposerAttachments.size > 0;
   }
 
   private updateModelBtn() {
@@ -3092,7 +3157,21 @@ export class GlossaView extends ItemView {
      Submit — runs the agent loop (with tools if endpoint supports it)
      ============================================================ */
   private async submit() {
+    if (this.streaming || this.submitInFlight) return;
+    this.submitInFlight = true;
+    try {
+      await this.submitPrepared();
+    } finally {
+      this.submitInFlight = false;
+      this.updateSubmitBtn();
+    }
+  }
+
+  private async submitPrepared() {
     if (this.streaming) return;
+    const submitSessionToken = this.sessionToken;
+    await this.pendingComposerAttachments.wait();
+    if (this.streaming || submitSessionToken !== this.sessionToken) return;
     const raw = this.inputEl.value.trim();
     const hasExplicitImage = this.ctx.list().some(item => item.kind === 'image' && !item.isCurrent);
     if (!raw && !hasExplicitImage) return;
@@ -3102,6 +3181,7 @@ export class GlossaView extends ItemView {
     // original text so the user can fix the issue and retry.
     const inputBackup = this.inputEl.value;
     const restoreInput = () => {
+      if (submitSessionToken !== this.sessionToken) return;
       this.inputEl.value = inputBackup;
       this.recomputeInputHeight();
       this.inputEl.focus();
@@ -3119,7 +3199,9 @@ export class GlossaView extends ItemView {
     // 2) Then resolve any legacy {{...}} markers
     // Both happen at submit time so the textarea itself never grew.
     const slashExpansion = await this.expandSlashTrigger(raw);
+    if (submitSessionToken !== this.sessionToken) return;
     const markerExpansion = await this.resolveSlashMarkers(slashExpansion.text);
+    if (submitSessionToken !== this.sessionToken) return;
     const text = markerExpansion.text || (hasExplicitImage ? 'Analyze the attached image(s).' : '');
     const ep = this.activeEndpoint();
     if (!ep) { restoreInput(); quickNotice('No endpoint configured. Open settings.'); return; }
@@ -3127,6 +3209,7 @@ export class GlossaView extends ItemView {
     // Decrypt endpoint FIRST — fail before touching UI / message state so we don't leave
     // an empty assistant bubble + cursor on the screen.
     const epReady = await this.plugin.getDecryptedEndpoint(ep);
+    if (submitSessionToken !== this.sessionToken) return;
     if (!epReady) { restoreInput(); quickNotice('Endpoint key locked or invalid. Unlock encryption or re-enter the API key.'); return; }
 
     // Auto-compact: if the existing session is approaching the context budget, summarise
@@ -3137,11 +3220,13 @@ export class GlossaView extends ItemView {
     let preSubmitCompacted = false;
     const effectiveWindow = this.effectiveContextWindow(epReady.model);
     if (this.plugin.settings.autoCompactEnabled) {
-      const used = estimateSessionTokens(this.session);
+      const reported = latestProviderInputTokens(this.session);
+      const used = reported ?? estimateSessionTokens(this.session);
       const budget = effectiveWindow.maxCtx;
       const threshold = budget * (this.plugin.settings.autoCompactThresholdPct / 100);
       if (used > threshold) {
         await this.runAutoCompact(epReady, 'auto');
+        if (submitSessionToken !== this.sessionToken) return;
         preSubmitCompacted = true;
       }
     }
@@ -3178,6 +3263,7 @@ export class GlossaView extends ItemView {
     // edits and lazily resolves non-Markdown files using the requested task
     // (for example front + ending pages for /summarize).
     await this.hydrateCurrentContextForPrompt(raw, embeddedSelection || embeddedCurrentFile);
+    if (submitSessionToken !== this.sessionToken) return;
     const turnContextItems = this.ctx.list();
     const hasExplicitAttachments = turnContextItems.some(it => !it.isCurrent);
 
@@ -3251,7 +3337,7 @@ export class GlossaView extends ItemView {
     // file verbatim. Suppress only that duplicate copy; otherwise the open
     // file is always present and its policy role decides how it is used.
     const suppressEmbeddedCurrent = embeddedSelection || embeddedCurrentFile;
-    const { text: ctxBlock, dropped, forcedDrops } = this.ctx.asPromptBlock(softCap, hardCap, {
+    const { text: ctxBlock, dropped, forcedDrops, remaining: attachmentTextTokens } = this.ctx.asPromptBlock(softCap, hardCap, {
       suppressAutoCurrent: suppressEmbeddedCurrent,
       items: turnContextItems,
     });
@@ -3301,6 +3387,16 @@ export class GlossaView extends ItemView {
     // only guess from its own final replies (#2). Each assistant turn that ran tools
     // re-emits the tool_use blocks; each toolEvent becomes a role:'tool' message.
     const history = this.buildModelHistory(userMsg.id, this.currentAsstMsg.id);
+    const enableTools = ep.kind === 'custom-api' && !ep.useObsidianFetch;
+
+    this.contextTokenBreakdown = {
+      system: estimateTokens(sysPrompt),
+      tools: enableTools ? estimateTokens(JSON.stringify(listToolSpecs())) : 0,
+      history: estimateTokens(history.map(message => `${message.role}:${message.content}`).join('\n')) + estimateTokens(text),
+      attachments: attachmentTextTokens + explicitTurnImages.reduce((sum, image) => sum + Math.ceil(image.dataUri.length / 1365), 0),
+    };
+    this.updateTokenBadge();
+    this.renderCostBar();
 
     this.abortCtl = new AbortController();
 
@@ -3308,7 +3404,6 @@ export class GlossaView extends ItemView {
     // CLI providers → either single-shot (no tools) or fullAgent (their own tool dispatch).
     // For read-only permission we still expose read-side tools.
     // requestUrl path is non-streaming + non-tool-aware → must disable.
-    const enableTools = ep.kind === 'custom-api' && !ep.useObsidianFetch;
     if (ep.kind === 'custom-api' && ep.useObsidianFetch && this.plugin.settings.runMode === 'act') {
       quickNotice('Tools disabled in "Use Obsidian requestUrl" mode — switch off requestUrl for full agent.');
     }
@@ -3319,7 +3414,7 @@ export class GlossaView extends ItemView {
     // event if the user switched / cleared the session mid-stream. Without
     // this guard, chunks queued before a switch would write into the new
     // session's messages array and corrupt history.
-    const myToken = this.sessionToken;
+    const myToken = submitSessionToken;
     const live = () => myToken === this.sessionToken;
 
     await runAgentLoop({
@@ -3337,6 +3432,7 @@ export class GlossaView extends ItemView {
       autoApproveTools: this.plugin.settings.agentAlwaysApproveTools,
       neverApproveTools: this.plugin.settings.agentNeverApproveTools,
       permissionRules: this.plugin.settings.permissionRules,
+      workspaceFolders: this.plugin.settings.agentWorkspaceFolders,
       onPermissionRulePersist: async (rule) => {
         this.plugin.settings.permissionRules = [
           // Drop any superseded duplicate (same tool + scope + value + session scope)
@@ -3362,6 +3458,7 @@ export class GlossaView extends ItemView {
       model: ep.model,
       signal: this.abortCtl.signal,
       attachedImages: requestImages,
+      nativePdfInput: supportsNativePdfInput(epReady),
       checkpoint: this.plugin.checkpoint,
       sessionId: this.session.id,
       turnId: this.currentAsstMsg?.id,
@@ -3485,6 +3582,10 @@ export class GlossaView extends ItemView {
           if (usage.input) this.sessionInputTokens += usage.input;
           if (usage.output) this.sessionOutputTokens += usage.output;
           if (usage.costUSD) this.sessionCostUSD += usage.costUSD;
+          if (typeof usage.lastInput === 'number' && this.contextTokenBreakdown) {
+            this.contextTokenBreakdown.providerInput = usage.lastInput;
+            this.updateTokenBadge();
+          }
         }
       },
     });
@@ -3652,6 +3753,11 @@ export class GlossaView extends ItemView {
     if (lvl === 'read-only') dyn.push(`# Permission: read-only\nWrite/edit/delete tools are disabled at this permission level. Only read-side tools are available.`);
     else if (lvl === 'workspace-write') dyn.push(`# Permission: workspace-write\nYou may modify files inside this vault. Each write requires user approval.`);
 
+    const workspaceFolders = this.plugin.settings.agentWorkspaceFolders.map(folder => folder.trim()).filter(Boolean);
+    if (workspaceFolders.length > 0) {
+      dyn.push(`# Agent workspace\nYou may read, browse, or modify files only inside these vault-relative folders: ${workspaceFolders.map(folder => `"${folder}"`).join(', ')}. Pass an allowed folder explicitly to list_files; do not attempt vault-root enumeration.`);
+    }
+
     if (this.plugin.settings.loadProjectContext) {
       const proj = await loadProjectContext(this.app);
       if (proj) dyn.push('# Project instructions\n\n' + proj);
@@ -3755,6 +3861,7 @@ export class GlossaView extends ItemView {
     this.pendingRegeneratePrompt = null;
     this.recentVisualContext = null;
     this.sessionCostUSD = 0; this.sessionInputTokens = 0; this.sessionOutputTokens = 0;
+    this.contextTokenBreakdown = null;
     this.msgUIs.clear();
     clear(this.messagesEl);
     this.resetThreadRail();
@@ -3781,6 +3888,7 @@ export class GlossaView extends ItemView {
     this.historyWindow = latestHistoryWindow(this.session.messages);
     this.pendingRegeneratePrompt = null;
     this.recentVisualContext = null;
+    this.contextTokenBreakdown = null;
     if (this.session.messages.length === 0) {
       this.msgUIs.clear();
       clear(this.messagesEl);
@@ -3832,6 +3940,7 @@ export class GlossaView extends ItemView {
     this.sessionCostUSD = 0;
     this.sessionInputTokens = 0;
     this.sessionOutputTokens = 0;
+    this.contextTokenBreakdown = null;
     this.currentTurnId = null;
     this.streamingBuf = '';
     this.streamingMsgUI = null;

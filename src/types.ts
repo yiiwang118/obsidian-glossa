@@ -12,6 +12,10 @@ export interface TokenUsage {
   cacheRead?: number;
   cacheWrite?: number;
   costUSD?: number;
+  /** Provider-reported input tokens for the final request in an agent run. */
+  lastInput?: number;
+  /** Largest provider-reported input prompt observed during the run. */
+  peakInput?: number;
 }
 
 export interface ToolEvent {
@@ -336,6 +340,8 @@ export interface GlossaSettings {
   permissionLevel: PermissionLevel;     // claw-code-style 3-tier
   runMode: RunMode;                      // plan / act (Cline-style)
   loadProjectContext: boolean;           // auto-load AGENTS.md / CLAUDE.md / .codex.md
+  /** Vault-relative folders the Agent may access. Empty means the full vault. */
+  agentWorkspaceFolders: string[];
 
   chatsFolder: string;
 
@@ -446,6 +452,7 @@ export const DEFAULT_SETTINGS: GlossaSettings = {
   permissionLevel: 'read-only',
   runMode: 'plan',
   loadProjectContext: true,
+  agentWorkspaceFolders: [],
   chatsFolder: 'Chats',
   globalProxy: '',
   customApiUseObsidianFetch: false,

@@ -14,6 +14,25 @@ function optionalNumber(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined;
 }
 
+export function formatCompactOutgoingLinks(
+  links: readonly { link: string; displayText?: string }[],
+  resolve: (link: string) => string | null,
+  limit: number,
+): string {
+  const seen = new Set<string>();
+  const rows: string[] = [];
+  for (const link of links) {
+    const target = resolve(link.link) ?? link.link;
+    const key = `${link.link}\u0000${target}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const label = link.displayText?.trim();
+    rows.push(`- [[${link.link}]]${label && label !== link.link ? ` (${label})` : ''} -> ${target}`);
+    if (rows.length >= limit) break;
+  }
+  return rows.length > 0 ? `\n\nOutgoing links (${rows.length}):\n${rows.join('\n')}` : '\n\nOutgoing links: none';
+}
+
 export const readNote: ToolImpl = buildTool({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
@@ -89,7 +108,7 @@ export const readNote: ToolImpl = buildTool({
   describe: a => `read ${a.path}${a.start_line ? ` lines ${a.start_line}-${a.end_line ?? '...'}` : ''}`,
   spec: {
     name: 'read_note',
-    description: 'Read one explicitly targeted vault file before editing or answering about its body. Optional 1-based line ranges avoid loading irrelevant content. Full reads are capped at 50,000 characters or 5,000 lines. Do not call when the same current-file content is already attached in context.',
+    description: 'Read one explicitly targeted vault file before editing or answering about its body. Optional 1-based line ranges avoid loading irrelevant content. Set include_outgoing_links only when a small link summary can avoid another tool call. Full reads are capped at 50,000 characters or 5,000 lines. Do not call when the same current-file content is already attached in context.',
     parameters: {
       type: 'object',
       properties: {
@@ -97,6 +116,8 @@ export const readNote: ToolImpl = buildTool({
         start_line: { type: 'integer', minimum: 1, description: 'Optional 1-based first line. Defaults to 1 when another range field is set.' },
         end_line: { type: 'integer', minimum: 1, description: 'Optional inclusive last line. Takes precedence over max_lines.' },
         max_lines: { type: 'integer', minimum: 1, maximum: 5_000, description: 'Lines to return when end_line is omitted. Default 200.' },
+        include_outgoing_links: { type: 'boolean', description: 'Append a compact outgoing-link list. Default false.' },
+        outgoing_link_limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum outgoing links when included. Default 12.' },
       },
       required: ['path'],
       additionalProperties: false,
@@ -111,11 +132,19 @@ export const readNote: ToolImpl = buildTool({
     const text = await app.vault.read(f);
     try {
       const input = inputRecord(args);
-      return formatNoteRead(path, text, {
+      const body = formatNoteRead(path, text, {
         startLine: optionalNumber(input.start_line),
         endLine: optionalNumber(input.end_line),
         maxLines: optionalNumber(input.max_lines),
       });
+      if (input.include_outgoing_links !== true) return body;
+      const limit = optionalNumber(input.outgoing_link_limit) ?? 12;
+      const links = app.metadataCache.getFileCache(f)?.links ?? [];
+      return body + formatCompactOutgoingLinks(
+        links,
+        link => app.metadataCache.getFirstLinkpathDest(link, path)?.path ?? null,
+        limit,
+      );
     } catch (error) {
       return `Error: ${error instanceof Error ? error.message : String(error)}`;
     }

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile, TFolder } from 'obsidian';
-import { buildTool, globToRegExp as sharedGlobToRegExp, type ToolImpl } from './_shared';
+import { assertVaultPath, buildTool, globToRegExp as sharedGlobToRegExp, type ToolImpl } from './_shared';
 
 /** Local wrapper so the rest of this file keeps the case-insensitive flag
  *  list_files has always used. */
@@ -21,18 +21,7 @@ export const listFiles: ToolImpl = buildTool({
   },
   spec: {
     name: 'list_files',
-    description: [
-      'List files inside a vault folder. Returns FULL vault-relative paths (one per line)',
-      'so you can pass them directly to read_note / read_pdf / file_edit / apply_patch.',
-      '',
-      'Args:',
-      '- folder (optional): vault-relative folder path. Empty or "/" means vault root.',
-      '- glob (optional): glob pattern matched against the FULL path. Supports **, *, ?. Defaults to "**/*.md".',
-      '- recursive (optional, default true): whether to descend into subfolders.',
-      '- all_files (optional): when true, include non-markdown files. Ignored if `glob` is set.',
-      '- include_folders (optional): when true, include folder entries (with trailing /). Default false.',
-      '- limit (optional, default 500): cap the number of returned entries.',
-    ].join('\n'),
+    description: 'List full vault-relative paths in one folder for later read/edit calls. Defaults to recursive Markdown files; supports glob, all-file, folder, and limit options.',
     parameters: {
       type: 'object',
       properties: {
@@ -41,12 +30,17 @@ export const listFiles: ToolImpl = buildTool({
         recursive: { type: 'boolean', description: 'Default true.' },
         all_files: { type: 'boolean', description: 'When true, include non-markdown files. Ignored if glob is set.' },
         include_folders: { type: 'boolean', description: 'Default false.' },
-        limit: { type: 'number', description: 'Cap on returned entries. Default 500.' },
+        limit: { type: 'integer', minimum: 1, maximum: 5000, description: 'Cap on returned entries. Default 500.' },
       },
+      additionalProperties: false,
     },
   },
   run: async (app, args) => {
-    const folder = (args.folder && args.folder !== '/') ? args.folder : '';
+    let folder = '';
+    if (args.folder && args.folder !== '/') {
+      try { folder = assertVaultPath(args.folder, 'folder'); }
+      catch (error) { return `Error: ${error.message}`; }
+    }
     const recursive = args.recursive ?? true;
     const allFiles = !!args.all_files;
     const includeFolders = !!args.include_folders;

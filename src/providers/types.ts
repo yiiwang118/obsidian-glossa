@@ -21,7 +21,8 @@ export type ChatChunk =
  *  resources) back to the model. */
 export type ToolContentBlock =
   | { type: 'text'; text: string }
-  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+  | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string }; name: string };
 
 export interface MessageInput {
   role: 'system' | 'user' | 'assistant' | 'tool';

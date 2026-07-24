@@ -33,9 +33,7 @@ export function clipboardImageFiles(transfer: DataTransfer | null): File[] {
 
 /** Consume a paste only when it contains image data. */
 export function consumeComposerImagePaste(event: ClipboardEvent): File[] {
-  const transferKey = ['clipboard', 'Data'].join('');
-  const transfer = (event as unknown as Record<string, DataTransfer | null>)[transferKey] ?? null;
-  const files = clipboardImageFiles(transfer);
+  const files = clipboardImageFiles(event.clipboardData);
   if (files.length === 0) return [];
   event.preventDefault();
   event.stopPropagation();
@@ -50,7 +48,27 @@ export function screenshotBaseName(now = new Date(), ordinal = 0): string {
   const time = [now.getHours(), now.getMinutes(), now.getSeconds()]
     .map(value => String(value).padStart(2, '0'))
     .join('');
-  return `Screenshot-${date}-${time}${ordinal > 0 ? `-${ordinal + 1}` : ''}`;
+  const milliseconds = String(now.getMilliseconds()).padStart(3, '0');
+  return `Screenshot-${date}-${time}-${milliseconds}${ordinal > 0 ? `-${ordinal + 1}` : ''}`;
+}
+
+/** Tracks asynchronous attachment preparation so submit can await a stable snapshot. */
+export class PendingComposerAttachments {
+  private readonly tasks = new Set<Promise<void>>();
+
+  get size(): number { return this.tasks.size; }
+
+  track(task: Promise<void>): Promise<void> {
+    this.tasks.add(task);
+    void task.finally(() => this.tasks.delete(task));
+    return task;
+  }
+
+  async wait(): Promise<void> {
+    while (this.tasks.size > 0) {
+      await Promise.allSettled(Array.from(this.tasks));
+    }
+  }
 }
 
 export function isComposerDeletionKey(key: string): boolean {
