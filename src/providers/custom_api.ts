@@ -213,6 +213,7 @@ export class CustomApiProvider implements LLMProvider {
     };
     const messages = buildOpenAICompatibleMessages(req);
     const body: AnyValue = { model: req.model ?? this.ep.model, messages, stream: false, temperature: req.temperature ?? 0.7 };
+    if (req.maxTokens) body.max_tokens = req.maxTokens;
     this.applyOpenAIReasoning(body);
     try {
       const r = await requestUrl({ url, method: 'POST', headers, body: JSON.stringify(body), throw: false });

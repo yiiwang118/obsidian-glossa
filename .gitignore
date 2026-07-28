@@ -29,6 +29,7 @@ tool_outputs/
 .DS_Store
 .idea/
 .vscode/
+.vs/
 *.swp
 *.swo
 

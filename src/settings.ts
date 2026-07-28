@@ -12,6 +12,7 @@ import { validateSkillDefinition } from './agent/skill_validation';
 import { t, bi } from './utils/i18n';
 import { ICON } from './ui/icons';
 import { Popup } from './ui/popup';
+import { renderInlineCompletionSettings } from './features/inline_completion_settings';
 import {
   BUNDLED_SKILL_ZH,
   TOOL_CATEGORY_COPY,
@@ -290,6 +291,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         bi('Network and proxy', '网络与代理'),
         bi('Web research and downloads', '网页研究与下载'),
         bi('Context and selection', '上下文与选中内容'),
+        bi('Inline completion', '行内补全'),
         bi('Quick translation', '快速翻译'),
         bi('Agent permissions and approvals', 'Agent 权限与审批'),
         bi('Tools and Skills', '工具与 Skills'),
@@ -872,6 +874,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       .addToggle(t => t
         .setValue(this.plugin.settings.autoAttachSelection)
         .onChange(async v => { this.plugin.settings.autoAttachSelection = v; await this.plugin.saveSettings(); }));
+    renderInlineCompletionSettings(containerEl, this.plugin, () => this.refresh());
     const selectionTranslationModeSetting = new Setting(containerEl)
       .setName(bi('Selection translation trigger', '选区翻译触发方式'))
       .setDesc(bi(

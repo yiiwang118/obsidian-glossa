@@ -8062,3 +8062,19 @@ button.nc-aligned-select[aria-expanded="true"] .nc-aligned-select-chevron {
     max-width: none;
   }
 }
+
+.glossa-inline-completion {
+  color: var(--text-faint);
+  opacity: 0.72;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+.glossa-inline-completion-slider-value {
+  display: inline-block;
+  flex: 0 0 5.5rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}

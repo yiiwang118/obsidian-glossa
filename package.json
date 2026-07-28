@@ -35,6 +35,8 @@
   },
   "homepage": "https://github.com/yiiwang118/obsidian-glossa#readme",
   "devDependencies": {
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.38.6",
     "@eslint/js": "^9.39.5",
     "@types/node": "^20",
     "esbuild": "^0.28.1",

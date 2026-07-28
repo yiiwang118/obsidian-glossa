@@ -25,6 +25,7 @@ Glossa turns the sidebar into a working surface, not a separate chatbot. The act
 |---|---|---|
 | 🧠 | **Understands context** | Work with the active note, selections, attached files, PDFs, images, and prior task state without repeatedly pasting content. |
 | ✍️ | **Edits precisely** | Patch one section, replace exact text, coordinate multi-file changes, and preserve surrounding Markdown instead of rewriting everything. |
+| ⌨️ | **Suggests what comes next** | Optionally request bounded, low-latency Markdown continuations while writing and accept the ghost text directly in the editor. |
 | 📚 | **Reads serious documents** | Inspect papers by page, search PDF text, render visual pages, examine screenshots, run OCR, and inspect charts or UI details. |
 | 🌐 | **Researches the web** | Search bounded public sources, extract useful content, verify paper identity, and save validated downloads with provenance. |
 | 🧩 | **Runs focused Skills** | Use built-in workflows for Markdown, Canvas, Bases, PDFs, images, or create and validate your own vault Skills. |
