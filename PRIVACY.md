@@ -14,6 +14,7 @@ What follows is a map of network calls and stored data for the community review 
 | `web_fetch` tool | The URL you / the model fetched | HTTP GET; standard `User-Agent` | Tool invocation; approval prompt | Yes — deny the approval |
 | `@url` mention attaching a web page | That URL | HTTP GET | You typed an `@http...` reference | Yes — don't attach |
 | Endpoint connection test | The selected Custom API endpoint (`/models` or a 1-token ping) | API key as required by that endpoint | You click "Test" / "Test active endpoint" in settings | Yes — don't click |
+| Inline completion | The completion endpoint you selected | Current file path, nearest preceding heading, and configurable text before/after the cursor (defaults: 800 before, 200 after) | You explicitly enable inline completion, then pause while editing Markdown | Yes - keep inline completion off |
 
 Pasting a screenshot reads image data only from that explicit paste event. Glossa does not poll, monitor, or read ambient clipboard contents. The pasted image remains a local composer attachment until you send the message; sending then follows the first row above.
 
@@ -43,7 +44,7 @@ If you turn encryption ON in Settings → Security, API keys and the four `.json
 - No usage analytics
 - No crash reports
 - No identifier of you, your machine, or your vault
-- No content unless you explicitly send a message, attach context, approve a web fetch, or approve a note tool
+- No content unless you explicitly send a message, attach context, approve a web fetch or note tool, or explicitly enable inline completion
 - PDF text extraction is local through Obsidian/PDF.js; extracted text is only sent if you attach it or the agent returns it to the LLM as tool context
 
 ## Provider-side privacy

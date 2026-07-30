@@ -23,6 +23,7 @@ import { clearMediaCaches } from './utils/media_cache';
 import { clearRenderedPdfPageCache } from './utils/pdf_render';
 import { chatMessagesForStorage, purgeTransientChatPayloads } from './utils/chat_storage';
 import { SelectionTranslationController } from './features/selection_translation';
+import { createInlineCompletionExtension } from './features/inline_completion';
 
 export default class GlossaPlugin extends Plugin {
   settings: GlossaSettings;
@@ -71,6 +72,21 @@ export default class GlossaPlugin extends Plugin {
     // 0.3 default is 13. Bump anyone still on the legacy 12 (or unset) to 13.
     if (!this.settings.reasoningFontSize || this.settings.reasoningFontSize < 12) {
       this.settings.reasoningFontSize = 13;
+    }
+    this.settings.inlineCompletionDelayMs = Math.min(
+      2_000,
+      Math.max(300, Number(this.settings.inlineCompletionDelayMs) || 650),
+    );
+    this.settings.inlineCompletionContextBeforeChars = Math.min(
+      4_000,
+      Math.max(200, Number(this.settings.inlineCompletionContextBeforeChars) || 800),
+    );
+    const inlineCompletionAfterChars = Number(this.settings.inlineCompletionContextAfterChars);
+    this.settings.inlineCompletionContextAfterChars = Number.isFinite(inlineCompletionAfterChars)
+      ? Math.min(2_000, Math.max(0, inlineCompletionAfterChars))
+      : 200;
+    if (typeof this.settings.inlineCompletionMiddleOfLine !== 'boolean') {
+      this.settings.inlineCompletionMiddleOfLine = true;
     }
     // Earlier plugin builds seeded the codex-cli "Default model" field with
     // 'gpt-5.4' for every newly-created endpoint. That leaks into `-m gpt-5.4`
@@ -127,6 +143,7 @@ export default class GlossaPlugin extends Plugin {
     addIcon('glossa-ribbon', GLOSSA_RIBBON_SVG);
 
     this.registerView(VIEW_TYPE_GLOSSA, (leaf) => new GlossaView(leaf, this));
+    this.registerEditorExtension(createInlineCompletionExtension(this));
     this.selectionTranslation = new SelectionTranslationController(this);
     this.selectionTranslation.start();
     this.register(() => {

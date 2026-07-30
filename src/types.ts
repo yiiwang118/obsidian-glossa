@@ -376,6 +376,22 @@ export interface GlossaSettings {
   translationEndpointId: string | null;
   /** Model override within the dedicated translation endpoint; empty follows the endpoint model. */
   translationModel: string;
+  /** Opt-in ghost-text suggestions while editing Markdown notes. */
+  inlineCompletionEnabled: boolean;
+  /** One-time acknowledgement that note excerpts are sent automatically while enabled. */
+  inlineCompletionConsentGranted: boolean;
+  /** Dedicated endpoint for inline suggestions; null follows the active chat endpoint. */
+  inlineCompletionEndpointId: string | null;
+  /** Model override within the dedicated inline-completion endpoint. */
+  inlineCompletionModel: string;
+  /** Idle time before requesting a suggestion. */
+  inlineCompletionDelayMs: number;
+  /** Maximum characters sent before the cursor for inline completion. */
+  inlineCompletionContextBeforeChars: number;
+  /** Maximum characters sent after the cursor for inline completion. */
+  inlineCompletionContextAfterChars: number;
+  /** Allow fill-in-the-middle suggestions when text exists after the cursor on the same line. */
+  inlineCompletionMiddleOfLine: boolean;
 
   // updates
   updateCheckEnabled: boolean;
@@ -487,6 +503,14 @@ export const DEFAULT_SETTINGS: GlossaSettings = {
   selectionTranslateMode: 'button',
   translationEndpointId: null,
   translationModel: '',
+  inlineCompletionEnabled: false,
+  inlineCompletionConsentGranted: false,
+  inlineCompletionEndpointId: null,
+  inlineCompletionModel: '',
+  inlineCompletionDelayMs: 650,
+  inlineCompletionContextBeforeChars: 800,
+  inlineCompletionContextAfterChars: 200,
+  inlineCompletionMiddleOfLine: true,
   updateCheckEnabled: true,
   updateLastCheckedAt: 0,
   updateDismissedVersion: '',
