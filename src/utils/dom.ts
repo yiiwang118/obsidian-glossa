@@ -18,7 +18,7 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   // That was an XSS footgun (any model-derived text reaching el could inject
   // script) — removed. Callers that genuinely need trusted SVG
   // constants should go through setTrustedSvg().
-  const e = activeWindow.createEl(tag);
+  const e = opts.parent ? opts.parent.createEl(tag) : activeWindow.createEl(tag);
   if (opts.className) e.className = opts.className;
   if (opts.text != null) e.textContent = opts.text;
   if (opts.title) e.title = opts.title;
@@ -26,7 +26,6 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) e.setAttribute(k, v);
   if (opts.style) setStyle(e, opts.style);
   if (opts.onClick) e.addEventListener('click', opts.onClick);
-  if (opts.parent) opts.parent.appendChild(e);
   return e;
 }
 
@@ -52,12 +51,19 @@ export function setTrustedSvg(target: HTMLElement, svgText: string): void {
   clear(target);
   const svg = parsedTrustedSvg(svgText);
   if (!svg) return;
-  const cloned = cloneSvgElement(svg);
-  if (cloned) target.appendChild(cloned);
+  const ids = new Map<string, string>();
+  const prefix = `glossa-svg-${++trustedSvgInstance}-`;
+  for (const node of [svg, ...Array.from(svg.querySelectorAll('[id]'))]) {
+    const id = node.getAttribute('id');
+    if (id) ids.set(id, prefix + id);
+  }
+  const cloned = cloneSvgElement(svg, target.ownerDocument, ids);
+  target.appendChild(cloned);
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const trustedSvgCache = new Map<string, Element | null>();
+let trustedSvgInstance = 0;
 
 function parsedTrustedSvg(svgText: string): Element | null {
   if (trustedSvgCache.has(svgText)) return trustedSvgCache.get(svgText) ?? null;
@@ -69,22 +75,30 @@ function parsedTrustedSvg(svgText: string): Element | null {
   return parsed;
 }
 
-function cloneSvgElement(source: Element): SVGElement | null {
-  const cloned = activeDocument.createElementNS(SVG_NS, source.localName);
+function cloneSvgElement(source: Element, ownerDocument: Document, ids: Map<string, string>): SVGElement {
+  const cloned = ownerDocument.createElementNS(SVG_NS, source.localName);
   for (const attr of Array.from(source.attributes)) {
-    cloned.setAttribute(attr.name, attr.value);
+    // Fragment IDs are document-wide, including paint servers in hidden SVG copies.
+    let value = attr.name === 'id' ? ids.get(attr.value) ?? attr.value : attr.value;
+    value = value.replace(/url\(\s*(['"]?)#([^)'"\s]+)\1\s*\)/g,
+      (reference, _quote: string, id: string) => ids.has(id) ? `url(#${ids.get(id)})` : reference);
+    if ((attr.localName === 'href') && value.startsWith('#') && ids.has(value.slice(1))) {
+      value = `#${ids.get(value.slice(1))}`;
+    }
+    if (attr.namespaceURI) cloned.setAttributeNS(attr.namespaceURI, attr.name, value);
+    else cloned.setAttribute(attr.name, value);
   }
   for (const child of Array.from(source.childNodes)) {
-    const copied = cloneSvgNode(child);
+    const copied = cloneSvgNode(child, ownerDocument, ids);
     if (copied) cloned.appendChild(copied);
   }
   return cloned;
 }
 
-function cloneSvgNode(source: ChildNode): Node | null {
-  if (source.nodeType === 3) return activeDocument.createTextNode(source.textContent ?? '');
+function cloneSvgNode(source: ChildNode, ownerDocument: Document, ids: Map<string, string>): Node | null {
+  if (source.nodeType === 3) return ownerDocument.createTextNode(source.textContent ?? '');
   if (source.nodeType !== 1) return null;
-  return cloneSvgElement(source as Element);
+  return cloneSvgElement(source as Element, ownerDocument, ids);
 }
 
 export function debounce<F extends (...a: AnyValue[]) =>AnyValue>(fn: F, ms: number): F {
