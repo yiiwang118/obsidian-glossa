@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0] — Unreleased
+
+### Added
+- Validated custom endpoint JSON body parameters with explicit override precedence and protected conversation/stream fields.
+- Final request URL previews in endpoint settings and the add-endpoint dialog.
+
+### Fixed
+- Anthropic SDK-style roots now resolve to `/v1/messages` (and `/v1/models`), while versioned roots and explicit Messages URLs remain usable.
+
+### Changed
+- Migrated existing custom endpoints to an empty extra-body configuration; the settings schema addition advances the minor version per the contribution guide.
+
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]

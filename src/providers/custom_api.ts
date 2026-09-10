@@ -3,6 +3,7 @@ import { requestUrl } from 'obsidian';
 import { isDeepSeekEndpoint, mapOpenAIReasoningEffort, type Endpoint } from '../types';
 import { nativeStreamingHttpRequest } from '../utils/native_http';
 import type { LLMProvider, ChatRequest, ChatChunk, ToolContentBlock } from './types';
+import { customApiBody, customApiUrl } from './custom_api_config';
 
 /** Strip the SYSTEM_PROMPT_DYNAMIC_BOUNDARY marker used by buildSystemPrompt() for the
  *  Anthropic two-zone cache split. Non-cacheable endpoints get a clean single string. */
@@ -72,6 +73,8 @@ export class CustomApiProvider implements LLMProvider {
   }
 
   private applyAnthropicThinking(body: AnyValue): void {
+    // An explicit thinking mode must not inherit an automatic thinking budget.
+    if (this.ep.extraBody && Object.prototype.hasOwnProperty.call(this.ep.extraBody, 'thinking')) return;
     if (!this.ep.reasoningEffort || this.ep.reasoningEffort === 'off') return;
     const budgets: Record<string, number> = {
       minimal: 1_024,
@@ -96,14 +99,13 @@ export class CustomApiProvider implements LLMProvider {
     if (!this.ep.apiKey)  return { ok: false, message: 'API key missing.' };
     try {
       const style = this.ep.apiStyle ?? 'openai';
-      const base = this.ep.baseUrl.replace(/\/$/, '');
-      const url = style === 'anthropic' ? `${base}/messages` : `${base}/models`;
+      const url = customApiUrl(this.ep, style === 'anthropic' ? 'chat' : 'models');
       const headers: AnyValue = { 'Content-Type': 'application/json', ...(this.ep.headers ?? {}) };
       if (style === 'anthropic') {
         headers['x-api-key'] = this.ep.apiKey;
         headers['anthropic-version'] = '2023-06-01';
         const r = await requestUrl({ url, method: 'POST', headers, throw: false,
-          body: JSON.stringify({ model: this.ep.model ?? 'claude-sonnet-4-6', max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }) });
+          body: JSON.stringify(customApiBody(this.ep, { model: this.ep.model ?? 'claude-sonnet-4-6', max_tokens: 1, messages: [{ role: 'user', content: 'ping' }], stream: false })) });
         if (r.status < 400) return { ok: true, message: `HTTP 200 · ${this.ep.model ?? 'default model'}` };
         return { ok: false, message: `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 160)}` };
       } else {
@@ -136,7 +138,7 @@ export class CustomApiProvider implements LLMProvider {
    *  Returns the whole text + final usage in one shot. No tool_call streaming. */
   private async *requestNonStreaming(req: ChatRequest, style: 'openai' | 'anthropic'): AsyncGenerator<ChatChunk> {
     if (style === 'anthropic') {
-      const url = `${this.ep.baseUrl.replace(/\/$/, '')}/messages`;
+      const url = customApiUrl(this.ep);
       const headers: AnyValue = {
         'Content-Type': 'application/json',
         'x-api-key': this.ep.apiKey,
@@ -182,7 +184,7 @@ export class CustomApiProvider implements LLMProvider {
       this.applyAnthropicThinking(body);
       if (req.systemPrompt) body.system = stripBoundary(req.systemPrompt);
       try {
-        const r = await requestUrl({ url, method: 'POST', headers, body: JSON.stringify(body), throw: false });
+        const r = await requestUrl({ url, method: 'POST', headers, body: JSON.stringify(customApiBody(this.ep, body)), throw: false });
         if (r.status >= 400) {
           yield { type: 'error', error: withReasoningEffortHint(this.ep, `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 300)}`) };
           return;
@@ -205,7 +207,7 @@ export class CustomApiProvider implements LLMProvider {
       return;
     }
 
-    const url = `${this.ep.baseUrl.replace(/\/$/, '')}/chat/completions`;
+    const url = customApiUrl(this.ep);
     const headers: AnyValue = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${this.ep.apiKey}`,
@@ -216,7 +218,7 @@ export class CustomApiProvider implements LLMProvider {
     if (req.maxTokens) body.max_tokens = req.maxTokens;
     this.applyOpenAIReasoning(body);
     try {
-      const r = await requestUrl({ url, method: 'POST', headers, body: JSON.stringify(body), throw: false });
+      const r = await requestUrl({ url, method: 'POST', headers, body: JSON.stringify(customApiBody(this.ep, body)), throw: false });
       if (r.status >= 400) {
         yield { type: 'error', error: withReasoningEffortHint(this.ep, `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 300)}`) };
         return;
@@ -253,7 +255,7 @@ export class CustomApiProvider implements LLMProvider {
   async listModels(): Promise<string[]> {
     if (!this.ep.baseUrl || !this.ep.apiKey) return [];
     const style = this.ep.apiStyle ?? 'openai';
-    const url = `${this.ep.baseUrl.replace(/\/$/, '')}/models`;
+    const url = customApiUrl(this.ep, 'models');
     const headers: AnyValue = style === 'anthropic'
       ? { 'x-api-key': this.ep.apiKey, 'anthropic-version': '2023-06-01', ...(this.ep.headers ?? {}) }
       : { 'Authorization': `Bearer ${this.ep.apiKey}`, ...(this.ep.headers ?? {}) };
@@ -287,7 +289,7 @@ export class CustomApiProvider implements LLMProvider {
 
   /* ---------------- OpenAI-compatible ---------------- */
   private async *streamOpenAI(req: ChatRequest): AsyncGenerator<ChatChunk> {
-    const url = `${this.ep.baseUrl.replace(/\/$/, '')}/chat/completions`;
+    const url = customApiUrl(this.ep);
     const headers: AnyValue = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${this.ep.apiKey}`,
@@ -309,7 +311,7 @@ export class CustomApiProvider implements LLMProvider {
 
     let resp: Response;
     try {
-      resp = await nativeStreamingHttpRequest(url, { method: 'POST', headers, body: JSON.stringify(body), signal: req.signal });
+      resp = await nativeStreamingHttpRequest(url, { method: 'POST', headers, body: JSON.stringify(customApiBody(this.ep, body)), signal: req.signal });
     } catch (e) {
       yield { type: 'error', error: `network: ${e.message}` };
       return;
@@ -430,7 +432,7 @@ export class CustomApiProvider implements LLMProvider {
 
   /* ---------------- Anthropic-compatible ---------------- */
   private async *streamAnthropic(req: ChatRequest): AsyncGenerator<ChatChunk> {
-    const url = `${this.ep.baseUrl.replace(/\/$/, '')}/messages`;
+    const url = customApiUrl(this.ep);
     const headers: AnyValue = {
       'Content-Type': 'application/json',
       'x-api-key': this.ep.apiKey,
@@ -534,7 +536,7 @@ export class CustomApiProvider implements LLMProvider {
       }));
     }
 
-    const resp = await nativeStreamingHttpRequest(url, { method: 'POST', headers, body: JSON.stringify(body), signal: req.signal });
+    const resp = await nativeStreamingHttpRequest(url, { method: 'POST', headers, body: JSON.stringify(customApiBody(this.ep, body)), signal: req.signal });
     if (!resp.ok) {
       const txt = await resp.text().catch(() => '');
       if (isContextOverflowError(resp.status, txt)) {
