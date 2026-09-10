@@ -1350,6 +1350,9 @@ export class SelectionTranslationController {
   private showError(message: string): void {
     const popup = this.popup;
     if (!popup) return;
+    if (this.paintFrame) window.cancelAnimationFrame(this.paintFrame);
+    this.paintFrame = 0;
+    this.pendingPaintText = '';
     popup.root.classList.remove('is-loading', 'is-complete', 'is-streaming');
     popup.root.classList.add('is-error');
     popup.body.empty();
