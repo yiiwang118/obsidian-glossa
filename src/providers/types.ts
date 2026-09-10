@@ -10,7 +10,12 @@ export type ChatChunk =
   | { type: 'tool_call'; id: string; name: string; args: AnyValue }
   /** Tool was executed by the provider itself (e.g. CLI in full-agent mode). For display only. */
   | { type: 'tool_event'; id: string; name: string; args: AnyValue; status: 'running' | 'success' | 'error' | 'denied'; result?: string }
-  | { type: 'final'; text: string; usage?: TokenUsage; reasoningContent?: string }
+  | {
+    type: 'final'; text: string; usage?: TokenUsage; reasoningContent?: string;
+    /** Provider completion metadata for detecting truncated or thinking-only answers. */
+    stopReason?: string;
+    hasReasoning?: boolean;
+  }
   /** Server rejected the prompt because it exceeded the model's context window.
    *  The agent loop should react by compacting the conversation and retrying. */
   | { type: 'context_overflow'; message: string }
