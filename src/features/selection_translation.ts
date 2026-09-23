@@ -4,6 +4,7 @@ import type { SelectionInfo } from '../context/sources';
 import { getCurrentSelection } from '../context/sources';
 import { buildProvider } from '../providers/registry';
 import { CustomApiProvider } from '../providers/custom_api';
+import type { ChatChunk } from '../providers/types';
 import { inferSelectionLanguage, inferSelectionTranslationTarget, type TranslationTarget } from '../utils/translation_target';
 import { bi, currentLanguage } from '../utils/i18n';
 import { el, setStyle, setTrustedSvg } from '../utils/dom';
@@ -332,6 +333,37 @@ export function selectionTranslationMathMarkdown(
 
 export function prepareTranslationEndpoint(endpoint: Endpoint): Endpoint {
   return { ...endpoint, reasoningEffort: 'off' };
+}
+
+export function selectionTranslationMaxTokens(text: string, endpoint: Endpoint): number {
+  const textBudget = Math.min(8192, Math.max(512, Math.ceil(text.length * 1.5)));
+  // M2.x always thinks, even when reasoningEffort is off. Leave room for that
+  // before the translation; this is a headroom heuristic, not a completion guarantee.
+  const needsThinkingHeadroom = endpoint.kind === 'custom-api'
+    && /^(?:minimax\/)?minimax-m2(?:\.\d+)?(?:-highspeed)?$/i.test(endpoint.model?.trim() ?? '');
+  return needsThinkingHeadroom ? Math.max(16_384, textBudget) : textBudget;
+}
+
+export function selectionTranslationResponseError(
+  text: string,
+  completion?: Extract<ChatChunk, { type: 'final' }>,
+): string | null {
+  const empty = !text.trim();
+  if (completion?.stopReason === 'max_tokens' || completion?.stopReason === 'length') {
+    if (empty && completion.hasReasoning) return bi(
+      'The model reached its output limit while thinking, before returning a translation. Try a shorter selection or another model.',
+      '模型在思考阶段达到输出上限，尚未返回译文。请缩短选区或切换模型。',
+    );
+    return bi(
+      'The model reached its output limit; the translation is incomplete. Try a shorter selection or another model.',
+      '模型已达到输出上限，译文不完整。请缩短选区或切换模型。',
+    );
+  }
+  if (empty && completion?.hasReasoning) return bi(
+    'The model returned only thinking content, without a translation. Retry or choose another model.',
+    '模型仅返回了思考内容，没有译文。请重试或切换模型。',
+  );
+  return empty ? bi('The model returned an empty translation.', '模型返回了空翻译。') : null;
 }
 
 export function translationModelsForEndpoint(endpoint: Endpoint): string[] {
@@ -1247,12 +1279,13 @@ export class SelectionTranslationController {
         if (attempt > 0) this.showLoading(true);
         output = '';
         let receivedTextChunk = false;
+        let completion: Extract<ChatChunk, { type: 'final' }> | undefined;
         for await (const chunk of provider.stream({
           systemPrompt: 'Translate precisely. Preserve or reconstruct every mathematical expression as Obsidian-compatible LaTeX using $...$ and $$...$$; mathematical notation outside delimiters is invalid. Return only the requested target-language content.',
           messages: [{ role: 'user', content: buildSelectionTranslationPrompt(selection.text.trim(), target, attempt > 0) }],
           model: translationReady.model,
           temperature: 0,
-          maxTokens: Math.min(8192, Math.max(512, Math.ceil(selection.text.length * 1.5))),
+          maxTokens: selectionTranslationMaxTokens(selection.text, translationReady),
           signal: controller.signal,
         })) {
           if (controller.signal.aborted || sequence !== this.requestSequence || !this.popup) return;
@@ -1260,21 +1293,25 @@ export class SelectionTranslationController {
             receivedTextChunk = true;
             output += chunk.text;
             this.scheduleTextPaint(output);
-          } else if (chunk.type === 'final' && !receivedTextChunk) {
-            output = chunk.text;
-            this.scheduleTextPaint(output);
+          } else if (chunk.type === 'final') {
+            completion = chunk;
+            if (!receivedTextChunk) {
+              output = chunk.text;
+              this.scheduleTextPaint(output);
+            }
           } else if (chunk.type === 'error') {
             throw new Error(chunk.error);
           } else if (chunk.type === 'context_overflow') {
             throw new Error(chunk.message);
           }
         }
+        const responseError = selectionTranslationResponseError(output, completion);
+        if (responseError) throw new Error(responseError);
         const retryLanguage = translationNeedsRetry(selection.text.trim(), output.trim(), target);
         const retryMath = translationNeedsMathRetry(selection.text.trim(), output.trim());
         if ((!retryLanguage && !retryMath) || attempt === 1) break;
       }
       if (controller.signal.aborted || sequence !== this.requestSequence || !this.popup) return;
-      if (!output.trim()) throw new Error(bi('The model returned an empty translation.', '模型返回了空翻译。'));
       this.paintText(output.trim());
       await this.renderFinalMath(output.trim(), sequence);
       if (controller.signal.aborted || sequence !== this.requestSequence || !this.popup) return;
@@ -1313,6 +1350,9 @@ export class SelectionTranslationController {
   private showError(message: string): void {
     const popup = this.popup;
     if (!popup) return;
+    if (this.paintFrame) window.cancelAnimationFrame(this.paintFrame);
+    this.paintFrame = 0;
+    this.pendingPaintText = '';
     popup.root.classList.remove('is-loading', 'is-complete', 'is-streaming');
     popup.root.classList.add('is-error');
     popup.body.empty();

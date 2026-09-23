@@ -148,6 +148,8 @@ export interface Endpoint {
   model?: string;
   availableModels?: string[];
   headers?: Record<string, string>;
+  /** Additional JSON parameters; conversation and transport fields are reserved. */
+  extraBody?: Record<string, unknown>;
   apiStyle?: 'openai' | 'anthropic';
   /** Reasoning effort knob, mapped to provider-specific args/headers. */
   reasoningEffort?: ReasoningEffort;

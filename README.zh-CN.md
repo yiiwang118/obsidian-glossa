@@ -143,6 +143,16 @@ Glossa 本身不是托管 AI 服务。对话与选定上下文会发送到你配
 4. 直接提问；只读任务保持 **Plan**，需要修改文件时切换到 **Act**。
 5. 在写入或下载前检查 approval。
 
+### 自定义 API 兼容性
+
+Anthropic-style 端点可填写 SDK 根地址（如 `https://api.minimax.io/anthropic`）、以 `/v1` 结尾的版本根路径，或完整 Messages URL。设置中展示最终请求 URL；对话、连通测试和模型探测使用相同路径规则。OpenAI 兼容端点仍填写版本根路径。
+
+在端点的 **高级 → 额外 JSON 请求体** 中填写 JSON 对象，例如 MiniMax OpenAI 格式使用 `{"reasoning_split":true}`，支持关闭思考的模型使用 `{"thinking":{"type":"disabled"}}`。显式参数在顶层覆盖自动生成值，包括思考、采样和 token 上限。模型、消息、system、工具、工具选择和流式字段不可覆盖。无效输入会显示错误且不保存；清空输入可移除覆盖。额外请求体按普通配置保存在插件设置中，凭据请使用 API key 字段。
+
+推理强度 **Off** 通常仅省略推理强度参数，并不保证关闭思考。MiniMax M2.x 无法关闭思考；`thinking.disabled` 需要模型本身支持。
+
+快速翻译会为 MiniMax M2.x 设置 16,384 token 的输出上限，为思考预留空间。这是上限，不代表固定消耗或保证成功；额外请求体中显式指定的 token 上限优先。Anthropic 响应只有思考内容或被截断时会显示错误与重试按钮，不会标记为翻译完成。开启 Auto 后，每次新的有效选区都会发送到配置的翻译端点；关闭 Auto 可恢复手动触发。
+
 ## 构建与验证
 
 ```bash

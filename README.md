@@ -143,6 +143,16 @@ Reload the app and enable **Glossa** under Community plugins.
 4. Ask directly. Stay in **Plan** for read-only work; switch to **Act** when you want file changes.
 5. Review approvals before writes or downloads.
 
+### Custom API compatibility
+
+For Anthropic-style endpoints, enter an SDK root such as `https://api.minimax.io/anthropic`, a versioned root ending in `/v1`, or a full Messages URL. Glossa displays the final request URL and uses the same path rules for chat, connectivity testing, and model discovery. OpenAI-compatible endpoints still use their versioned root.
+
+Under an endpoint's **Advanced → Extra JSON body**, enter a JSON object such as `{"reasoning_split":true}` (MiniMax OpenAI format) or `{"thinking":{"type":"disabled"}}` for models that support disabling thinking. Explicit parameters replace generated values at the top level, including thinking, sampling, and token limits. Model, messages, system, tools, tool selection, and stream fields are reserved. Invalid input stays unsaved with a validation message; clear the field to remove overrides. Extra body values are stored in plugin settings as ordinary configuration, so use the API key field for credentials.
+
+The reasoning **Off** option normally omits reasoning effort; it does not guarantee thinking is disabled. MiniMax M2.x cannot disable thinking; select a supported model for `thinking.disabled`.
+
+Quick translation gives MiniMax M2.x an output limit of 16,384 tokens to leave room for thinking. This is a maximum, not a fixed charge or a guarantee of completion; explicit extra-body token limits take precedence. Thinking-only and truncated Anthropic responses display an error with a Retry button instead of a completed translation. In Auto mode, each new eligible selection is sent to your configured translation endpoint; turn Auto off to require a manual action.
+
 ## Build and Verify
 
 ```bash

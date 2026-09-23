@@ -52,7 +52,7 @@ function makeT(file) {
 }
 
 /** Bundle a TS source file into a CJS module and require it. */
-async function loadModule(srcPath) {
+async function loadModule(srcPath, obsidianOverrides = {}) {
   const r = await esbuild.build({
     entryPoints: [srcPath],
     bundle: true,
@@ -83,6 +83,7 @@ async function loadModule(srcPath) {
       loadPdfJs: async () => ({ getDocument: () => { throw new Error('loadPdfJs shim has no document'); } }),
       getAllTags: () => [], prepareSimpleSearch: () => null,
       requestUrl: () => ({ status: 200, text: '[]', json: [] }),
+      ...obsidianOverrides,
     };
     return orig.apply(this, arguments);
   };

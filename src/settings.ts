@@ -6,6 +6,7 @@ import type { Endpoint, CustomPrompt, SlashCommand, SelectionTranslateMode } fro
 import { reasoningOptionsForEndpoint } from './types';
 import { uid, setStyle, setTrustedSvg } from './utils/dom';
 import { CustomApiProvider } from './providers/custom_api';
+import { customApiUrl, parseExtraBody } from './providers/custom_api_config';
 import { buildProvider } from './providers/registry';
 import { discoverSkills, type Skill } from './agent/skills';
 import { validateSkillDefinition } from './agent/skill_validation';
@@ -274,7 +275,10 @@ export class GlossaSettingTab extends PluginSettingTab {
   private renderGeneration = 0;
   private readonly selectPopup = new Popup();
 
-  constructor(app: App, public plugin: GlossaPlugin) { super(app, plugin); }
+  constructor(app: App, public plugin: GlossaPlugin) {
+    super(app, plugin);
+    plugin.register(() => this.selectPopup.destroy());
+  }
 
   getSettingDefinitions(): SettingDefinitionItem[] {
     return [{
@@ -288,6 +292,8 @@ export class GlossaSettingTab extends PluginSettingTab {
         bi('Font size', '字体大小'),
         bi('Update checks', '版本更新检查'),
         bi('Model endpoints', '模型端点'),
+        bi('Extra JSON body', '额外 JSON 请求体'),
+        bi('Request URL', '请求 URL'),
         bi('Network and proxy', '网络与代理'),
         bi('Web research and downloads', '网页研究与下载'),
         bi('Context and selection', '上下文与选中内容'),
@@ -958,8 +964,8 @@ export class GlossaSettingTab extends PluginSettingTab {
     const translationModelSetting = new Setting(containerEl)
       .setName(bi('Translation model', '翻译模型'))
       .setDesc(bi(
-        'Choose any detected model on this endpoint. Quick translation disables reasoning for lower latency.',
-        '选择该端点已探测到的任意模型。快速翻译会关闭推理以降低延迟。',
+        'Choose any detected model on this endpoint. Quick translation omits automatic reasoning effort; model behavior and extra body parameters still apply.',
+        '选择该端点已探测到的任意模型。快速翻译不设置自动推理强度；模型本身的行为和额外请求体参数仍然生效。',
       ));
     createAlignedSelect(
       translationModelSetting.controlEl,
@@ -1532,6 +1538,12 @@ export class GlossaSettingTab extends PluginSettingTab {
     }
 
     if (ep.kind === 'custom-api') {
+      let requestUrlSetting: Setting | undefined;
+      const updateRequestUrl = () => {
+        if (requestUrlSetting === undefined) return;
+        try { requestUrlSetting.setDesc(customApiUrl(ep)); }
+        catch { requestUrlSetting.setDesc(bi('Enter a valid HTTP(S) Base URL.', '请输入有效的 HTTP(S) Base URL。')); }
+      };
       const apiFormatSetting = new Setting(basic)
         .setName(bi('API format', 'API 格式'))
         .setDesc(bi('Choose the request and response format implemented by this endpoint.', '选择该端点实现的请求与响应格式。'));
@@ -1545,12 +1557,13 @@ export class GlossaSettingTab extends PluginSettingTab {
         ep.apiStyle ?? 'openai',
         async value => {
           ep.apiStyle = value;
+          updateRequestUrl();
           await this.plugin.saveSettings();
         },
         bi('API format', 'API 格式'),
       );
       new Setting(basic).setName('Base URL')
-        .setDesc(bi('API root ending at the provider version path, for example /v1.', 'API 根地址，通常以 provider 的版本路径结尾，例如 /v1。'))
+        .setDesc(bi('OpenAI: versioned root (e.g. /v1). Anthropic: SDK root, versioned root, or full Messages URL.', 'OpenAI：版本根路径（如 /v1）。Anthropic：SDK 根地址、版本根路径或完整 Messages URL。'))
         .addText(t => t.setValue(ep.baseUrl ?? '').onChange(async v => {
         const trimmed = v.trim();
         if (trimmed) {
@@ -1570,8 +1583,11 @@ export class GlossaSettingTab extends PluginSettingTab {
           }
         }
         ep.baseUrl = trimmed;
+        updateRequestUrl();
         await this.plugin.saveSettings();
       }));
+      requestUrlSetting = new Setting(basic).setName(bi('Request URL', '请求 URL'));
+      updateRequestUrl();
       const apiKeySetting = new Setting(basic).setName('API key')
         .setDesc(ep.apiKey?.startsWith('NCENC1:') ? bi('✓ encrypted', '✓ 已加密') : (this.plugin.settings.encryptionEnabled ? bi('will encrypt on save', '保存时加密') : bi('plaintext', '明文')))
         .addText(t => {
@@ -1613,6 +1629,31 @@ export class GlossaSettingTab extends PluginSettingTab {
           .onChange(async v => {
             try { ep.headers = v.trim() ? JSON.parse(v) : undefined; await this.plugin.saveSettings(); } catch { /* ignore */ }
           }));
+      const extraBodySetting = new Setting(advanced)
+        .setName(bi('Extra JSON body', '额外 JSON 请求体'))
+        .setDesc(bi(
+          'Provider parameters override generated values (e.g. thinking, reasoning_split, max_tokens). Model, messages, tools and streaming fields are reserved. Off only omits reasoning effort; disabling thinking depends on the model.',
+          '服务商参数覆盖自动生成值（如 thinking、reasoning_split、max_tokens）。模型、消息、工具及流式字段不可覆盖。Off 仅省略推理强度；能否关闭思考取决于模型。',
+        ));
+      const extraBodyError = extraBodySetting.descEl.createDiv({ attr: { role: 'status', 'aria-live': 'polite' } });
+      extraBodySetting.addTextArea(tx => {
+        tx.inputEl.rows = 5;
+        tx.setPlaceholder('{"reasoning_split": true}')
+          .setValue(ep.extraBody && Object.keys(ep.extraBody).length ? JSON.stringify(ep.extraBody, null, 2) : '')
+          .onChange(async value => {
+            let parsed: Record<string, unknown>;
+            try { parsed = parseExtraBody(value); }
+            catch (error) {
+              tx.inputEl.setAttribute('aria-invalid', 'true');
+              extraBodyError.setText(bi('Not saved: ', '未保存：') + (error instanceof Error ? error.message : String(error)));
+              return;
+            }
+            tx.inputEl.removeAttribute('aria-invalid');
+            extraBodyError.setText('');
+            ep.extraBody = parsed;
+            await this.plugin.saveSettings();
+          });
+      });
     }
 
     if (ep.kind === 'codex-cli' || ep.kind === 'claude-code-cli') {
@@ -2016,6 +2057,12 @@ class AddEndpointModal extends Modal {
     });
 
     if (this.selectedKind === 'custom-api') {
+      let requestUrlPreview: HTMLElement;
+      const updateRequestUrl = () => {
+        if (!requestUrlPreview) return;
+        try { requestUrlPreview.setText(customApiUrl(this.draft)); }
+        catch { requestUrlPreview.setText(bi('Enter a valid HTTP(S) Base URL.', '请输入有效的 HTTP(S) Base URL。')); }
+      };
       row(bi('API format', 'API 格式'), (p) => {
         createAlignedSelect(
           p,
@@ -2025,7 +2072,7 @@ class AddEndpointModal extends Modal {
             { value: 'anthropic', label: 'Anthropic-style' },
           ] as const,
           this.draft.apiStyle ?? 'openai',
-          value => { this.draft.apiStyle = value; },
+          value => { this.draft.apiStyle = value; updateRequestUrl(); },
           bi('API format', 'API 格式'),
         );
       });
@@ -2034,8 +2081,10 @@ class AddEndpointModal extends Modal {
         inp.placeholder = HTTPS_API_PLACEHOLDER;
         inp.autocomplete = 'off';
         inp.spellcheck = false;
-        inp.oninput = () => { this.draft.baseUrl = inp.value; };
+        inp.oninput = () => { this.draft.baseUrl = inp.value; updateRequestUrl(); };
       });
+      row(bi('Request URL', '请求 URL'), p => { requestUrlPreview = p.createDiv({ cls: 'setting-item-description' }); });
+      updateRequestUrl();
       row('API key', (p) => {
         const inp = p.createEl('input', { type: 'password', value: this.plainKey });
         inp.placeholder = API_KEY_PLACEHOLDER;

@@ -10,9 +10,8 @@ const svg = (path: string, extras = '') =>
    icon stays in brand colour in brand surfaces (tab, role badge,
    empty-state hero), independent of light/dark theme. viewBox cropped tight to the
    artwork so Obsidian's icon system renders it crisply at 16-24px.
-   `glossa-mark-grad` is the SVG-internal gradient id; modern browsers
-   resolve url(#…) lookups within the same SVG fragment, so repeated
-   inline copies in the chat transcript don't collide.
+   setTrustedSvg gives each rendered copy its own gradient ID so hidden or
+   removed icons cannot affect another copy's paint server.
    ============================================================ */
 const GLOSSA_MARK_PATHS = `<path d="M120.2 131.7 C112.4 125.1 108.2 115.8 109.1 105.6 C110.4 91.1 121.7 80.6 136.2 79.9 C140.7 64.6 154.3 55.1 171.5 54.2 C178.1 53.9 184.1 54.9 189.8 57.1 M226.9 72.5 C235.1 77.6 239.8 86.3 239.2 96.2 C246.2 100.6 249.8 108.5 249 117 C247.9 130.3 236.8 140.4 222.7 140.4 C218.5 149.6 209.8 155.7 199.5 155.8 C190.5 156 182.8 151.9 178.1 145.3 C172.8 150.8 165.5 153.8 157.7 153.4 C150.7 153.1 144.7 150.6 139.9 146.3"/><path d="M175.8 73.3 C160.9 79.1 151.1 94.2 153.4 110.6 C156.3 131.2 175.5 145.4 196.1 142.4 C205.7 141.1 214.1 136.2 220 129 C216.7 130.6 213.1 131.7 209.2 132.2 C189.2 135.1 170.8 121.2 168 101.3 C166.5 90.8 169.7 80.8 175.8 73.3Z"/><circle cx="140.1" cy="143.8" r="15.9"/><circle cx="118.8" cy="168.3" r="7.6"/><path d="M208.9 52 C210.8 61.1 214.5 64.8 223.6 66.7 C214.5 68.6 210.8 72.3 208.9 81.4 C207 72.3 203.3 68.6 194.2 66.7 C203.3 64.8 207 61.1 208.9 52Z"/><path d="M195.5 84.5 C197 91.1 199.7 93.9 206.2 95.4 C199.7 96.9 197 99.6 195.5 106.2 C194 99.6 191.3 96.9 184.7 95.4 C191.3 93.9 194 91.1 195.5 84.5Z"/>`;
 

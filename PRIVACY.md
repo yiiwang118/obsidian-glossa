@@ -13,7 +13,9 @@ What follows is a map of network calls and stored data for the community review 
 | Tool call (agent mode) | The LLM endpoint | Tool result text as the next user turn | Agent loop after a tool runs | Yes — switch to Plan mode (read-only) or run tools manually |
 | `web_fetch` tool | The URL you / the model fetched | HTTP GET; standard `User-Agent` | Tool invocation; approval prompt | Yes — deny the approval |
 | `@url` mention attaching a web page | That URL | HTTP GET | You typed an `@http...` reference | Yes — don't attach |
-| Endpoint connection test | The selected Custom API endpoint (`/models` or a 1-token ping) | API key as required by that endpoint | You click "Test" / "Test active endpoint" in settings | Yes — don't click |
+| Endpoint connection test | The selected Custom API endpoint (`/models` or a Messages ping) | API key and configured extra body parameters; the ping defaults to a 1-token output limit unless explicitly overridden | You click "Test" / "Test active endpoint" in settings | Yes — don't click |
+| Quick translation | The translation endpoint you selected | Selected PDF, Markdown, or HTML text and a translation prompt, plus configured extra body parameters | You invoke translation, or enable Auto mode and make a new selection | Yes — turn selection translation off and don't invoke it |
+| Version check | GitHub's public releases API for `yiiwang118/obsidian-glossa` | A request for release metadata; no vault text or API keys | Automatic checks (enabled by default), or you click "Check for updates" | Yes — disable update checks |
 | Inline completion | The completion endpoint you selected | Current file path, nearest preceding heading, and configurable text before/after the cursor (defaults: 800 before, 200 after) | You explicitly enable inline completion, then pause while editing Markdown | Yes - keep inline completion off |
 
 Pasting a screenshot reads image data only from that explicit paste event. Glossa does not poll, monitor, or read ambient clipboard contents. The pasted image remains a local composer attachment until you send the message; sending then follows the first row above.
@@ -26,25 +28,25 @@ The community review build does not spawn local binaries, read shell environment
 
 ## Data stored locally
 
-All paths are inside the user's vault under `.obsidian/plugins/glossa/`. None of this is synced unless your vault sync setup (Obsidian Sync, iCloud, Dropbox, …) explicitly includes `.obsidian/`.
+All paths are inside the user's vault under its configured plugin directory (normally `.obsidian/plugins/glossa/`). The configuration directory can be customized. These files may be synced if your vault sync setup (Obsidian Sync, iCloud, Dropbox, …) includes that directory.
 
 | File | What's in it | Encrypted? |
 |---|---|---|
-| `data.json` | Settings, endpoint configs (incl. API keys) | API keys: opt-in via passphrase (Settings → Security). Other fields: plaintext. |
+| `data.json` | Settings, endpoint configs (incl. API keys and extra JSON body parameters) | API keys: opt-in via passphrase (Settings → Security). Other fields, including extra body parameters: plaintext. Use the API key field for credentials. |
 | `chats.json` | Every chat session: messages, tool events, reasoning, timestamps | Plaintext. |
 | `embeddings.json` | Legacy semantic-index data from older builds, if present. The community review build does not rebuild it. | Encrypted **only** if encryption was enabled when created. Otherwise plaintext legacy data. |
 | `checkpoints.json` | Pre-edit snapshots of files touched by destructive tools (7-day TTL, 200-entry cap) | Encrypted **only** if encryption is enabled. |
 | `nested_skill_dirs.json` | Cached list of `.glossa/skills/` directories discovered in your vault | Plaintext (just paths). |
 | `tool_outputs/*.txt` | Tool results that exceeded inline-size cap, persisted for the model to re-reference | Plaintext. |
 
-If you turn encryption ON in Settings → Security, API keys and the four `.json` blobs above are sealed with AES-GCM-256, key derived from your passphrase via PBKDF2 (200 000 iterations). The key never leaves the WebCrypto layer — JavaScript sees only an opaque `CryptoKey` handle, which is dropped when you "lock" the plugin.
+If you turn encryption ON in Settings → Security, API keys and newly written checkpoint payloads use AES-GCM-256, with a key derived from your passphrase via PBKDF2 (600,000 iterations for current keys). Chat history and ordinary settings, including extra body parameters, remain plaintext. Legacy encrypted data may use the earlier 200,000-iteration format. The key never leaves the WebCrypto layer — JavaScript sees only an opaque `CryptoKey` handle, which is dropped when you "lock" the plugin.
 
 ## What is *not* sent
 
 - No usage analytics
 - No crash reports
 - No identifier of you, your machine, or your vault
-- No content unless you explicitly send a message, attach context, approve a web fetch or note tool, or explicitly enable inline completion
+- No content unless you explicitly send a message, attach context, approve a web fetch or note tool, invoke translation, or enable automatic translation or inline completion
 - PDF text extraction is local through Obsidian/PDF.js; extracted text is only sent if you attach it or the agent returns it to the LLM as tool context
 
 ## Provider-side privacy
