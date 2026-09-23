@@ -16,7 +16,11 @@ export interface PopupItem {
 
 export class Popup {
   private static instances = new Set<Popup>();
-  private el: HTMLElement;
+  private el: HTMLElement | null = null;
+  private ownerDocument: Document | null = null;
+  private ownerWindow: Window | null = null;
+  private positionFrame: number | null = null;
+  private outsideTimer: number | null = null;
   private itemEls: HTMLElement[] = [];
   private selectedIdx = -1;
   private items: PopupItem[] = [];
@@ -27,11 +31,13 @@ export class Popup {
 
   constructor() {
     Popup.instances.add(this);
-    this.el = el('div', { className: 'nc-popup' });
+  }
+
+  private createElement(ownerDocument: Document): void {
+    this.el = el('div', { className: 'nc-popup', parent: ownerDocument.body });
     this.el.setAttribute('role', 'listbox');
     this.el.setAttribute('aria-label', 'Glossa menu');
     setStyle(this.el, { display: 'none' });
-    activeDocument.body.appendChild(this.el);
     this.el.addEventListener('mousedown', (e) => e.stopPropagation());
     // When the cursor leaves the popup, drop the mouse-induced `.selected`
     // highlight from every row. `.checked` (the row marking the current
@@ -46,26 +52,40 @@ export class Popup {
   }
 
   destroy() {
-    this.removeOutsideHandler();
-    this.removeKeyHandler();
+    this.hide();
     Popup.instances.delete(this);
-    this.el.remove();
+    this.el?.remove();
+    this.el = null;
   }
 
   show(anchor: HTMLElement, items: PopupItem[]) {
-    this.hidePeers();
+    this.hide();
+    const ownerDocument = anchor.ownerDocument;
+    const ownerWindow = ownerDocument.defaultView;
+    if (!ownerWindow) return;
+    this.hidePeers(ownerDocument);
+    if (this.el?.ownerDocument !== ownerDocument) {
+      this.el?.remove();
+      this.createElement(ownerDocument);
+    }
+    const popup = this.el;
+    if (!popup) return;
+    this.ownerDocument = ownerDocument;
+    this.ownerWindow = ownerWindow;
     this.items = items;
     this.anchor = anchor;
     this.anchor.setAttribute('aria-expanded', 'true');
     this.selectedIdx = -1;
     this.render();
     this.open = true;
-    setStyle(this.el, { display: 'block' });
+    setStyle(popup, { display: 'block' });
 
-    window.requestAnimationFrame(() => {
+    this.positionFrame = ownerWindow.requestAnimationFrame(() => {
+      this.positionFrame = null;
+      if (!this.open || this.anchor !== anchor) return;
       const r = anchor.getBoundingClientRect();
-      const rect = this.el.getBoundingClientRect();
-      const vw = window.innerWidth, vh = window.innerHeight;
+      const rect = popup.getBoundingClientRect();
+      const vw = ownerWindow.innerWidth, vh = ownerWindow.innerHeight;
       const popupH = Math.min(rect.height, 320);
       const popupW = Math.min(rect.width, 360);
 
@@ -83,8 +103,8 @@ export class Popup {
       let left = r.left;
       left = Math.max(6, Math.min(vw - popupW - 6, left));
 
-      setStyle(this.el, { left: left + 'px' });
-      setStyle(this.el, { top: top  + 'px' });
+      setStyle(popup, { left: left + 'px' });
+      setStyle(popup, { top: top  + 'px' });
     });
     this.installOutsideHandler();
     this.installKeyHandler();
@@ -93,20 +113,24 @@ export class Popup {
   hide() {
     this.open = false;
     this.anchor?.setAttribute('aria-expanded', 'false');
-    setStyle(this.el, { display: 'none' });
+    if (this.el) setStyle(this.el, { display: 'none' });
+    if (this.positionFrame !== null) this.ownerWindow?.cancelAnimationFrame(this.positionFrame);
+    this.positionFrame = null;
     this.items = [];
     this.itemEls = [];
     this.removeOutsideHandler();
     this.removeKeyHandler();
+    this.ownerDocument = null;
+    this.ownerWindow = null;
   }
 
   /** Body-level popups are shared visual chrome. Only one should ever be
    *  visible; otherwise model/context/slash menus can visually overlap. */
-  private hidePeers() {
+  private hidePeers(ownerDocument: Document) {
     for (const popup of Popup.instances) {
       if (popup !== this) popup.hide();
     }
-    for (const node of Array.from(activeDocument.querySelectorAll<HTMLElement>('.nc-popup'))) {
+    for (const node of Array.from(ownerDocument.querySelectorAll<HTMLElement>('.nc-popup'))) {
       if (node !== this.el) setStyle(node, { display: 'none' });
     }
   }
@@ -157,11 +181,11 @@ export class Popup {
         e.stopPropagation();
       }
     };
-    activeDocument.addEventListener('keydown', this.keyHandler, true);
+    this.ownerDocument?.addEventListener('keydown', this.keyHandler, true);
   }
   private removeKeyHandler() {
     if (this.keyHandler) {
-      activeDocument.removeEventListener('keydown', this.keyHandler, true);
+      this.ownerDocument?.removeEventListener('keydown', this.keyHandler, true);
       this.keyHandler = null;
     }
   }
@@ -170,15 +194,24 @@ export class Popup {
     this.removeOutsideHandler();
     this.outsideClickHandler = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (this.el.contains(t)) return;
+      if (this.el?.contains(t)) return;
       if (this.anchor && this.anchor.contains(t)) return;
       this.hide();
     };
-    window.setTimeout(() => activeDocument.addEventListener('mousedown', this.outsideClickHandler), 0);
+    const ownerDocument = this.ownerDocument;
+    const handler = this.outsideClickHandler;
+    this.outsideTimer = this.ownerWindow?.setTimeout(() => {
+      this.outsideTimer = null;
+      if (this.open && this.outsideClickHandler === handler) {
+        ownerDocument?.addEventListener('mousedown', handler);
+      }
+    }, 0) ?? null;
   }
   private removeOutsideHandler() {
+    if (this.outsideTimer !== null) this.ownerWindow?.clearTimeout(this.outsideTimer);
+    this.outsideTimer = null;
     if (this.outsideClickHandler) {
-      activeDocument.removeEventListener('mousedown', this.outsideClickHandler);
+      this.ownerDocument?.removeEventListener('mousedown', this.outsideClickHandler);
       this.outsideClickHandler = null;
     }
   }
@@ -189,12 +222,14 @@ export class Popup {
   }
 
   private render() {
-    clear(this.el);
+    const popup = this.el;
+    if (!popup) return;
+    clear(popup);
     this.itemEls = [];
     let lastSection: string | undefined;
     this.items.forEach((it, i) => {
       if (it.section && it.section !== lastSection) {
-        el('div', { className: 'nc-popup-section', text: it.section, parent: this.el, attrs: { role: 'presentation' } });
+        el('div', { className: 'nc-popup-section', text: it.section, parent: popup, attrs: { role: 'presentation' } });
         lastSection = it.section;
       }
       const row = el('div', {
@@ -202,7 +237,7 @@ export class Popup {
           + (i === this.selectedIdx ? ' selected' : '')
           + (it.checked ? ' checked' : '')
           + (it.danger ? ' danger' : ''),
-        parent: this.el,
+        parent: popup,
       });
       row.setAttribute('role', 'option');
       row.setAttribute('aria-selected', String(i === this.selectedIdx));
