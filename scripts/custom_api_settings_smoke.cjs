@@ -1,10 +1,12 @@
 /* Browser smoke test of the production settings renderer with a minimal Obsidian UI shim.
  * PLAYWRIGHT_MODULE and CHROME_PATH may point to an existing local installation. */
 const path = require('path');
+const fs = require('fs');
 const assert = require('assert/strict');
 const esbuild = require('esbuild');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname, '..');
+const output = process.env.UI_SCREENSHOT_DIR || path.join(root, 'tests/.cache/custom-api-settings');
 
 const shim = `
 export class App {}
@@ -47,6 +49,7 @@ export async function requestUrl() { throw new Error('Network calls are disabled
 `;
 
 (async () => {
+  fs.mkdirSync(output, { recursive: true });
   const bundle = await esbuild.build({
     stdin: { contents: `import { GlossaSettingTab } from './src/settings'; import { setLanguage } from './src/utils/i18n'; window.SettingsHarness = { GlossaSettingTab, setLanguage };`, resolveDir: root },
     bundle: true, format: 'iife', write: false,
@@ -96,7 +99,12 @@ export async function requestUrl() { throw new Error('Network calls are disabled
       const endpoint = { id: 'demo', label: 'MiniMax', kind: 'custom-api', apiStyle: 'anthropic', baseUrl: 'https://api.minimax.io/anthropic', model: 'MiniMax-M3', extraBody: { thinking: { type: 'disabled' } } };
       window.endpoint = endpoint;
       window.saved = [];
-      const plugin = { settings: { endpoints: [endpoint] }, saveSettings: async () => window.saved.push(JSON.parse(JSON.stringify(endpoint))) };
+      window.unloadCallbacks = [];
+      const plugin = {
+        settings: { endpoints: [endpoint] },
+        register: callback => window.unloadCallbacks.push(callback),
+        saveSettings: async () => window.saved.push(JSON.parse(JSON.stringify(endpoint))),
+      };
       const tab = new window.SettingsHarness.GlossaSettingTab({}, plugin);
       tab.renderEndpointCard(document.querySelector('main'), endpoint);
       document.querySelectorAll('details').forEach(el => { el.open = true; });
@@ -115,15 +123,19 @@ export async function requestUrl() { throw new Error('Network calls are disabled
     const extra = setting('Extra JSON body').locator('textarea');
     await extra.fill('{"thinking":{"type":"disabled"},"reasoning_split":true}');
     assert.equal(await page.evaluate(() => window.endpoint.extraBody.reasoning_split), true);
-    const output = path.join(root, 'docs/screenshots/custom-api-settings.png');
-    await page.screenshot({ path: output, fullPage: true });
+    await page.screenshot({ path: path.join(output, 'custom-api-settings.png'), fullPage: true });
     await extra.fill('{"stream":true}');
     assert.equal(await extra.getAttribute('aria-invalid'), 'true');
     assert.equal(await page.evaluate(() => window.endpoint.extraBody.reasoning_split), true);
-    await page.screenshot({ path: path.join(root, 'docs/screenshots/custom-api-validation.png'), fullPage: true });
+    await page.screenshot({ path: path.join(output, 'custom-api-validation.png'), fullPage: true });
     await extra.fill('');
     assert.deepEqual(await page.evaluate(() => window.endpoint.extraBody), {});
+    await setting('API format').locator('button').click();
+    assert.equal(await page.locator('.nc-popup').count(), 1);
+    await page.evaluate(() => window.unloadCallbacks.forEach(callback => callback()));
+    assert.equal(await page.locator('.nc-popup').count(), 0);
+    assert.equal(await setting('API format').locator('button').getAttribute('aria-expanded'), 'false');
     assert.deepEqual(errors, []);
-    console.log('Custom API settings browser smoke passed: URL, persistence, invalid-input retention, clear.');
+    console.log('Custom API settings browser smoke passed: URL, persistence, invalid-input retention, clear, plugin unload cleanup.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

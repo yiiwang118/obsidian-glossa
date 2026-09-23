@@ -151,6 +151,8 @@ Anthropic-style 端点可填写 SDK 根地址（如 `https://api.minimax.io/anth
 
 推理强度 **Off** 通常仅省略推理强度参数，并不保证关闭思考。MiniMax M2.x 无法关闭思考；`thinking.disabled` 需要模型本身支持。
 
+快速翻译会为 MiniMax M2.x 设置 16,384 token 的输出上限，为思考预留空间。这是上限，不代表固定消耗或保证成功；额外请求体中显式指定的 token 上限优先。Anthropic 响应只有思考内容或被截断时会显示错误与重试按钮，不会标记为翻译完成。开启 Auto 后，每次新的有效选区都会发送到配置的翻译端点；关闭 Auto 可恢复手动触发。
+
 ## 构建与验证
 
 ```bash

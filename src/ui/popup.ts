@@ -54,8 +54,6 @@ export class Popup {
   destroy() {
     this.hide();
     Popup.instances.delete(this);
-    this.el?.remove();
-    this.el = null;
   }
 
   show(anchor: HTMLElement, items: PopupItem[]) {
@@ -113,13 +111,16 @@ export class Popup {
   hide() {
     this.open = false;
     this.anchor?.setAttribute('aria-expanded', 'false');
-    if (this.el) setStyle(this.el, { display: 'none' });
+    this.anchor = null;
     if (this.positionFrame !== null) this.ownerWindow?.cancelAnimationFrame(this.positionFrame);
     this.positionFrame = null;
     this.items = [];
     this.itemEls = [];
     this.removeOutsideHandler();
     this.removeKeyHandler();
+    // A closed menu must not retain a detached window or setting-row callbacks.
+    this.el?.remove();
+    this.el = null;
     this.ownerDocument = null;
     this.ownerWindow = null;
   }

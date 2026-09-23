@@ -79,6 +79,8 @@ exports.run = async (t, loadModule) => {
     t.eq(anchor.getAttribute('aria-expanded'), 'false', 'selection closes trigger ARIA state');
     t.eq(popout.listeners.get('keydown').size, 0, 'keyboard listener removed from original document');
     t.eq(popout.listeners.get('mousedown').size, 0, 'outside listener removed from original document');
+    t.eq(popup.currentAnchor(), null, 'closed menu releases its anchor');
+    t.eq(popout.body.children.length, 0, 'closed menu releases its owner-document DOM');
 
     popup.show(anchor, items);
     popup.hide();

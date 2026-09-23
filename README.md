@@ -151,6 +151,8 @@ Under an endpoint's **Advanced → Extra JSON body**, enter a JSON object such a
 
 The reasoning **Off** option normally omits reasoning effort; it does not guarantee thinking is disabled. MiniMax M2.x cannot disable thinking; select a supported model for `thinking.disabled`.
 
+Quick translation gives MiniMax M2.x an output limit of 16,384 tokens to leave room for thinking. This is a maximum, not a fixed charge or a guarantee of completion; explicit extra-body token limits take precedence. Thinking-only and truncated Anthropic responses display an error with a Retry button instead of a completed translation. In Auto mode, each new eligible selection is sent to your configured translation endpoint; turn Auto off to require a manual action.
+
 ## Build and Verify
 
 ```bash

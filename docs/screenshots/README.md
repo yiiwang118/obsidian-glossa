@@ -23,4 +23,4 @@ CHROME_PATH=/absolute/path/to/chrome \
 node scripts/custom_api_settings_smoke.cjs
 ```
 
-Both environment variables are optional when Playwright and its browser resolve normally. The script regenerates the two fixture screenshots.
+Both environment variables are optional when Playwright and its browser resolve normally. The script also verifies settings-menu cleanup on plugin unload. Screenshots go to `tests/.cache/custom-api-settings`; set `UI_SCREENSHOT_DIR` to choose another output directory.

@@ -1,20 +1,25 @@
 # Changelog
 
+All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [0.8.0] — Unreleased
 
 ### Added
 - Validated custom endpoint JSON body parameters with explicit override precedence and protected conversation/stream fields.
 - Final request URL previews in endpoint settings and the add-endpoint dialog.
+- Configurable, opt-in inline completions in Markdown editors.
 
 ### Fixed
 - Anthropic SDK-style roots now resolve to `/v1/messages` (and `/v1/models`), while versioned roots and explicit Messages URLs remain usable.
+- Keep dropdown menus in their trigger's window and give each rendered SVG its own gradient references, preventing invisible PDF selection icons.
+- Reserve thinking headroom for MiniMax M2.x quick translation and preserve Anthropic completion metadata for accurate empty/truncated-output diagnostics.
+- Preserve translation errors and Retry buttons after pending animation frames.
+- Release closed popup elements and anchors, and destroy the settings popup on plugin unload.
 
 ### Changed
 - Migrated existing custom endpoints to an empty extra-body configuration; the settings schema addition advances the minor version per the contribution guide.
-
-All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
+- Updated the official Obsidian ESLint plugin to 0.4.2 and patched vulnerable development dependencies.
+- Clarified translation network use, custom-body precedence, and the scope of local encryption.
 
 ## [0.7.3] — 2026-07-25
 

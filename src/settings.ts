@@ -275,7 +275,10 @@ export class GlossaSettingTab extends PluginSettingTab {
   private renderGeneration = 0;
   private readonly selectPopup = new Popup();
 
-  constructor(app: App, public plugin: GlossaPlugin) { super(app, plugin); }
+  constructor(app: App, public plugin: GlossaPlugin) {
+    super(app, plugin);
+    plugin.register(() => this.selectPopup.destroy());
+  }
 
   getSettingDefinitions(): SettingDefinitionItem[] {
     return [{
@@ -289,6 +292,8 @@ export class GlossaSettingTab extends PluginSettingTab {
         bi('Font size', '字体大小'),
         bi('Update checks', '版本更新检查'),
         bi('Model endpoints', '模型端点'),
+        bi('Extra JSON body', '额外 JSON 请求体'),
+        bi('Request URL', '请求 URL'),
         bi('Network and proxy', '网络与代理'),
         bi('Web research and downloads', '网页研究与下载'),
         bi('Context and selection', '上下文与选中内容'),
@@ -959,8 +964,8 @@ export class GlossaSettingTab extends PluginSettingTab {
     const translationModelSetting = new Setting(containerEl)
       .setName(bi('Translation model', '翻译模型'))
       .setDesc(bi(
-        'Choose any detected model on this endpoint. Quick translation disables reasoning for lower latency.',
-        '选择该端点已探测到的任意模型。快速翻译会关闭推理以降低延迟。',
+        'Choose any detected model on this endpoint. Quick translation omits automatic reasoning effort; model behavior and extra body parameters still apply.',
+        '选择该端点已探测到的任意模型。快速翻译不设置自动推理强度；模型本身的行为和额外请求体参数仍然生效。',
       ));
     createAlignedSelect(
       translationModelSetting.controlEl,
