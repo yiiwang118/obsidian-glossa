@@ -96,6 +96,8 @@ export default class GlossaPlugin extends Plugin {
     // truly want to override.
     let codexMigratedCount = 0;
     for (const ep of (this.settings.endpoints ?? [])) {
+      // Existing endpoints retain their request body when upgrading to 0.8.
+      if (ep.kind === 'custom-api' && ep.extraBody === undefined) ep.extraBody = {};
       if ((ep as AnyValue).kind === 'codex-cli' && (ep as AnyValue).model === 'gpt-5.4') {
         (ep as AnyValue).model = '';
         codexMigratedCount++;
