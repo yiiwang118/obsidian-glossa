@@ -238,9 +238,30 @@ exports.run = async function(t, loadModule) {
   t.eq(
     translationEndpoint.reasoningEffort,
     'off',
-    'quick translation disables endpoint reasoning to reduce first-token latency',
+    'quick translation omits optional reasoning effort to reduce first-token latency',
   );
   t.eq(chatEndpoint.reasoningEffort, 'ultra', 'translation optimization does not mutate the chat endpoint');
+
+  for (const model of ['MiniMax-M2', 'MiniMax-M2.1', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'minimax/MiniMax-M2.7']) {
+    t.eq(mod.selectionTranslationMaxTokens('Hello', { ...translationEndpoint, model }), 16384,
+      `${model} reserves output headroom for mandatory thinking even with effort off`);
+  }
+  for (const model of ['MiniMax-M3', 'claude-sonnet-4-6', 'gpt-5.6', 'MiniMax-M20', 'MiniMax-M2.7-other']) {
+    t.eq(mod.selectionTranslationMaxTokens('Hello', { ...translationEndpoint, model }), 512,
+      `${model} keeps the short-selection budget`);
+  }
+  t.eq(mod.selectionTranslationMaxTokens('x'.repeat(24000), { ...translationEndpoint, model: 'gpt-5.6' }), 8192,
+    'ordinary translation output remains capped for long selections');
+  t.eq(mod.selectionTranslationMaxTokens('Hello', { ...translationEndpoint, kind: 'claude-code-cli', model: 'MiniMax-M2.7' }), 512,
+    'the MiniMax API heuristic does not change CLI providers');
+
+  const final = { type: 'final', text: '', stopReason: 'end_turn', hasReasoning: false };
+  t.eq(mod.selectionTranslationResponseError('译文', final), null, 'complete text is successful');
+  t.ok(/empty translation|空翻译/.test(mod.selectionTranslationResponseError('', final)), 'empty responses without reasoning retain the fallback error');
+  t.ok(/only thinking|仅返回了思考/.test(mod.selectionTranslationResponseError('', { ...final, hasReasoning: true })), 'thinking-only end_turn is distinguished from empty output');
+  t.ok(/while thinking|思考阶段/.test(mod.selectionTranslationResponseError('', { ...final, stopReason: 'max_tokens', hasReasoning: true })), 'thinking-only truncation explains that the budget ended before text');
+  t.ok(/incomplete|不完整/.test(mod.selectionTranslationResponseError('partial', { ...final, stopReason: 'max_tokens', hasReasoning: true })), 'partial text is not presented as a completed translation');
+  t.ok(/incomplete|不完整/.test(mod.selectionTranslationResponseError('', { ...final, stopReason: 'length' })), 'compatible length reason is recognized without claiming thinking');
 
   const models = mod.translationModelsForEndpoint({
     model: 'deepseek-v4-pro',

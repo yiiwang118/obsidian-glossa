@@ -202,7 +202,12 @@ export class CustomApiProvider implements LLMProvider {
             yield { type: 'tool_call', id: String(b.id ?? Date.now().toString(36)), name: String(b.name), args: b.input ?? {} };
           }
         }
-        yield { type: 'final', text, usage: { input: j.usage?.input_tokens, output: j.usage?.output_tokens } };
+        yield {
+          type: 'final', text,
+          stopReason: typeof j.stop_reason === 'string' ? j.stop_reason : undefined,
+          hasReasoning: blocks.some((b: AnyValue) => b.type === 'thinking' || b.type === 'redacted_thinking'),
+          usage: { input: j.usage?.input_tokens, output: j.usage?.output_tokens },
+        };
       } catch (e) { yield { type: 'error', error: e.message }; }
       return;
     }
@@ -551,6 +556,8 @@ export class CustomApiProvider implements LLMProvider {
     let buf = ''; let bufText = '';
     const toolBuffers = new Map<number, { id: string; name: string; argsStr: string }>();
     let usage: AnthropicStreamUsage | undefined;
+    let stopReason: string | undefined;
+    let hasReasoning = false;
 
     let lastChunkAt = Date.now();
     let timedOut = false;
@@ -583,6 +590,13 @@ export class CustomApiProvider implements LLMProvider {
           if (data) {
             let ev: AnyValue; try { ev = JSON.parse(data); } catch { ev = null; }
             if (ev) {
+              if (ev.type === 'message_delta' && typeof ev.delta?.stop_reason === 'string') {
+                stopReason = ev.delta.stop_reason;
+              }
+              if ((ev.type === 'content_block_start' && ['thinking', 'redacted_thinking'].includes(ev.content_block?.type))
+                || (ev.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta')) {
+                hasReasoning = true;
+              }
               if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
                 toolBuffers.set(ev.index, { id: ev.content_block.id, name: ev.content_block.name, argsStr: '' });
               } else if (ev.type === 'content_block_delta') {
@@ -620,7 +634,7 @@ export class CustomApiProvider implements LLMProvider {
         yield { type: 'error', error: `Tool call "${slot.name}" had truncated/unparsable JSON args from stream — likely the proxy dropped the connection mid-message.` };
       }
     }
-    yield { type: 'final', text: bufText, usage: usage ? {
+    yield { type: 'final', text: bufText, stopReason, hasReasoning, usage: usage ? {
       input: usage.input_tokens, output: usage.output_tokens,
       cacheRead: usage.cache_read_input_tokens, cacheWrite: usage.cache_creation_input_tokens,
     } : undefined };
