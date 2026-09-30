@@ -1,0 +1,31 @@
+const path = require('path');
+exports.run = async (t, load) => {
+  const { runAgentLoop } = await load(path.resolve(__dirname, '../src/agent/loop.ts'));
+  const requests = [], events = [];
+  let n = 0, boundary = 0;
+  const provider = { id:'test', displayName:'Test', defaultModel:()=>'', isAvailable:async()=>true, async *stream(req) {
+    requests.push(JSON.parse(JSON.stringify(req)));
+    if (n++ === 0) yield {type:'tool_call', id:'call', name:'structured', args:{}};
+    else yield {type:'text',text:'Done'};
+    yield {type:'final',text:''};
+  }};
+  const options = { app:{vault:{adapter:{exists:async()=>false},getName:()=> 'Test',getAbstractFileByPath:()=>null},workspace:{},metadataCache:{}}, provider, systemPrompt:'test', userContent:'begin',history:[],enableTools:true,permissionLevel:'read-only',runMode:'plan',maxSteps:3,autoApproveTools:[],neverApproveTools:[],onText:()=>{},onToolStart:()=>{},onToolEnd:ev=>events.push({...ev}),onStepBoundary:()=>{},onFinal:()=>{},onError:error=>{throw Error(error);},takeSteering:async()=>boundary++ ? ['New correction'] : [], runtimeTools:[{ spec:{name:'structured',description:'read-only test',parameters:{type:'object'}},dangerous:false,isReadOnly:()=>true,isConcurrencySafe:()=>true,describe:()=>'',run:async()=>({ status:'success', text:'Error: this is literal note content', modelText:'Compact model projection', data:{ok:true} }) }] };
+  await runAgentLoop(options);
+  t.eq(events.at(-1).status, 'success', 'explicit success beats error-looking note content');
+  const result = requests[1].messages.find(m=>m.toolCallId==='call');
+  t.eq(result.content, 'Compact model projection', 'model projection separated from UI');
+  t.eq(result.toolIsError, false, 'structured success preserved in wire protocol');
+  t.ok(events.at(-1).result.startsWith('Error:'), 'UI keeps full projection');
+  t.ok(requests[1].messages.some(m=>m.content==='New correction'), 'steering enters next model step');
+  const abort = new AbortController(); abort.abort(); n=0; requests.length=0;
+  await runAgentLoop({...options,signal:abort.signal});
+  t.eq(requests.length,0,'already cancelled run never calls provider');
+  const { pruneUnderPressure } = await load(path.resolve(__dirname, '../src/utils/context_pressure.ts'));
+  const pair=(id,name,isError=false)=>[{role:'assistant',content:'',toolCalls:[{id,name,args:{}}]}, {role:'tool',toolCallId:id,toolName:name,toolIsError:isError,content:'Evidence '.repeat(2000)}];
+  const messages=[...pair('old','read_note'),...pair('write','write_note'),...pair('error','read_note',true),...pair('unknown','external_mutation'),...pair('recent','read_note')];
+  const pressure=pruneUnderPressure(messages,100);
+  t.eq(pressure.ids,['old'],'only old successful reads automatically pruned');
+  t.ok(!pressure.messages.some(m=>m.toolCallId==='old'||m.toolCalls?.some(c=>c.id==='old')),'call and result removed together');
+  t.ok(pressure.messages.some(m=>m.toolCallId==='write'),'write evidence retained');
+  t.eq(messages.length,10,'visible original history untouched');
+};

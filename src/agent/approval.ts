@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, Modal, Notice, TFile } from 'obsidian';
 import type { ToolImpl } from './tools';
 import { diffStats, lineDiff, applySelectedDiff, renderDiffInto } from '../utils/diff';
@@ -357,4 +356,3 @@ class ApprovalModal extends Modal {
     return wrap;
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

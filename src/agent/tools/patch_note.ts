@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * patch_note — section / block / frontmatter-anchored append-prepend-replace.
  *
@@ -229,4 +228,3 @@ export const patchNote: ToolImpl = buildTool({
     return `Patched ${path} @ ${targetDesc} (${op}, ${insert.length} line${insert.length === 1 ? '' : 's'}).`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

@@ -59,6 +59,7 @@ export interface ToolSpec {
 }
 
 export interface ChatRequest {
+  execution?: { mode: 'plan' | 'act'; permission: import('../types').PermissionLevel };
   systemPrompt?: string;
   messages: MessageInput[];
   tools?: ToolSpec[];

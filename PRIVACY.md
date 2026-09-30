@@ -2,7 +2,7 @@
 
 Glossa is a **local plugin**. There is no Glossa-controlled server, no telemetry, no analytics, no crash reporting. The plugin author cannot see what you type or any content of your vault.
 
-What follows is a map of network calls and stored data for the community review build.
+What follows is a map of network calls and stored data for API chat and optional desktop CLI use.
 
 ## Outbound network calls
 
@@ -11,6 +11,8 @@ What follows is a map of network calls and stored data for the community review 
 | You send a chat message | The LLM endpoint **you configured** | Full prompt: system prompt + history + attached context (file content of any `@` chips) + your current message | You press Enter | Yes — don't send the message |
 | Streaming a response | Same as above | Server-Sent Events stream back; no extra outbound | Implicit when sending | — |
 | Tool call (agent mode) | The LLM endpoint | Tool result text as the next user turn | Agent loop after a tool runs | Yes — switch to Plan mode (read-only) or run tools manually |
+| Web search and repository search | DuckDuckGo, optional Brave / Tavily / Exa / SerpAPI, or GitHub search API | Search query and a configured search-service key when required | Network tool approval or configured auto-approval | Yes — deny approval / disable auto-approval |
+| Academic search and download candidate discovery | OpenAlex, arXiv, DuckDuckGo and Yahoo | Search terms or paper titles | Approved search / download workflow | Yes — don't invoke or approve the workflow |
 | `web_fetch` tool | The URL you / the model fetched | HTTP GET; standard `User-Agent` | Tool invocation; approval prompt | Yes — deny the approval |
 | `@url` mention attaching a web page | That URL | HTTP GET | You typed an `@http...` reference | Yes — don't attach |
 | Endpoint connection test | The selected Custom API endpoint (`/models` or a Messages ping) | API key and configured extra body parameters; the ping defaults to a 1-token output limit unless explicitly overridden | You click "Test" / "Test active endpoint" in settings | Yes — don't click |
@@ -24,7 +26,11 @@ Pasting a screenshot reads image data only from that explicit paste event. Gloss
 
 ## Local subprocesses and shell environment
 
-The community review build does not spawn local binaries, read shell environment variables, or start MCP servers. Local CLI endpoint kinds from older settings are kept disabled and return a message directing users to Custom API endpoints.
+Selecting Codex, Claude Code or Grok explicitly starts the installed local binary. Detection runs its version command; sending passes the system prompt, conversation and selected text context over stdin for Codex/Claude Code. Grok receives a private temporary prompt file outside the vault in the OS temporary directory (owner-only permissions on POSIX), removed after completion, failure or cancellation. Conversation text is never placed in command-line arguments. An abrupt host crash can leave the temporary file for the OS to clean up. The CLI contacts its configured provider using its existing login. Glossa does not read authentication files, run login shells, install dependencies or upload telemetry. Child processes inherit the application environment, with common executable directories added to PATH and any explicitly configured proxy applied. The home directory is used only to find standard executable locations.
+
+The current vault is the CLI working directory. Codex uses its native read-only/workspace-write sandbox; Claude Code uses restricted mode and a limited set of file tools. Codex and Claude Code disable external MCP configuration. Grok requests native read-only/workspace sandboxing, limits built-in file tools and disables subagents; its local configuration, including hooks and MCP settings, still applies. Permission bypass is never enabled. Native CLI commands and file operations do not pass through Glossa approvals, workspace-subfolder restrictions or checkpoints. CLI settings, instructions and the CLI provider's privacy policy remain relevant; its own data retention or telemetry is outside Glossa's control. No automatic CLI login or background runs occur.
+
+Queued text is stored until consumed. A resumed persistent task authorizes up to its configured number of additional model rounds. Stop, errors, blockers or the round limit end continuation; a reopened task never resumes automatically. Diagnostic export is an explicit local download containing allowlisted metadata, without prompts, note text, tool arguments, paths, headers, endpoint URLs or keys.
 
 ## Data stored locally
 
@@ -33,7 +39,7 @@ All paths are inside the user's vault under its configured plugin directory (nor
 | File | What's in it | Encrypted? |
 |---|---|---|
 | `data.json` | Settings, endpoint configs (incl. API keys and extra JSON body parameters) | API keys: opt-in via passphrase (Settings → Security). Other fields, including extra body parameters: plaintext. Use the API key field for credentials. |
-| `chats.json` | Every chat session: messages, tool events, reasoning, timestamps | Plaintext. |
+| `chats.json` | Chat sessions, folders, pending text, task progress, bounded diagnostic metadata, tool events, reasoning and timestamps | Plaintext, including backups. |
 | `embeddings.json` | Legacy semantic-index data from older builds, if present. The community review build does not rebuild it. | Encrypted **only** if encryption was enabled when created. Otherwise plaintext legacy data. |
 | `checkpoints.json` | Pre-edit snapshots of files touched by destructive tools (7-day TTL, 200-entry cap) | Encrypted **only** if encryption is enabled. |
 | `nested_skill_dirs.json` | Cached list of `.glossa/skills/` directories discovered in your vault | Plaintext (just paths). |
@@ -46,7 +52,7 @@ If you turn encryption ON in Settings → Security, API keys and newly written c
 - No usage analytics
 - No crash reports
 - No identifier of you, your machine, or your vault
-- No content unless you explicitly send a message, attach context, approve a web fetch or note tool, invoke translation, or enable automatic translation or inline completion
+- No content unless you explicitly send/queue a message, resume a bounded task, attach context, approve a web fetch or note tool, invoke translation, or enable automatic translation or inline completion
 - PDF text extraction is local through Obsidian/PDF.js; extracted text is only sent if you attach it or the agent returns it to the LLM as tool context
 
 ## Provider-side privacy
@@ -64,8 +70,10 @@ Some providers retain prompts for training by default. Disable training opt-in t
 - API keys default to **plaintext** in `data.json`. We recommend enabling encryption (Settings → Security) — but we do *not* force it, because losing the passphrase locks you out of your own keys.
 - Semantic indexing is disabled in the community review build.
 - New installs default to **Plan** + **read-only** mode. Raising permission to `workspace-write` or `full` is an explicit user action.
-- The agent's `read-only` and `workspace-write` permission levels are designed so the LLM cannot run anything irreversible without you clicking "Approve" — even when auto-approve rules are configured, destructive tools never go through silently the first time.
+- In API mode, the agent's `read-only` and `workspace-write` permission levels are designed so the LLM cannot run anything irreversible without you clicking "Approve" — even when auto-approve rules are configured, destructive tools never go through silently the first time.
 
 ## Questions
 
 File a [discussion](https://github.com/yiiwang118/obsidian-glossa/discussions) — not an issue, since this isn't a bug.
+
+Local CLI model discovery exchanges initialization and model-list metadata with the installed CLI, without sending chat messages or starting a model turn. Glossa caches model names and supported effort levels in its local settings; credentials remain managed by the CLI.

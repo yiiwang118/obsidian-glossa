@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument -- HTML replacement callbacks receive parser-derived values that are normalized before use. */
 
 export interface WebFetchOptions {
   signal?: AbortSignal;
@@ -251,4 +250,3 @@ function decodeHtml(text: string): string {
 function compactWhitespace(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
-/* eslint-enable @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * dataview_query — bridge to the Dataview plugin's DQL engine.
  *
@@ -114,4 +113,3 @@ function unknownMessage(value: unknown, fallback: string): string {
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Re-enable review lint rules after dynamic boundary module. */

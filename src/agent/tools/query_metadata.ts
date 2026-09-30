@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile, getAllTags } from 'obsidian';
 import { buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
@@ -31,4 +30,3 @@ export const queryMetadata: ToolImpl = buildTool({
     }, null, 2);
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

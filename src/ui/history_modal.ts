@@ -1,9 +1,9 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, Menu, Modal, Notice } from 'obsidian';
 import type GlossaPlugin from '../main';
 import type { ChatSession } from '../types';
 import { debounce, setTrustedSvg } from '../utils/dom';
 import { t, bi } from '../utils/i18n';
+import { sessionFolder } from '../utils/chat_folders';
 
 /* ============================================================
    Public entry points
@@ -48,6 +48,9 @@ class HistoryPopover {
   private filter = '';
   private renamingId: string | null = null;
   private listEl!: HTMLElement;
+  private foldersEl!: HTMLElement;
+  private folderId: string | null = null;
+  private folderEditor: string | null = null;
   /** Index of the keyboard-highlighted row in the CURRENT filtered list.
    *  -1 means "no selection yet". Reset whenever the filter changes. */
   private kbdIdx = -1;
@@ -75,15 +78,19 @@ class HistoryPopover {
     setTrustedSvg(searchIcon, `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`);
     const search = searchWrap.createEl('input', { type: 'text', cls: 'nc-history-pop-search-input' });
     search.placeholder = t('hist_search');
+    search.setAttribute('aria-label', t('hist_search'));
     const onSearch = debounce(() => { this.filter = search.value.toLowerCase(); this.renderList(); }, 80);
     search.addEventListener('input', onSearch);
-    window.setTimeout(() => search.focus(), 30);
+    this.root.ownerDocument.defaultView?.setTimeout(() => { if (search.isConnected) search.focus(); }, 30);
 
     const moreBtn = top.createEl('button', { cls: 'nc-history-pop-more', attr: { title: t('more') } });
     // Filled dots — Lucide's stroke-only r=1 dots are too tiny to see at 14px,
     // so we use solid fill with r=1.6.
     setTrustedSvg(moreBtn, `<svg viewBox="0 0 24 24" width="14" height="14"><circle cx="5"  cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>`);
     moreBtn.onclick = (e) => this.openOverflowMenu(e, moreBtn);
+
+    this.foldersEl = this.root.createDiv({ cls: 'nc-history-folders' });
+    this.renderFolders();
 
     // List body — flex-grow, scrollable.
     this.listEl = this.root.createDiv({ cls: 'nc-history-pop-list' });
@@ -98,7 +105,11 @@ class HistoryPopover {
     // handled, so the underlying chat textarea doesn't also process arrows).
     this.keyHandler = (e: KeyboardEvent) => {
       if ((e as AnyValue).isComposing || (e as AnyValue).keyCode === 229) return;
-      if (this.renamingId) return;     // rename input handles its own keys
+      if (this.root.ownerDocument.querySelector('.menu, .modal-container')) return;
+      if (this.renamingId || this.folderEditor !== null) return;
+      if (e.key === 'Escape') { this.onClose(); e.preventDefault(); e.stopPropagation(); return; }
+      if (e.target !== search && !this.listEl.contains(e.target as Node)) return;
+      if ((e.target as Element)?.closest?.('button')) return;
       const n = this.kbdRows.length;
       if (n === 0) return;
       if (e.key === 'ArrowDown') {
@@ -114,12 +125,12 @@ class HistoryPopover {
         this.onClose(); e.preventDefault(); e.stopPropagation();
       }
     };
-    activeDocument.addEventListener('keydown', this.keyHandler, true);
+    this.root.ownerDocument.addEventListener('keydown', this.keyHandler, true);
   }
 
   destroy() {
     if (this.keyHandler) {
-      activeDocument.removeEventListener('keydown', this.keyHandler, true);
+      this.root.ownerDocument.removeEventListener('keydown', this.keyHandler, true);
       this.keyHandler = null;
     }
     this.root.empty();
@@ -144,7 +155,9 @@ class HistoryPopover {
     this.kbdRows = [];
     this.kbdSessions = [];
     const all = this.plugin.store.listSessions();
+    const folders = this.plugin.store.listFolders();
     const sessions = all.filter(s => {
+      if (this.folderId !== null && sessionFolder(s, folders) !== this.folderId) return false;
       if (!this.filter) return true;
       if (s.title.toLowerCase().includes(this.filter)) return true;
       return s.messages.some(m => (m.content ?? '').toLowerCase().includes(this.filter));
@@ -170,6 +183,71 @@ class HistoryPopover {
     this.setKbdIdx(-1);
   }
 
+  private renderFolders() {
+    this.foldersEl.empty();
+    const folders = this.plugin.store.listFolders();
+    const sessions = this.plugin.store.listSessions();
+    const choices = [
+      { id: null, name: bi('All chats', '全部对话') },
+      { id: '', name: bi('Unfiled', '未分类') },
+      ...folders,
+    ];
+    for (const folder of choices) {
+      const count = sessions.filter(s => folder.id === null || sessionFolder(s, folders) === folder.id).length;
+      const button = this.foldersEl.createEl('button', { cls: 'nc-history-folder', text: `${folder.name} · ${count}` });
+      button.type = 'button';
+      button.setAttribute('aria-pressed', String(this.folderId === folder.id));
+      button.onclick = () => { this.folderId = folder.id; this.renderFolders(); this.renderList(); };
+      if (folder.id) button.oncontextmenu = e => {
+        e.preventDefault();
+        this.folderMenu(folder.id, folder.name, e);
+      };
+    }
+    const create = this.foldersEl.createEl('button', { cls: 'nc-history-folder nc-history-folder-add', text: '+', attr: { 'aria-label': bi('New folder', '新建目录'), title: bi('New folder', '新建目录') } });
+    create.onclick = () => this.editFolder('', '');
+    if (this.folderId) {
+      const manage = this.foldersEl.createEl('button', { cls: 'nc-history-folder', text: '···', attr: { 'aria-label': bi('Manage folder', '管理目录') } });
+      manage.onclick = e => this.folderMenu(this.folderId, folders.find(f => f.id === this.folderId)?.name ?? '', e);
+    }
+  }
+
+  private folderMenu(id: string, name: string, event: MouseEvent) {
+    const menu = new Menu();
+    menu.addItem(it => it.setTitle(bi('Rename folder', '重命名目录')).setIcon('pencil').onClick(() => this.editFolder(id, name)));
+    menu.addItem(it => it.setTitle(bi('Remove folder · keep chats', '删除目录 · 保留对话')).setIcon('folder-minus').onClick(async () => {
+      await this.plugin.store.deleteFolder(id);
+      if (this.folderId === id) this.folderId = '';
+      this.renderFolders(); this.renderList();
+    }));
+    menu.showAtMouseEvent(event);
+  }
+
+  private editFolder(id: string, name: string) {
+    this.folderEditor = id;
+    this.renderFolders();
+    const form = this.foldersEl.createEl('form', { cls: 'nc-history-folder-form' });
+    const input = form.createEl('input', { type: 'text', attr: { placeholder: bi('Folder name', '目录名称'), 'aria-label': bi('Folder name', '目录名称'), maxlength: '60' } });
+    input.value = name;
+    const save = form.createEl('button', { text: bi('Save', '保存') });
+    save.type = 'submit';
+    const cancel = form.createEl('button', { text: bi('Cancel', '取消') });
+    cancel.type = 'button';
+    const close = () => { this.folderEditor = null; this.renderFolders(); };
+    cancel.onclick = close;
+    input.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+    form.onsubmit = e => {
+      e.preventDefault();
+      if (!input.value.trim() || save.disabled) return;
+      save.disabled = true;
+      void (async () => {
+        if (id) await this.plugin.store.renameFolder(id, input.value);
+        else this.folderId = (await this.plugin.store.createFolder(input.value))?.id ?? null;
+        close(); this.renderList();
+      })();
+    };
+    input.focus(); input.select();
+  }
+
   private renderRow(s: ChatSession): HTMLElement | null {
     const row = this.listEl.createDiv({ cls: 'nc-history-pop-row' });
     // a11y: rows are option items within the listbox container. aria-selected
@@ -184,6 +262,8 @@ class HistoryPopover {
     title.title = title.textContent ?? '';
     const ago = row.createSpan({ cls: 'nc-history-pop-row-ago', text: this.relativeTime(s.updatedAt) });
     ago.title = new Date(s.updatedAt).toLocaleString();
+    const actions = row.createEl('button', { cls: 'nc-history-row-more', text: '···', attr: { 'aria-label': bi('Chat actions', '对话操作') } });
+    actions.onclick = e => { e.stopPropagation(); this.openRowMenu(s, e); };
 
     row.onclick = () => this.onPick(s);
     // Mouse hover syncs the keyboard cursor only after the pointer actually
@@ -195,21 +275,36 @@ class HistoryPopover {
 
     row.addEventListener('contextmenu', (e: MouseEvent) => {
       e.preventDefault();
+      this.openRowMenu(s, e);
+    });
+    return row;
+  }
+
+  private openRowMenu(s: ChatSession, e: MouseEvent) {
       const menu = new Menu();
       menu.addItem(it => it.setTitle(t('hist_open')).setIcon('arrow-right').onClick(() => this.onPick(s)));
       menu.addItem(it => it.setTitle(t('hist_rename')).setIcon('pencil').onClick(() => { this.renamingId = s.id; this.renderList(); }));
       menu.addItem(it => it.setTitle(t('hist_duplicate')).setIcon('copy').onClick(async () => { await this.plugin.store.duplicateSession(s.id); this.renderList(); }));
+      menu.addItem(it => it.setTitle(bi('Move to folder…', '移动到目录…')).setIcon('folder-input').onClick(() => {
+        const picker = new Menu();
+        for (const folder of [{ id: '', name: bi('Unfiled', '未分类') }, ...this.plugin.store.listFolders()]) {
+          picker.addItem(it => it.setTitle(folder.name).setIcon('folder').setChecked((s.folderId ?? '') === folder.id).onClick(async () => {
+            await this.plugin.store.moveSession(s.id, folder.id);
+            this.renderFolders(); this.renderList();
+          }));
+        }
+        picker.showAtMouseEvent(e);
+      }));
       menu.addSeparator();
       menu.addItem(it => it.setTitle(t('hist_delete')).setIcon('trash').setWarning(true).onClick(async () => {
         const { confirmModal } = await import('./confirm_modal');
         if (!await confirmModal(this.plugin.app, { title: t('hist_delete'), body: t('hist_delete_confirm'), danger: true })) return;
         await this.plugin.store.deleteSession(s.id);
         this.onDelete?.(s.id);
+        this.renderFolders();
         this.renderList();
       }));
       menu.showAtMouseEvent(e);
-    });
-    return row;
   }
 
   private renderRenameInline(row: HTMLElement, s: ChatSession) {
@@ -217,13 +312,16 @@ class HistoryPopover {
     const input = row.createEl('input', { cls: 'nc-history-pop-rename', type: 'text' });
     input.value = s.title;
     input.placeholder = bi('Title', '标题');
+    let settled = false;
     const commit = async () => {
+      if (settled) return;
+      settled = true;
       const v = input.value.trim() || bi('(untitled)', '（无标题）');
       await this.plugin.store.renameSession(s.id, v);
       this.renamingId = null;
       this.renderList();
     };
-    const cancel = () => { this.renamingId = null; this.renderList(); };
+    const cancel = () => { settled = true; this.renamingId = null; this.renderList(); };
     input.onkeydown = (e) => {
       if (e.key === 'Enter')  { e.preventDefault(); void commit(); }
       if (e.key === 'Escape') { e.preventDefault(); cancel(); }
@@ -297,4 +395,3 @@ class HistoryModal extends Modal {
   }
   onClose() { this.view?.destroy(); }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

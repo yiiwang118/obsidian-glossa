@@ -17,9 +17,15 @@ A local-first AI workspace for reading, researching, and changing real notes wit
 
 </div>
 
-Glossa turns the sidebar into a working surface, not a separate chatbot. The active note can enter context automatically, explicit attachments stay grounded as the task target, and every file-changing action goes through visible tools and approval rules.
+Glossa turns the sidebar into a working surface, not a separate chatbot. The active note can enter context automatically, explicit attachments stay grounded as the task target, and API file changes follow visible tool and approval rules. Optional local CLI runtimes use their own native permissions, as described below.
 
 ## What Glossa Does
+
+**Learn from a correction.** Use **Remember this correction** beside an assistant reply to turn feedback into an editable skill draft. Choose an existing learned skill to improve it, or create a new one. Review the conversation excerpt and workflow diff, then inspect the generated examples or add your own. Each example runs with fresh context against both the candidate and the currently enabled version (or no skill), checking exact output fragments and whether the skill should apply. Editing the draft or examples invalidates the results; every candidate example must pass before you can enable it. Tied scores are shown as no measured gain.
+
+This first version validates **text behavior**, not live tool execution or changes to real notes. Generation uses the selected chat model; validation makes two model calls per example (3–5 examples). The model does not receive the expected output checks. Review the excerpt before sending it; tool result bodies and automatic attachment contents are not collected by the learning feature. There is no background training or model-weight update.
+
+Use **Glossa: Manage learned skills** or **Learning history** in the dialog to inspect results, disable a skill, edit a draft, or restore a previously tested version. Enabled skills join normal skill discovery for future turns and keep the existing tool approval rules. Built-in and manually authored skills are not overwritten. Drafts, workflow versions, feedback references, model identity and validation outputs are stored locally in `.glossa/learning.json`, with up to 12 versions per skill and 60 learned skills. Learning history is plain text and can be included in vault sync; API-key encryption does not encrypt this file. Simultaneous edits are checked before saving. Historical validation results describe the model and examples used at that time.
 
 | | Capability | What it means in practice |
 |---|---|---|
@@ -31,47 +37,23 @@ Glossa turns the sidebar into a working surface, not a separate chatbot. The act
 | 🧩 | **Runs focused Skills** | Use built-in workflows for Markdown, Canvas, Bases, PDFs, images, or create and validate your own vault Skills. |
 | 🔐 | **Keeps actions accountable** | Start read-only, approve writes, inspect tool results, and restore checkpointed files when an edit needs to be rolled back. |
 
-## What's New
+## New in 1.0.0
 
-- **2026-07-25 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) Browse the workspace, then edit it as one safe transaction.** [`0.7.3`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.7.3) adds the folder discovery requested in [Issue #1](https://github.com/yiiwang118/obsidian-glossa/issues/1): the Agent can list bounded, filtered vault-relative paths inside user-selected workspace folders, then pass them directly to note, PDF, and edit tools. Same-turn edits to one file now share one diff, approval, and write; multi-file patches are fully prepared and fingerprinted before the first write, with rollback on any failure. The unified edit engine preserves BOMs, line endings, trailing newlines, and Unicode while making fuzzy matching an explicit high-confidence last resort. Cropped native PDFs, provider-reported token usage, context breakdowns, compact outgoing links, and race-safe screenshot paste reduce extra work without weakening approvals.
-- **2026-07-22 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) Translation keeps its place and typesets the math.** [`0.7.2`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.7.2) keeps the quick-translation panel available while its source document scrolls, pins it to the visible top edge after the selection passes out of view, and leaves sidebars, ribbons, and menus usable without dismissing it. Clearly flattened PDF notation is reconstructed as Obsidian-compatible LaTeX and rendered once after streaming completes; ordinary prose stays on the fast text path, and a missing math delimiter can trigger at most one focused correction.
-- **2026-07-22 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) Translation can now meet you at the selection.** [`0.7.1`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.7.1) adds three deliberate trigger modes: keep selection translation off, show a clear Glossa action beside a stable selection, or translate each new PDF, Markdown, or HTML selection automatically after 350 ms. The translation window carries its own Auto switch, URL/formula/code-only selections are filtered before any request, sidebar streaming no longer closes an active translation, and dropped images can no longer leak into the PDF behind the composer. Release provenance is also restored safely: `main.js` and `styles.css` receive separate attestations that are verified before upload.
-- **2026-07-20 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) Quick translation now stays readable without losing the source.** [`0.7.0`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.7.0) lets the streaming translation panel grow with its answer before scrolling, then move or resize within the visible workspace. Native PDF selection remains highlighted while the panel is open, and a conservative text-layer boundary repair prevents high-zoom selections such as `training` from becoming a neighboring fragment such as `e trainin`. Compatibility returns to app version 1.12.0, with searchable settings still enabled automatically on 1.13 and newer.
-- **2026-07-17 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) Settings search and release checks now agree with the host.** [`0.6.11`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.11) adopts the 1.13 declarative settings index, so model, translation, Agent, context, tool, privacy, and storage options can be found from settings search without replacing Glossa's task-focused layout. Selection geometry now stays fully typed under the directory scanner, deprecated controls are gone, and GitHub Actions publishes freshly validated standard assets without the shared multi-file attestation bundle rejected by the plugin directory verifier. This release requires app version 1.13.0 or newer.
-- **2026-07-17 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) Translate where you are, without adding another chat turn.** [`0.6.10`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.10) opens a focused, streaming translation panel beside selected text after a double press of Enter or an assigned hotkey. Paper titles and technical terms choose the right Chinese/English target more reliably, PDF line wraps are cleaned without flattening real paragraphs, and translation can use a dedicated endpoint and model instead of the sidebar model. Saved translations and PDF markers remain out of this release while their interaction design is refined separately.
-- **2026-07-13 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) ✅ Community checks are now part of the build, not an afterthought.** [`0.6.9`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.9) adds the official `eslint-plugin-obsidianmd` rules to the same zero-warning gate as strict TypeScript lint, tests, dependency audit, production build, source review, CSS compatibility, and release metadata. Settings headings and DOM helpers now follow host conventions; native HTTP and DNS fallbacks validate every value crossing the Node bridge; Web Crypto handles hashes; and regression tests keep browser-first networking, private-address blocking, and older-WebView CSS compatibility intact.
-- **2026-07-12 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 🎛️ Settings that explain themselves.** [`0.6.8`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.8) reorganizes configuration into five task-focused areas: General, Models & web, Agent, Tools & Skills, and Data & advanced. A compact status header keeps the active model, mode, and Auto/EN/中文 language control visible, while one keyboard-accessible selector keeps labels, checkmarks, arrows, and row geometry aligned throughout the plugin.
-- **2026-07-12 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 🧩 Every tool and Skill is visible before you trust it.** The new searchable capability catalog shows which tools load by default, which arrive on demand, what can run automatically, what requires approval, and which actions are read-only. Bundled and vault Skills expose their source, trigger guidance, required tools, and validation status instead of behaving like an opaque prompt folder.
-- **2026-07-12 — ![NEW](https://img.shields.io/badge/NEW-EF4444?style=flat-square) 🧠 Reasoning controls no longer second-guess you.** Choose `off`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. OpenAI-compatible requests send the selected value unchanged, `off` omits the field, Anthropic-style endpoints use explicit budgets, and an unsupported model or gateway returns its real error with the attempted effort identified. Export chat and Settings also have direct header buttons instead of living behind a generic overflow menu.
+[**1.0.0 — September 30, 2026**](https://github.com/yiiwang118/obsidian-glossa/releases/tag/1.0.0) brings organized conversations, local CLI runtimes and clearer control over ongoing work.
 
-<details>
-<summary><strong>Earlier updates</strong> (2026-04-08 to 2026-07-12, 21 entries)</summary>
+- **Compact composer:** file references stay left; API/CLI, provider or CLI app, and model selectors stay right. Pick or type an effort value. Plan/Act, focus styles and narrow layouts are more consistent.
+- **Local CLI:** use installed Codex, Claude Code or Grok with native model/effort discovery, remembered choices and configured proxy support.
+- **History folders:** create, rename and organize conversations without deleting them when removing a folder.
+- **Running tasks:** steer the next API step, queue and edit the next turn, or explicitly resume a persistent task with bounded continuation.
+- **Learned skills:** turn a correction into an editable workflow, compare examples before enabling it, and inspect or restore earlier versions.
+- **Visible changes:** search model menus, inspect tool activity and per-turn file changes, and undo eligible checkpointed edits with stale-content protection.
+- **Review readiness:** independent community-rule linting, unload cleanup, and explicit network, CLI and temporary-file disclosures are part of the release checks.
 
-- **2026-07-10 — 📌 The open note is useful context, not a selection requirement.** With [`0.6.7`](https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.6.7), requests to summarize, explain, translate, or analyze can use the active Markdown note automatically. Explicit selections and attachments still win when they name another target, while short follow-ups such as “continue”, “use Chinese”, or “save it below” retain the previous title, URL, output folder, failure, and requested object.
-- **2026-07-10 — ⚙️ Smaller prompts now do more work.** Specialized schemas stay deferred until `tool_search` or an active Skill requests them; `read_note` supports exact line ranges and `read_files` batches up to eight known files. Stale read/search evidence can leave the model prompt without deleting visible chat, while write confirmations, downloads, plans, failures, and Skill state stay protected. Repeated failures must change strategy, and identical-call loops stop before wasting a run.
-- **2026-07-10 — 📚 Papers, images, and formulas get task-specific treatment.** PDF work can inspect identity, summarize, search concepts, read page ranges, or render visual evidence for equations, tables, figures, and scans. Image work can switch among description, OCR, UI review, chart analysis, detail crops, and exact color sampling. Math normalization preserves code while fixing historical `\(...\)` and `\[...\]` output, and bounded caches make repeated media inspection faster.
-- **2026-07-10 — 🛠️ Six focused Skills ship with validation, not ceremony.** Glossa includes `obsidian-markdown`, `obsidian-canvas`, `obsidian-bases`, `pdf-analysis`, `image-analysis`, and `skill-creator`. Skill Creator uses positive and negative trigger examples, selects an appropriate constraint level, writes a focused `SKILL.md`, and checks naming, activation cues, path safety, workflow structure, and tool references before the Skill is trusted.
-- **2026-07-05 — `0.6.6` made dynamic plugin boundaries explicit and review-safe.** Dataview, Tasks, Templater, and PDF.js integrations gained narrower types and runtime capability checks, removing the final broad top-type unions reported by source review without hiding host failures behind unchecked values.
-- **2026-07-04 — `0.6.5` community review failures now stop locally.** Removed forbidden `no-explicit-any` disables, described and bounded lint directives, wrapped non-`Error` promise rejections, and expanded release checks to reject the same source patterns that block directory review. `0.6.4` remains as the superseded cleanup attempt for a complete audit trail.
-- **2026-07-04 — `0.6.3` updates lead back to the installed plugin.** The update notice now opens Glossa inside the app's plugin browser first; GitHub Release remains available when the community catalog has not synchronized yet.
-- **2026-07-04 — `0.6.2` marketplace-readiness pass.** Tightened the public description, refreshed release documentation, replaced review-facing direct fetch paths, removed CSS `:has()` compatibility risks, added strict source lint, and brought the dependency audit to zero known vulnerabilities.
-- **2026-07-03 — `0.6.1` faster selection translation.** Select text and press Enter twice to translate when the composer is empty; mixed-language detection ignores Markdown URLs and reduces the weight of model names, providers, and other proper nouns before choosing a target language.
-- **2026-07-03 — `0.6.1` quieter selection and session behavior.** The quick-translate hint moved into the composer placeholder, deleted active chats reset cleanly, streaming preserves scroll position unless the reader is already following the bottom, and Node integration tests gained the browser globals they need.
-- **2026-06-30 — `0.6.0` bounded web research.** Search can route through DuckDuckGo, Brave, Tavily, Exa, or SerpAPI, then fetch and extract bounded source notes with domain filtering, deduplication, trust hints, useful metadata, and task-guided excerpts.
-- **2026-06-30 — `0.6.0` safer downloads with provenance.** Public PDFs, images, datasets, and release assets can be saved with redirect checks, private-network blocking, size caps, overwrite controls, SHA-256 hashes, optional `.source.json` records, and post-download PDF inspection.
-- **2026-06-30 — `0.5.3` quiet update awareness.** A throttled sidebar notice can report newer GitHub releases, users can check manually or dismiss one version, semver patches sort correctly, and long-running conversations avoid repeated DOM work.
-- **2026-06-29 — `0.5.2` long-chat navigation.** A compact conversation rail records user prompts only, highlights the current prompt while scrolling, previews earlier questions, and jumps back without filling the transcript with navigation chrome.
-- **2026-06-26 — `0.5.1` clearer attachment context.** Uploaded files remain visible on sent messages, the composer separates explicit attachments from the active note, stale chips clear after sending, and ordinary prose avoids unnecessary MathJax work.
-- **2026-06-26 — `0.5.0` agent UI refresh.** The sidebar, composer, tool activity, status pills, PDF context, history naming, empty-chat persistence, and endpoint settings received a coordinated visual and interaction pass.
-- **2026-06-25 — `0.4.3` PDF, image, and provider polish.** Task-aware document guidance improved, `xhigh` became available without silent fallback, automatic selection capture stopped reading unrelated UI text, and custom API tool calls became more reliable.
-- **2026-06-23 — `0.4.2` submission follow-up.** Remaining review lint findings were cleared, trusted SVG rendering replaced unsafe HTML insertion, older WebViews kept readable release UI, and GitHub Actions added artifact provenance.
-- **2026-06-23 — `0.4.1` first community submission pass.** Added `read_pdf`, release metadata checks, conservative Plan plus read-only defaults, endpoint-native connection tests, bounded large-diff previews, and explicit privacy documentation.
-- **2026-05-19 — `0.4.0` security and persistence hardening.** Atomic JSON writes, first-build RAG consent, checkpoint write serialization, encoded path-traversal protection, strict patch-envelope parsing, deferred-tool filtering, CI, privacy documentation, and release automation landed together.
-- **2026-04-08 — `0.3.0` pre-open-source baseline.** The final internal build established the chat, context, provider, and note-tool foundations that were hardened for the first public release.
+![Glossa 1.0.0 composer with file references left and runtime, provider and model controls right](docs/screenshots/1.0.0/composer.png)
 
-For the exact Added, Changed, Fixed, and Checks breakdown, see the full [Changelog](CHANGELOG.md).
+**Upgrade:** existing API endpoints, model choices and conversation history are retained. Local CLI remains optional and requires a separately installed, signed-in CLI. New controls follow the selected API or CLI runtime's documented permissions below. Glossa 1.0.0 requires desktop Obsidian **1.12.0 or newer**.
 
-</details>
+See the [Changelog](CHANGELOG.md#100--2026-09-30) for the full release notes.
 
 ## Typical Workflows
 
@@ -106,6 +88,36 @@ Request a note change
 - Long chats keep recent evidence complete, compact older tool output, and preserve corrections, URLs, paths, failures, and next actions.
 - Persisted chat data strips repeated image payloads and model-only context while keeping useful text and metadata.
 
+## Sessions and Local Runtimes
+
+- **History folders:** create a folder with `+` below history search, then use a chat's `··· → Move to folder`. Folder actions rename or remove the folder while keeping its chats unfiled. Empty folders survive restart.
+- **Running input:** Enter sends text to the API agent's next model step. The composer menu can instead queue the next turn. Edit or remove pending messages; the current tool is allowed to finish. CLI input always queues for the next turn. The queue holds up to 20 text messages and requires a manual send after Stop, closing, or switching chats.
+- **Persistent tasks:** use the header's `◎` button, then Resume. Tasks retain their objective, progress and blockers, with 1–20 rounds (default 3). Errors, blockers and the round limit stop continuation; reopening always requires explicit resume. Requires a tool-enabled API endpoint. Continuing requests recheck files and retain the existing approval/checkpoint rules.
+- **Local diagnostics:** the export menu downloads up to 500 metadata events: plugin version, model, tool sequence, duration, status, error codes, skill versions and context compaction. No messages, note text, tool arguments, file paths, endpoint URLs or credentials; no automatic upload.
+- **Context pressure:** old successful read results are pruned before requesting a summary. Call/result pairs stay valid, while recent evidence, failures and write results stay available. Visible history is retained.
+
+Compact file chips align left, with a three-part selector aligned to the right: **API / CLI → provider or CLI app → model**. API mode lists configured providers, then only the selected provider’s models; CLI mode lists **Codex / Claude Code / Grok**, then that CLI’s models. Long filenames and choices truncate with full details on hover. Effort supports both menu choices and **Custom effort…**; custom values are sent as entered and retained, while incompatible menu selections reset to Auto after a model change. Clear the custom value to restore the default.
+
+Install and sign in to the CLI in your terminal first; Glossa does not install, update or authenticate it. Detection checks standard executable locations; set an explicit binary path under Providers if needed. Selecting CLI reads its native model catalog and per-model effort levels. Returning from API restores the last CLI provider and its choices. Catalogs are cached for 10 minutes, can be refreshed from the model menu, and remain available after a failed refresh. An empty model uses the CLI default. Global/per-endpoint proxy settings apply without reading shell startup scripts.
+
+CLI requires a desktop filesystem vault and runs from the vault root. Codex uses its native read-only or workspace-write sandbox. Claude Code requires `--restricted` support and exposes Read/Glob/Grep, plus Edit/Write for writable Act mode. External MCP configuration is disabled for Codex and Claude Code. Grok requires `streaming-messages-json` support, requests its native read-only/workspace sandbox and limits built-in tools to read/search plus `search_replace` in writable Act mode; built-in shell and subagents are excluded. No CLI enables permission bypass. Native configuration, sandbox support and provider terms still apply; Grok continues to load its local configuration. Native CLI actions do not use Glossa's per-tool approval, workspace subfolder restrictions, learned skills or undo checkpoints. Keep your own file history for important changes. Text and note context are supported; use API mode for images. CLI conversations remain available for folders and export.
+
+## Accounts, network use and local files
+
+Glossa is free and does not require a Glossa account. Cloud model and search providers may require their own account, API key, subscription or usage payment; those charges are paid to the provider. A local HTTP model endpoint can be used instead.
+
+| Feature | Service and purpose | Data sent / trigger |
+|---|---|---|
+| API chat, translation, completion and skill validation | Your configured model endpoint | Prompts and relevant text/context when you invoke the feature; automatic translation and completion require opt-in. |
+| CLI chat and model discovery | The installed CLI's configured provider | Chat/context when sent, or model capability requests when selecting/refreshing a CLI; uses the CLI's existing login. |
+| Web search | DuckDuckGo; optional Brave, Tavily, Exa or SerpAPI | Search query; configured provider key where needed. Network tool approval applies, including user-configured auto-approval. |
+| Academic search and paper downloads | OpenAlex, arXiv, DuckDuckGo and Yahoo | Search terms/paper titles to find sources and download candidates. |
+| Repository search | GitHub's public search API | Repository search terms to find project sources. |
+| Page reads and downloads | The requested public website | URL request to read a page or download an approved file. |
+| Update checks | GitHub releases API for this repository | Release metadata request; no note content or provider keys. Enabled by default, throttled to once per 12 hours; can be disabled. Updates are installed through Obsidian. |
+
+Local CLI use accesses installed executables outside the vault; your home directory is used to locate common executable paths. Grok requires a prompt file, so Glossa writes the conversation and selected context to a private `glossa-grok-*` directory in the OS temporary folder **outside the vault** (owner-only file permissions on POSIX). It deletes this temporary directory after completion, failure or cancellation; an abrupt host crash may leave it behind. Codex and Claude Code receive prompts over stdin. Glossa does not read CLI credential files; the CLI itself uses its own login, configuration and retention policies.
+
 ## Safety by Design
 
 - **Plan mode and read-only permissions** are the conservative starting point.
@@ -113,7 +125,7 @@ Request a note change
 - **Checkpoints** snapshot affected files before destructive edits.
 - **Network tools** use bounded responses, redirect checks, private-network blocking, and explicit download intent.
 - **Validated downloads** enforce size limits and file signatures before writing.
-- **Community builds** do not execute shell commands, read system identity, or use direct system filesystem access.
+- **API mode** uses vault tools and Glossa approvals. **CLI mode** explicitly launches an installed local program under the separate boundaries described above.
 
 Glossa itself is not a hosted AI service. Conversation content and selected context are sent to the model endpoint you configure; web content is accessed only for the web action being performed. See [Privacy](PRIVACY.md) and [Security](SECURITY.md) for the exact boundaries.
 
@@ -162,7 +174,7 @@ npm install
 npm run check
 ```
 
-`npm run check` runs TypeScript checks, review and strict lint, directive auditing, the complete test suite, dependency audit, production build, generated-bundle review scanning, and release metadata validation.
+`npm run check` runs TypeScript checks, review and strict lint, directive auditing, an independent community-scanner lint pass, the complete test suite, dependency audit, production build, generated-bundle review scanning, and release metadata validation.
 
 For development builds:
 

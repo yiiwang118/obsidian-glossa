@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, Editor, MarkdownView, Modal, Notice } from 'obsidian';
 import type GlossaPlugin from '../main';
 import { buildProvider } from '../providers/registry';
@@ -105,4 +104,3 @@ class DiffPreviewModal extends Modal {
   private finish(v: boolean) { if (this.done) return; this.done = true; this.cb(v); this.close(); }
   onClose() { if (!this.done) { this.done = true; this.cb(false); } }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

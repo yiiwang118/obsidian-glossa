@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * rename_note — move or rename a note, preserving all wikilinks to it.
  *
@@ -53,4 +52,3 @@ export const renameNote: ToolImpl = buildTool({
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

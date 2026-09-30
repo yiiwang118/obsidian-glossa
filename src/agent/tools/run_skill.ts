@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { getSkill } from '../skills';
 import { renderSkillBody } from '../skill_render';
 import { recordSkillUsage } from '../skill_usage';
@@ -38,4 +37,3 @@ export const runSkill: ToolImpl = buildTool({
     return header + body;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import type { SlashCommand } from '../types';
 
 export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
@@ -90,4 +89,3 @@ export function applySlashTemplate(opts: {
     .replace(/\$\{vault\}/g, opts.vaultName)
     .replace(/\$\{args(?::([^}]+))?\}/g, (_, def) => opts.args || def || '');
 }
-/* eslint-enable @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

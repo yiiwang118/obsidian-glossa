@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import {
   applyTextEdits,
@@ -109,4 +108,3 @@ export const fileEdit: ToolImpl = buildTool({
     return `Edited ${filePath} once with ${operations.length} edit${operations.length === 1 ? '' : 's'} (${describeTextMatches(result.edits)}).`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

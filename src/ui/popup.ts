@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { el, clear, setStyle, setTrustedSvg } from '../utils/dom';
 
 export interface PopupItem {
@@ -9,9 +8,27 @@ export interface PopupItem {
   /** Show a small ✓ before the label — used by the composer pickers
    *  (model / permission / reasoning) to indicate the current value. */
   checked?: boolean;
+  /** Preserve a provider's brand icon and show its selection mark at the end. */
+  trailingCheck?: boolean;
   /** Paint the row in danger colour for destructive actions. */
   danger?: boolean;
+  searchText?: string;
+  /** Keep management actions available while filtering model choices. */
+  alwaysVisible?: boolean;
   onSelect: () => void | Promise<void>;
+}
+
+export interface PopupOptions {
+  searchPlaceholder?: string;
+  emptyText?: string;
+}
+
+export function filterPopupItems(items: PopupItem[], query: string): PopupItem[] {
+  const words = query.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean);
+  if (!words.length) return items;
+  const matches = items.filter(item => !item.alwaysVisible && words.every(word =>
+    [item.label, item.section, item.hint, item.searchText].filter(Boolean).join(' ').toLocaleLowerCase().includes(word)));
+  return [...matches, ...items.filter(item => item.alwaysVisible)];
 }
 
 export class Popup {
@@ -24,6 +41,11 @@ export class Popup {
   private itemEls: HTMLElement[] = [];
   private selectedIdx = -1;
   private items: PopupItem[] = [];
+  private allItems: PopupItem[] = [];
+  private listEl: HTMLElement | null = null;
+  private searchEl: HTMLInputElement | null = null;
+  private options: PopupOptions = {};
+  private static nextListId = 0;
   private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private anchor: HTMLElement | null = null;
@@ -56,7 +78,7 @@ export class Popup {
     Popup.instances.delete(this);
   }
 
-  show(anchor: HTMLElement, items: PopupItem[]) {
+  show(anchor: HTMLElement, items: PopupItem[], options: PopupOptions = {}) {
     this.hide();
     const ownerDocument = anchor.ownerDocument;
     const ownerWindow = ownerDocument.defaultView;
@@ -71,12 +93,37 @@ export class Popup {
     this.ownerDocument = ownerDocument;
     this.ownerWindow = ownerWindow;
     this.items = items;
+    this.allItems = items;
+    this.options = options;
     this.anchor = anchor;
     this.anchor.setAttribute('aria-expanded', 'true');
     this.selectedIdx = -1;
+    if (options.searchPlaceholder) {
+      popup.classList.add('nc-popup-searchable');
+      popup.setAttribute('role', 'dialog');
+      popup.setAttribute('aria-label', options.searchPlaceholder);
+      const searchWrap = el('div', { className: 'nc-popup-search-wrap', parent: popup });
+      this.searchEl = el('input', { className: 'nc-popup-search', type: 'search', parent: searchWrap });
+      this.searchEl.placeholder = options.searchPlaceholder;
+      this.searchEl.setAttribute('aria-label', options.searchPlaceholder);
+      this.searchEl.setAttribute('role', 'combobox');
+      this.searchEl.setAttribute('aria-expanded', 'true');
+      this.searchEl.setAttribute('aria-autocomplete', 'list');
+      this.listEl = el('div', { className: 'nc-popup-results', parent: popup, attrs: { role: 'listbox' } });
+      this.listEl.id = `glossa-popup-list-${++Popup.nextListId}`;
+      this.listEl.setAttribute('aria-label', options.searchPlaceholder);
+      this.searchEl.setAttribute('aria-controls', this.listEl.id);
+      this.selectedIdx = items.findIndex(item => item.checked);
+      this.searchEl.addEventListener('input', () => {
+        this.items = filterPopupItems(this.allItems, this.searchEl?.value ?? '');
+        this.selectedIdx = this.items.findIndex(item => !item.alwaysVisible);
+        this.render();
+      });
+    }
     this.render();
     this.open = true;
-    setStyle(popup, { display: 'block' });
+    popup.classList.add('nc-popup-positioning');
+    setStyle(popup, { display: this.searchEl ? 'flex' : 'block' });
 
     this.positionFrame = ownerWindow.requestAnimationFrame(() => {
       this.positionFrame = null;
@@ -84,7 +131,7 @@ export class Popup {
       const r = anchor.getBoundingClientRect();
       const rect = popup.getBoundingClientRect();
       const vw = ownerWindow.innerWidth, vh = ownerWindow.innerHeight;
-      const popupH = Math.min(rect.height, 320);
+      const popupH = rect.height;
       const popupW = Math.min(rect.width, 360);
 
       // Prefer ABOVE the anchor; fall back BELOW when there's no room.
@@ -103,6 +150,9 @@ export class Popup {
 
       setStyle(popup, { left: left + 'px' });
       setStyle(popup, { top: top  + 'px' });
+      popup.classList.remove('nc-popup-positioning');
+      this.searchEl?.focus({ preventScroll: true });
+      this.scrollSelectedIntoView();
     });
     this.installOutsideHandler();
     this.installKeyHandler();
@@ -115,7 +165,11 @@ export class Popup {
     if (this.positionFrame !== null) this.ownerWindow?.cancelAnimationFrame(this.positionFrame);
     this.positionFrame = null;
     this.items = [];
+    this.allItems = [];
     this.itemEls = [];
+    this.searchEl = null;
+    this.listEl = null;
+    this.options = {};
     this.removeOutsideHandler();
     this.removeKeyHandler();
     // A closed menu must not retain a detached window or setting-row callbacks.
@@ -145,6 +199,12 @@ export class Popup {
 
   onKey(e: KeyboardEvent): boolean {
     if (!this.isOpen()) return false;
+    if (e.key === 'Tab' && this.searchEl) {
+      const anchor = this.anchor;
+      this.hide();
+      anchor?.focus();
+      return false;
+    }
     if (e.key === 'ArrowDown') {
       this.selectedIdx = this.selectedIdx < 0 ? 0 : Math.min(this.items.length - 1, this.selectedIdx + 1);
       this.render(); this.scrollSelectedIntoView(); return true;
@@ -154,6 +214,7 @@ export class Popup {
       this.render(); this.scrollSelectedIntoView(); return true;
     }
     if (e.key === 'Enter' || e.key === 'Tab') {
+      if (this.searchEl?.value.trim() && this.selectedIdx < 0) return true;
       const it = this.items[this.selectedIdx >= 0 ? this.selectedIdx : 0];
       if (it) {
         const res = it.onSelect();
@@ -162,7 +223,12 @@ export class Popup {
       }
       return true;
     }
-    if (e.key === 'Escape') { this.hide(); return true; }
+    if (e.key === 'Escape') {
+      const anchor = this.searchEl ? this.anchor : null;
+      this.hide();
+      anchor?.focus();
+      return true;
+    }
     return false;
   }
 
@@ -223,10 +289,13 @@ export class Popup {
   }
 
   private render() {
-    const popup = this.el;
+    const popup = this.listEl ?? this.el;
     if (!popup) return;
     clear(popup);
     this.itemEls = [];
+    if (this.searchEl && !this.items.some(item => !item.alwaysVisible)) {
+      el('div', { className: 'nc-popup-empty', text: this.options.emptyText ?? '', parent: popup, attrs: { role: 'status' } });
+    }
     let lastSection: string | undefined;
     this.items.forEach((it, i) => {
       if (it.section && it.section !== lastSection) {
@@ -242,6 +311,7 @@ export class Popup {
       });
       row.setAttribute('role', 'option');
       row.setAttribute('aria-selected', String(i === this.selectedIdx));
+      if (this.listEl) row.id = `${this.listEl.id}-${i}`;
       row.setAttribute('aria-label', it.hint ? `${it.label}, ${it.hint}` : it.label);
       row.tabIndex = -1;
       row.addEventListener('mousemove', () => {
@@ -261,7 +331,7 @@ export class Popup {
 
       // Leading column: ✓ when checked, else icon (if provided), else spacer.
       const lead = el('span', { className: 'nc-popup-icon', parent: row });
-      if (it.checked) {
+      if (it.checked && !it.trailingCheck) {
         setTrustedSvg(lead, `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`);
         lead.classList.add('nc-popup-check');
       } else if (it.iconSvg) {
@@ -269,8 +339,11 @@ export class Popup {
       }
       el('span', { className: 'nc-popup-label', text: it.label, parent: row });
       if (it.hint) el('span', { className: 'nc-popup-hint', text: it.hint, parent: row });
+      if (it.checked && it.trailingCheck) el('span', { className: 'nc-popup-trailing-check', text: '✓', parent: row, attrs: { 'aria-hidden': 'true' } });
       this.itemEls.push(row);
     });
+    const selected = this.itemEls[this.selectedIdx];
+    if (selected && this.searchEl) this.searchEl.setAttribute('aria-activedescendant', selected.id);
+    else this.searchEl?.removeAttribute('aria-activedescendant');
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Re-enable review lint rules after dynamic boundary module. */

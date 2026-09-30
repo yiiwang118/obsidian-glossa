@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Shared types and helpers for the per-tool modules in this directory.
  * Mirrors the upstream Claude Code tool architecture: each tool lives in its own file
@@ -19,6 +18,12 @@ export type PermissionResult<Input = AnyValue> =
 /** A tool may return either a plain string (most tools) or this structured shape
  *  when it wants to send rich content (images, resources) back to the model. */
 export interface ToolRunResult {
+  status?: 'success' | 'error' | 'denied' | 'cancelled';
+  errorCode?: string;
+  data?: unknown;
+  /** Optional compact projection for the model; text remains the UI projection. */
+  modelText?: string;
+  skillVersion?: string;
   /** Human-readable text for the UI card + a fallback for providers that can't
    *  carry rich blocks (OpenAI tool messages). */
   text: string;
@@ -149,13 +154,26 @@ export function buildTool(def: ToolDef): ToolImpl {
   };
 }
 
+export function toolSuccess(text: string, data?: unknown): ToolRunResult {
+  return { status: 'success', text, data };
+}
+
+export function toolFailure(errorCode: string, text: string): ToolRunResult {
+  return { status: 'error', errorCode, text };
+}
+
 /** Normalize a tool's return value (string OR ToolRunResult) into a uniform shape. */
 export function normalizeToolResult(raw: string | ToolRunResult): ToolRunResult {
   if (typeof raw === 'string') return { text: raw };
   return {
+    status: raw.status,
+    errorCode: raw.errorCode,
+    data: raw.data,
+    modelText: raw.modelText,
     text: raw.text ?? '',
     contentBlocks: raw.contentBlocks,
     loadedToolNames: raw.loadedToolNames,
+    skillVersion: raw.skillVersion,
     contextPruneRequest: raw.contextPruneRequest,
   };
 }
@@ -423,4 +441,3 @@ export function globToRegExp(glob: string): RegExp {
   rx += '$';
   return new RegExp(rx);
 }
-/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

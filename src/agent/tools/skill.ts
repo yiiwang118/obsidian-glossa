@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Unified `skill` tool — replaces the legacy `discover_skills` + `run_skill`
  * pair. The model now sees a single tool with one input (`skill: string`,
@@ -29,6 +28,7 @@ const SAFE_SKILL_KEYS: ReadonlySet<keyof Skill> = new Set<keyof Skill>([
   'name', 'title', 'description', 'whenToUse', 'triggers',
   'paths', 'requiredTools', 'argumentHint', 'userInvocable', 'disableModelInvocation',
   'path', 'source', 'body',
+  'learningVersion',
 ]);
 
 /** Skill is "safe" iff every non-empty key is in SAFE_SKILL_KEYS. */
@@ -132,7 +132,7 @@ export const skillTool: ToolImpl = buildTool({
     return {
       text: `${head}${metaBlock}\n---\n\n${body}`,
       loadedToolNames: skill.requiredTools,
+      skillVersion: skill.learningVersion,
     };
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * get_periodic_note — resolve a daily / weekly / monthly note by type + offset.
  *
@@ -138,4 +137,3 @@ export const getPeriodicNote: ToolImpl = buildTool({
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

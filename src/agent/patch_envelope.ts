@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { applyTextEdits, type AppliedTextEdit } from './text_edit_engine';
 /**
  * Codex-style `apply_patch` envelope parser + applier.
@@ -288,4 +287,3 @@ export function summarizeOps(ops: FileOp[]): string {
   }
   return lines.join('\n');
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

@@ -70,7 +70,7 @@ for (const docPath of ['README.md', 'README.zh-CN.md', 'CHANGELOG.md', 'manifest
 for (const docPath of ['README.md', 'README.zh-CN.md', 'PRIVACY.md', 'SECURITY.md']) {
   const text = fs.readFileSync(docPath, 'utf8');
   for (const [label, pattern] of [
-    ['removed local CLI endpoint claim', /\b(?:Codex CLI endpoint|Claude Code CLI endpoint|CLI `--version`|login shell\s*\(\$SHELL)\b/i],
+    ['unsupported login-shell claim', /login shell\s*\(\$SHELL/i],
     ['removed MCP runtime claim', /\b(?:MCP child env|MCP server child process|MCP catalog refresh|Marketplace command injection)\b/i],
     ['removed semantic index upload claim', /\b(?:RAG index build|auto-RAG|build the embedding index)\b/i],
   ]) {
@@ -116,14 +116,13 @@ function expectPackageScripts(scripts) {
   expectScriptEquals(scripts, 'build', 'node esbuild.config.mjs production');
   expectScriptEquals(scripts, 'release:check', 'node scripts/release_check.cjs');
   expectScriptEquals(scripts, 'review:scan', 'node scripts/review_scan.cjs');
+  expectScriptEquals(scripts, 'lint:community', 'node scripts/community_lint.mjs');
   expectScriptIncludes(scripts, 'lint:review', ['eslint "src/**/*.ts"', '--max-warnings=0']);
   expectScriptIncludes(scripts, 'lint:directives', [
     'eslint "src/**/*.ts"',
     '--report-unused-disable-directives',
     '--max-warnings=0',
     '@typescript-eslint/no-explicit-any:error',
-    '@typescript-eslint/no-unsafe-argument:error',
-    '@typescript-eslint/no-unsafe-return:error',
     '@typescript-eslint/no-duplicate-type-constituents:error',
     '@typescript-eslint/only-throw-error:error',
     '@typescript-eslint/no-unused-vars:error',
@@ -133,6 +132,7 @@ function expectPackageScripts(scripts) {
     'npm run lint:review',
     'npm run lint:strict',
     'npm run lint:directives',
+    'npm run lint:community',
     'npm test',
     'npm audit --omit=optional',
     'npm run build',
@@ -141,8 +141,6 @@ function expectPackageScripts(scripts) {
   expectScriptIncludes(scripts, 'lint:strict', [
     '--max-warnings=0',
     '@typescript-eslint/no-explicit-any:error',
-    '@typescript-eslint/no-unsafe-argument:error',
-    '@typescript-eslint/no-unsafe-return:error',
     '@typescript-eslint/no-duplicate-type-constituents:error',
     '@typescript-eslint/only-throw-error:error',
     '@typescript-eslint/no-unused-vars:error',

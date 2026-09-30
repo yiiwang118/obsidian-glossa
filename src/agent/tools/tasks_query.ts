@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * tasks_query — bridge to the Tasks plugin\'s query DSL.
  *
@@ -107,4 +106,3 @@ export const tasksQuery: ToolImpl = buildTool({
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { loadPdfJs } from 'obsidian';
 
 export interface PdfExtractionOptions {
@@ -586,4 +585,3 @@ async function yieldPdfExtraction(signal?: AbortSignal): Promise<void> {
   await new Promise<void>(resolve => window.setTimeout(resolve, 0));
   throwIfAborted(signal);
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

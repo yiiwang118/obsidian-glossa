@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 export type ImageInspectMode = 'auto' | 'describe' | 'ocr' | 'ui' | 'chart' | 'detail' | 'color';
 
 export interface ImageRegion {
@@ -380,4 +379,3 @@ function humanSize(b: number): string {
   if (b < 1024 * 1024) return (b / 1024).toFixed(1) + 'KB';
   return (b / (1024 * 1024)).toFixed(1) + 'MB';
 }
-/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

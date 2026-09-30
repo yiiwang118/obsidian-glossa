@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Minimal sub-agent harness for forked skill execution.
  *
@@ -48,7 +47,7 @@ export interface ForkOptions {
   neverApproveTools: string[];
   permissionRules?: PermissionRule[];
   /** Optional context bag passed through. */
-  endpointKind?: 'custom-api' | 'codex-cli' | 'claude-code-cli';
+  endpointKind?: 'custom-api' | 'codex-cli' | 'claude-code-cli' | 'grok-cli';
   endpointFullAgent?: boolean;
   checkpoint?: CheckpointManager;
   mcp?: McpHubLike;
@@ -138,4 +137,3 @@ export async function forkSkill(opts: ForkOptions): Promise<ForkResult> {
   }
   return { ok: true, result: collectedText, usage: collectedUsage };
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

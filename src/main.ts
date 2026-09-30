@@ -1,11 +1,9 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { Plugin, WorkspaceLeaf, Notice, addIcon } from 'obsidian';
 import { GlossaView, VIEW_TYPE_GLOSSA } from './ui/view';
 import { GlossaSettingTab } from './settings';
 import {
   DEFAULT_SETTINGS,
   type GlossaSettings,
-  type ChatSession,
   type Endpoint,
   type SelectionTranslateMode,
 } from './types';
@@ -21,9 +19,11 @@ import { OBSIDIAN_PLUGIN_URI, UPDATE_CHECK_INTERVAL_MS, fetchLatestUpdate } from
 import { compareSemver, normalizeVersion } from './utils/version';
 import { clearMediaCaches } from './utils/media_cache';
 import { clearRenderedPdfPageCache } from './utils/pdf_render';
-import { chatMessagesForStorage, purgeTransientChatPayloads } from './utils/chat_storage';
 import { SelectionTranslationController } from './features/selection_translation';
 import { createInlineCompletionExtension } from './features/inline_completion';
+import { openLearningModal } from './ui/learning_modal';
+import { ChatStore } from './chat_store';
+import { DeferredTasks } from './utils/deferred_tasks';
 
 export default class GlossaPlugin extends Plugin {
   settings: GlossaSettings;
@@ -43,6 +43,7 @@ export default class GlossaPlugin extends Plugin {
   updateInfo: UpdateInfo | null = null;
   private updateCheckInFlight: Promise<UpdateInfo | null> | null = null;
   private selectionTranslation: SelectionTranslationController | null = null;
+  private deferredTasks = new DeferredTasks();
 
   async onload() {
     const raw = (await this.loadData()) ?? {};
@@ -106,7 +107,7 @@ export default class GlossaPlugin extends Plugin {
     await this.saveData(this.settings);
     if (codexMigratedCount > 0) {
       // Defer past Obsidian's startup splash so the Notice is actually visible.
-      window.setTimeout(() => new Notice(
+      this.deferredTasks.schedule(() => new Notice(
         `Glossa: cleared stale 'gpt-5.4' model from ${codexMigratedCount} codex endpoint(s). ` +
         `They'll now use the model from ~/.codex/config.toml.`,
         10_000,
@@ -157,6 +158,7 @@ export default class GlossaPlugin extends Plugin {
     ribbonIconEl.addClass('glossa-ribbon-icon');
 
     this.addCommand({ id: 'open-sidebar', name: 'Open sidebar', callback: () => this.activateView() });
+    this.addCommand({ id: 'learned-skills', name: 'Manage learned skills', callback: () => openLearningModal(this) });
     this.addCommand({ id: 'new-chat', name: 'New chat',
       callback: async () => { await this.activateView(); (this.getView() as AnyValue)?.startNewSession?.(); } });
     this.addCommand({ id: 'unlock', name: 'Unlock encrypted keys',
@@ -227,13 +229,14 @@ export default class GlossaPlugin extends Plugin {
     // plugin-bridge upstream availability so the model only sees bridges
     // whose target plugins are actually installed.
     this.app.workspace.onLayoutReady(() => {
-      import('./agent/bundled_skills').then(m => m.initBundledSkills()).catch(e => console.warn('[bundled-skills] failed', e));
-      import('./agent/skills').then(m => m.loadPersistedNestedSkillDirs(this.app)).catch(e => console.warn('[nested-dirs] load failed', e));
-      import('./agent/plugin_bridges').then(m => m.watchPluginBridges(this.app)).catch(e => console.warn('[plugin-bridges] failed', e));
+      if (!this.deferredTasks.active) return;
+      import('./agent/bundled_skills').then(m => { if (this.deferredTasks.active) m.initBundledSkills(); }).catch(e => console.warn('[bundled-skills] failed', e));
+      import('./agent/skills').then(m => { if (this.deferredTasks.active) return m.loadPersistedNestedSkillDirs(this.app); }).catch(e => console.warn('[nested-dirs] load failed', e));
+      import('./agent/plugin_bridges').then(m => { if (this.deferredTasks.active) this.register(m.watchPluginBridges(this.app)); }).catch(e => console.warn('[plugin-bridges] failed', e));
     });
 
     this.app.workspace.onLayoutReady(() => {
-      window.setTimeout(() => {
+      this.deferredTasks.schedule(() => {
         this.checkForUpdates({ force: false, notify: false }).catch(e => console.warn('[Glossa] update check failed', e));
       }, 8000);
     });
@@ -249,18 +252,20 @@ export default class GlossaPlugin extends Plugin {
     const SKILL_ACTIVATE_DEBOUNCE_MS = 300;
     let lastActivatedPath: string | null = null;
     const pendingTimers = new Map<string, number>();
+    this.register(() => pendingTimers.clear());
     const scheduleActivate = (path: string) => {
+      if (!this.deferredTasks.active) return;
       if (!path) return;
       if (path === lastActivatedPath) return;            // already processed this exact path
       // Coalesce duplicate timers for the same path.
       const existing = pendingTimers.get(path);
-      if (existing) window.clearTimeout(existing);
-      const handle = window.setTimeout(() => {
+      this.deferredTasks.cancel(existing);
+      const handle = this.deferredTasks.schedule(() => {
         pendingTimers.delete(path);
         lastActivatedPath = path;
-        import('./agent/skill_activation').then(m => m.activateForPath(this.app, path)).catch(() => {});
+        import('./agent/skill_activation').then(m => { if (this.deferredTasks.active) return m.activateForPath(this.app, path); }).catch(() => {});
       }, SKILL_ACTIVATE_DEBOUNCE_MS);
-      pendingTimers.set(path, handle);
+      if (handle !== undefined) pendingTimers.set(path, handle);
     };
     const invalidateSkillCacheForPath = (path: string) => {
       if (!path.endsWith('/SKILL.md') && path !== 'SKILL.md') return;
@@ -312,6 +317,13 @@ export default class GlossaPlugin extends Plugin {
   }
 
   onunload() {
+    this.deferredTasks.dispose();
+    // Flush pending settings/chat changes once instead of leaving a delayed
+    // write alive after unloading. A final view-close save may also persist.
+    if (this._saveTimer !== null) {
+      this._saveTimer = null;
+      void this.persistAll().catch(e => console.error('[Glossa] final save failed', e));
+    }
     void this.mcp?.stop();
     clearMediaCaches();
     clearRenderedPdfPageCache();
@@ -337,6 +349,7 @@ export default class GlossaPlugin extends Plugin {
   }
 
   async checkForUpdates(opts: { force?: boolean; notify?: boolean } = {}): Promise<UpdateInfo | null> {
+    if (!this.deferredTasks.active) return null;
     if (!this.settings.updateCheckEnabled && !opts.force) return null;
     const now = Date.now();
     if (!opts.force && this.settings.updateLastCheckedAt && now - this.settings.updateLastCheckedAt < UPDATE_CHECK_INTERVAL_MS) {
@@ -347,11 +360,13 @@ export default class GlossaPlugin extends Plugin {
     this.updateCheckInFlight = (async () => {
       try {
         const info = await fetchLatestUpdate(this.manifest.version);
+        if (!this.deferredTasks.active) return null;
         this.settings.updateLastCheckedAt = Date.now();
         this.settings.updateLatestVersion = info?.latestVersion ?? '';
         this.settings.updateLatestReleaseUrl = info?.releaseUrl ?? '';
         this.updateInfo = info && this.settings.updateDismissedVersion !== info.latestVersion ? info : null;
         await this.saveSettings();
+        if (!this.deferredTasks.active) return null;
         this.getView()?.refreshFromSettings?.();
         if (opts.notify) {
           new Notice(this.updateInfo
@@ -562,290 +577,23 @@ export default class GlossaPlugin extends Plugin {
   /* ============================================================
      Persistence
      ============================================================ */
-  private _saveTimer: AnyValue;
+  private _saveTimer: number | null = null;
   async saveSettings() {
+    this.settings.citationHoverEnabled = false;
+    if (!this.deferredTasks.active) {
+      await this.persistAll();
+      return;
+    }
     setLanguage(this.settings.uiLanguage);
     this.getView()?.refreshFromSettings?.();
-    this.settings.citationHoverEnabled = false;
-    if (this._saveTimer) window.clearTimeout(this._saveTimer);
-    this._saveTimer = window.setTimeout(() => { void this.persistAll(); this._saveTimer = null; }, 300);
+    this.deferredTasks.cancel(this._saveTimer);
+    this._saveTimer = this.deferredTasks.schedule(() => {
+      this._saveTimer = null;
+      void this.persistAll().catch(e => console.error('[Glossa] save failed', e));
+    }, 300) ?? null;
   }
   async persistAll() {
     await this.saveData({ ...this.settings });
     await this.store.persist();
   }
 }
-
-class ChatStore {
-  private sessions: ChatSession[] = [];
-  private path: string;
-  private deletedPath: string;
-  private deletedSessionIds = new Map<string, number>();
-  private persistQueue: Promise<void> = Promise.resolve();
-
-  constructor(private plugin: GlossaPlugin) {
-    this.path = `${plugin.manifest.dir}/chats.json`;
-    this.deletedPath = `${plugin.manifest.dir}/chats.deleted.json`;
-  }
-
-  private sortAndCap() {
-    const sorted = this.sessions.sort((a, b) => b.updatedAt - a.updatedAt);
-    for (const s of sorted.slice(100)) this.markDeleted(s.id);
-    this.sessions = sorted.slice(0, 100);
-  }
-
-  private cloneMessages(messages: ChatSession['messages']): ChatSession['messages'] {
-    try {
-      return JSON.parse(JSON.stringify(chatMessagesForStorage(messages))) as ChatSession['messages'];
-    } catch {
-      return chatMessagesForStorage(messages);
-    }
-  }
-
-  private parseStore(raw: string): { sessions: ChatSession[]; deletedSessionIds: Record<string, number> } {
-    const parsed = JSON.parse(raw) as { sessions?: ChatSession[]; deletedSessionIds?: Record<string, number> } | ChatSession[];
-    if (Array.isArray(parsed)) return { sessions: parsed, deletedSessionIds: {} };
-    return {
-      sessions: Array.isArray(parsed?.sessions) ? parsed.sessions : [],
-      deletedSessionIds: parsed?.deletedSessionIds && typeof parsed.deletedSessionIds === 'object'
-        ? parsed.deletedSessionIds
-        : {},
-    };
-  }
-
-  private isMeaningfulSession(s: ChatSession): boolean {
-    return (s.messages ?? []).some(m =>
-      (m.content ?? '').trim().length > 0 ||
-      (m.displayContent ?? '').trim().length > 0 ||
-      (m.reasoningContent ?? '').trim().length > 0 ||
-      ((m.toolEvents ?? []).length > 0));
-  }
-
-  private markDeleted(id?: string) {
-    if (!id) return;
-    this.deletedSessionIds.set(id, Math.max(this.deletedSessionIds.get(id) ?? 0, Date.now()));
-  }
-
-  private applyDeletedSessionIds(deleted: Record<string, number>) {
-    for (const [id, at] of Object.entries(deleted)) {
-      if (!id) continue;
-      const prev = this.deletedSessionIds.get(id) ?? 0;
-      this.deletedSessionIds.set(id, Math.max(prev, Number(at) || Date.now()));
-    }
-  }
-
-  private deletedRecord(): Record<string, number> {
-    const entries = [...this.deletedSessionIds.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 2000);
-    this.deletedSessionIds = new Map(entries);
-    return Object.fromEntries(entries);
-  }
-
-  private normalizeSessions(sessions: ChatSession[]): ChatSession[] {
-    return sessions.filter(s => this.isMeaningfulSession(s) && !this.deletedSessionIds.has(s.id));
-  }
-
-  private async loadDeletedJournal() {
-    try {
-      if (!(await this.plugin.app.vault.adapter.exists(this.deletedPath))) return;
-      const raw = await this.plugin.app.vault.adapter.read(this.deletedPath);
-      const parsed = JSON.parse(raw) as { deletedSessionIds?: Record<string, number> };
-      if (parsed?.deletedSessionIds) this.applyDeletedSessionIds(parsed.deletedSessionIds);
-    } catch (e) {
-      console.warn('[Glossa] deleted chat journal load failed', e);
-    }
-  }
-
-  private async persistDeletedJournal() {
-    try {
-      const { safeWriteJson } = await import('./utils/safe_write');
-      await safeWriteJson(
-        this.plugin.app.vault.adapter,
-        this.deletedPath,
-        { deletedSessionIds: this.deletedRecord(), updatedAt: Date.now() },
-        { pretty: true },
-      );
-    } catch (e) {
-      console.warn('[Glossa] deleted chat journal save failed', e);
-    }
-  }
-
-  private async readStoreFile(path: string): Promise<{ sessions: ChatSession[]; deletedSessionIds: Record<string, number> } | null> {
-    try {
-      if (!(await this.plugin.app.vault.adapter.exists(path))) return null;
-      const raw = await this.plugin.app.vault.adapter.read(path);
-      return this.parseStore(raw);
-    } catch (e) {
-      console.warn(`[Glossa] chat recovery skipped unreadable file ${path}`, e);
-      return null;
-    }
-  }
-
-  private async recoveryCandidates(): Promise<string[]> {
-    const adapter = this.plugin.app.vault.adapter;
-    const candidates: string[] = [];
-    if (await adapter.exists(`${this.path}.bak`)) candidates.push(`${this.path}.bak`);
-    try {
-      const listed = await adapter.list(this.plugin.manifest.dir);
-      const conflictFiles = (listed.files ?? [])
-        .filter(file => /^chats\.json(?: \d+)?\.json$/.test(file.split('/').pop() ?? file))
-        .sort((a, b) => {
-          const aNum = Number((a.match(/chats\.json (\d+)\.json$/) ?? [])[1] ?? 0);
-          const bNum = Number((b.match(/chats\.json (\d+)\.json$/) ?? [])[1] ?? 0);
-          return bNum - aNum;
-        });
-      candidates.push(...conflictFiles);
-    } catch (e) {
-      console.warn('[Glossa] chat recovery could not list plugin directory', e);
-    }
-    return [...new Set(candidates)];
-  }
-
-  private async recoverSessionsFromBackups(): Promise<ChatSession[] | null> {
-    for (const candidate of await this.recoveryCandidates()) {
-      const store = await this.readStoreFile(candidate);
-      if (!store || store.sessions.length === 0) continue;
-      this.applyDeletedSessionIds(store.deletedSessionIds);
-      this.sessions = this.normalizeSessions(store.sessions);
-      this.sortAndCap();
-      await this.persist();
-      new Notice(bi(
-        `Glossa restored ${this.sessions.length} chat sessions from ${candidate.split('/').pop()}.`,
-        `Glossa 已从 ${candidate.split('/').pop()} 恢复 ${this.sessions.length} 个历史会话。`,
-      ), 8000);
-      return this.sessions;
-    }
-    return null;
-  }
-
-  async load(legacy?: ChatSession[]) {
-    try {
-      await this.loadDeletedJournal();
-      if (await this.plugin.app.vault.adapter.exists(this.path)) {
-        const store = await this.readStoreFile(this.path);
-        if (store) {
-          this.applyDeletedSessionIds(store.deletedSessionIds);
-          this.sessions = store.sessions;
-        } else {
-          const recovered = await this.recoverSessionsFromBackups();
-          if (recovered) this.sessions = recovered;
-        }
-      } else if (legacy?.length) {
-        this.sessions = legacy;
-      } else {
-        const recovered = await this.recoverSessionsFromBackups();
-        if (recovered) this.sessions = recovered;
-      }
-    } catch (e) { console.warn('[Glossa] chat load failed', e); }
-
-    let migrated = false;
-    const beforeFilter = this.sessions.length;
-    this.sessions = this.normalizeSessions(this.sessions);
-    if (this.sessions.length !== beforeFilter) migrated = true;
-    for (const s of this.sessions) {
-      if (purgeTransientChatPayloads(s.messages ?? []) > 0) migrated = true;
-      for (const m of s.messages ?? []) {
-        if (Array.isArray(m.contextSnapshot)) {
-          for (const it of m.contextSnapshot) {
-            if (it && typeof (it as AnyValue).content === 'string') {
-              delete (it as AnyValue).content; migrated = true;
-            }
-          }
-        }
-      }
-    }
-    if (migrated) await this.persist();
-    else if (this.deletedSessionIds.size > 0) await this.persistDeletedJournal();
-  }
-
-  /** Force re-strip all contextSnapshot.content even if previously missed. */
-  async purgeLegacyContext() {
-    let count = 0;
-    for (const s of this.sessions) for (const m of s.messages ?? []) {
-      if (Array.isArray(m.contextSnapshot)) {
-        for (const it of m.contextSnapshot) {
-          if (it && typeof (it as AnyValue).content === 'string') { delete (it as AnyValue).content; count++; }
-        }
-      }
-    }
-    await this.persist();
-    return count;
-  }
-
-  all(): ChatSession[] { return this.sessions; }
-  async saveSession(s: ChatSession) {
-    if (this.deletedSessionIds.has(s.id)) return;
-    const idx = this.sessions.findIndex(x => x.id === s.id);
-    if (!this.isMeaningfulSession(s)) {
-      if (idx >= 0) {
-        this.sessions.splice(idx, 1);
-        await this.persist();
-      }
-      return;
-    }
-    if (idx >= 0) this.sessions[idx] = s; else this.sessions.push(s);
-    this.sortAndCap();
-    await this.persist();
-  }
-  async persist() {
-    const write = async () => {
-      const { safeWriteJson } = await import('./utils/safe_write');
-      const deletedSessionIds = this.deletedRecord();
-      await safeWriteJson(this.plugin.app.vault.adapter, this.path, {
-        version: 2,
-        updatedAt: Date.now(),
-        sessions: this.sessions.map(session => ({
-          ...session,
-          messages: chatMessagesForStorage(session.messages ?? []),
-        })),
-        deletedSessionIds,
-      }, { pretty: true });
-      await this.persistDeletedJournal();
-    };
-    this.persistQueue = this.persistQueue.then(write, write);
-    try {
-      await this.persistQueue;
-    } catch (e) {
-      console.warn('[Glossa] chat save failed', e);
-    }
-  }
-  getSession(id: string): ChatSession | undefined { return this.deletedSessionIds.has(id) ? undefined : this.sessions.find(x => x.id === id); }
-  listSessions(): ChatSession[] { return this.normalizeSessions(this.sessions).sort((a, b) => b.updatedAt - a.updatedAt); }
-  async deleteSession(id: string) {
-    this.markDeleted(id);
-    this.sessions = this.sessions.filter(s => s.id !== id);
-    await this.persist();
-  }
-  async renameSession(id: string, title: string) {
-    if (this.deletedSessionIds.has(id)) return;
-    const s = this.sessions.find(x => x.id === id);
-    if (!s) return;
-    s.title = title.trim().slice(0, 100);
-    s.updatedAt = Date.now();
-    await this.persist();
-  }
-  async duplicateSession(id: string): Promise<ChatSession | null> {
-    const src = this.getSession(id);
-    if (!src) return null;
-    const newId = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
-    const copy: ChatSession = {
-      ...src,
-      id: newId,
-      title: `${src.title} (copy)`,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      messages: this.cloneMessages(src.messages),
-    };
-    this.sessions.push(copy);
-    this.sortAndCap();
-    await this.persist();
-    return copy;
-  }
-  async clearAll() {
-    for (const s of this.sessions) this.markDeleted(s.id);
-    this.sessions = [];
-    await this.persist();
-  }
-}
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

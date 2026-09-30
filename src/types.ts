@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import type { SourceLanguage } from './utils/translation_target';
 // Mode type kept for backwards-compat with persisted sessions, but the active
 // runtime now uses RunMode ('plan' / 'act') everywhere. MODE_LABELS /
@@ -26,9 +25,12 @@ export interface ToolEvent {
   /** Rich result content (e.g. image blocks from view_image). Sent back to the model
    *  on subsequent turns so it can re-reference the image / resource. */
   contentBlocks?: import('./providers/types').ToolContentBlock[];
-  status: 'pending' | 'running' | 'success' | 'error' | 'denied';
+  status: 'pending' | 'running' | 'success' | 'error' | 'denied' | 'cancelled';
+  errorCode?: string;
   startedAt: number;
   endedAt?: number;
+  /** Managed skill revision actually loaded during this invocation. */
+  skillVersion?: string;
 }
 
 /** Lightweight metadata of a context item — used in saved chats instead of the full content,
@@ -61,6 +63,8 @@ export interface ChatMessage {
    *  they all share the same `turnId`. The UI groups them into one visual
    *  container so the vertical rhythm reads as one continuous answer. */
   turnId?: string;
+  /** Endpoint identity only; never credentials or endpoint configuration. */
+  modelSnapshot?: { endpointId: string; model: string };
   usage?: TokenUsage;
   /** Stored as metadata-only refs; never the full file/image content. */
   contextSnapshot?: ContextItemRef[];
@@ -113,7 +117,7 @@ export interface SlashCommand {
  *     reasoning_effort; unsupported models return the provider's API error
  *   - `ultra` is retained as a passthrough extension for compatible gateways
  *   - Codex CLI: `-c model_reasoning_effort="<value>"`
- *   - Claude Code CLI: `--thinking <value>` */
+ *   - Claude Code CLI: `--effort <value>` */
 export type ReasoningEffort =
   | 'off'
   | 'none'
@@ -137,10 +141,21 @@ export const REASONING_EFFORT_OPTIONS: readonly ReasoningEffort[] = [
   'ultra',
 ];
 
+/** Model capabilities reported by the installed CLI, never inferred from its name. */
+export interface CliModelInfo {
+  id: string;
+  label: string;
+  resolvedModel?: string;
+  description?: string;
+  efforts: ReasoningEffort[];
+  defaultEffort?: ReasoningEffort;
+  isDefault?: boolean;
+}
+
 export interface Endpoint {
   id: string;
   label: string;
-  kind: 'custom-api' | 'codex-cli' | 'claude-code-cli';
+  kind: 'custom-api' | 'codex-cli' | 'claude-code-cli' | 'grok-cli';
 
   // custom-api
   baseUrl?: string;
@@ -153,8 +168,13 @@ export interface Endpoint {
   apiStyle?: 'openai' | 'anthropic';
   /** Reasoning effort knob, mapped to provider-specific args/headers. */
   reasoningEffort?: ReasoningEffort;
+  /** Explicit provider-native effort, retained even when absent from a cached catalog. */
+  customReasoningEffort?: string;
 
   // cli (common)
+  cliModels?: CliModelInfo[];
+  cliModelsUpdatedAt?: number;
+  cliModelsBinaryPath?: string;
   binaryPath?: string;
   cwd?: string;
   cliExtraArgs?: string[];
@@ -200,13 +220,25 @@ export function isDeepSeekEndpoint(ep: Partial<Pick<Endpoint, 'label' | 'baseUrl
 
 export function reasoningOptionsForEndpoint(ep?: Endpoint | null): ReasoningEffort[] {
   if (!ep) return [];
+  if (ep.kind !== 'custom-api') {
+    const model = ep.model && ep.cliModels?.find(m => m.id === ep.model || m.resolvedModel === ep.model);
+    return ['off', ...new Set((model && model.efforts || []).filter(v => v !== 'off' && REASONING_EFFORT_OPTIONS.includes(v)))];
+  }
   return [...REASONING_EFFORT_OPTIONS];
 }
 
 export function mapOpenAIReasoningEffort(ep: Endpoint, effort?: ReasoningEffort): string | null {
-  void ep;
+  const custom = customEffortValue(ep.customReasoningEffort);
+  if (custom) return custom;
   if (!effort || effort === 'off') return null;
   return effort;
+}
+
+export function customEffortValue(value?: string): string | undefined {
+  const token = value?.trim();
+  if (!token || token === 'off') return undefined;
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$/.test(token)) throw new Error('Use an effort name of up to 32 letters, numbers, hyphens or underscores.');
+  return token;
 }
 
 export interface CustomPrompt {
@@ -322,6 +354,8 @@ export function matchPermissionRule(rule: PermissionRule, toolName: string, args
 
 export interface GlossaSettings {
   activeEndpointId: string | null;
+  lastApiEndpointId?: string;
+  lastCliEndpointId?: string;
   endpoints: Endpoint[];
   mode: Mode;
 
@@ -545,6 +579,42 @@ export interface CompactSnapshot {
   messages: ChatMessage[];      // the messages REPLACED by this summary
 }
 
+export interface ChatFolder {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
+export interface PendingMessage {
+  id: string;
+  text: string;
+  kind: 'steer' | 'followup';
+  createdAt: number;
+}
+
+export interface SessionGoal {
+  objective: string;
+  phase: 'active' | 'paused' | 'blocked' | 'complete';
+  progress: string;
+  blocker?: string;
+  rounds: number;
+  maxRounds: number;
+  updatedAt: number;
+}
+
+export interface RunDiagnostic {
+  at: number;
+  kind: 'start' | 'step' | 'tool' | 'prune' | 'compact' | 'error' | 'end';
+  runtime?: Endpoint['kind'];
+  model?: string;
+  tool?: string;
+  status?: string;
+  code?: string;
+  durationMs?: number;
+  count?: number;
+  skillVersion?: string;
+}
+
 export interface ChatSession {
   id: string;
   title: string;
@@ -552,6 +622,12 @@ export interface ChatSession {
   updatedAt: number;
   mode: Mode;
   endpointId: string | null;
+  folderId?: string;
+  inbox?: PendingMessage[];
+  goal?: SessionGoal;
+  diagnostics?: RunDiagnostic[];
+  /** Model-only pruning markers; full visible history remains available. */
+  prunedToolCallIds?: string[];
   messages: ChatMessage[];
   /** Latest todo_write snapshot — persisted so plan board survives session switches. */
   plan?: PlanItem[];
@@ -622,4 +698,3 @@ export function modelContextWindow(model: string | undefined | null): number | n
   if (/llama|mistral|mixtral/.test(m)) return 32_000;
   return null;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

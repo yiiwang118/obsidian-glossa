@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import { parseEnvelope, looksLikeEnvelope, summarizeOps, type FileOp } from '../patch_envelope';
 import { commitPatchTransaction, materializePatchTransaction, obsidianPatchFileStore } from '../patch_transaction';
@@ -141,4 +140,3 @@ export const applyPatch: ToolImpl = buildTool({
     return `Patched ${path} once (${edits.length} edits; ${describeTextMatches(result.edits)}).`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

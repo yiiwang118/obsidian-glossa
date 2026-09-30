@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /** Load schemas for specialized tools omitted from the default model surface. */
 import { TOOLS, getTool, isToolAvailableForModel } from '../tools';
 import { buildTool, type ToolImpl, type ToolRunResult } from './_shared';
@@ -209,4 +208,3 @@ function formatLoadedTools(tools: readonly ToolImpl[], rejected: readonly string
   if (rejected.length) lines.push(`Unavailable or unknown: ${rejected.join(', ')}.`);
   return { text: lines.join('\n'), loadedToolNames: names };
 }
-/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

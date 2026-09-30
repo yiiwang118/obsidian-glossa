@@ -34,10 +34,11 @@ function defaultScripts() {
     test: 'node tests/run.cjs',
     typecheck: 'tsc --noEmit',
     'lint:review': 'eslint "src/**/*.ts" --max-warnings=0',
-    'lint:strict': 'eslint "src/**/*.ts" --max-warnings=0 --rule \'@typescript-eslint/no-explicit-any:error\' --rule \'@typescript-eslint/no-unsafe-argument:error\' --rule \'@typescript-eslint/no-unsafe-return:error\' --rule \'@typescript-eslint/no-duplicate-type-constituents:error\' --rule \'@typescript-eslint/only-throw-error:error\' --rule \'@typescript-eslint/no-unused-vars:error\'',
-    'lint:directives': 'eslint "src/**/*.ts" --report-unused-disable-directives --max-warnings=0 --rule \'@typescript-eslint/no-explicit-any:error\' --rule \'@typescript-eslint/no-unsafe-argument:error\' --rule \'@typescript-eslint/no-unsafe-return:error\' --rule \'@typescript-eslint/no-duplicate-type-constituents:error\' --rule \'@typescript-eslint/only-throw-error:error\' --rule \'@typescript-eslint/no-unused-vars:error\'',
+    'lint:strict': 'eslint "src/**/*.ts" --max-warnings=0 --rule \'@typescript-eslint/no-explicit-any:error\' --rule \'@typescript-eslint/no-duplicate-type-constituents:error\' --rule \'@typescript-eslint/only-throw-error:error\' --rule \'@typescript-eslint/no-unused-vars:error\'',
+    'lint:directives': 'eslint "src/**/*.ts" --report-unused-disable-directives --max-warnings=0 --rule \'@typescript-eslint/no-explicit-any:error\' --rule \'@typescript-eslint/no-duplicate-type-constituents:error\' --rule \'@typescript-eslint/only-throw-error:error\' --rule \'@typescript-eslint/no-unused-vars:error\'',
     'review:scan': 'node scripts/review_scan.cjs',
-    check: 'npm run typecheck && npm run lint:review && npm run lint:strict && npm run lint:directives && npm test && npm audit --omit=optional && npm run build && npm run release:check -- --allow-dirty',
+    'lint:community': 'node scripts/community_lint.mjs',
+    check: 'npm run typecheck && npm run lint:review && npm run lint:strict && npm run lint:directives && npm run lint:community && npm test && npm audit --omit=optional && npm run build && npm run release:check -- --allow-dirty',
     'release:check': 'node scripts/release_check.cjs',
   };
 }
@@ -151,7 +152,7 @@ exports.run = async function(t) {
     writeFile(root, 'PRIVACY.md', 'Codex CLI endpoint reads your login shell ($SHELL -lic env) and tests CLI `--version`.\n');
   }, root => {
     const result = runReleaseCheck(root);
-    t.ok(!result.ok && result.output.includes('removed local CLI endpoint claim'), 'removed local CLI endpoint docs are rejected');
+    t.ok(!result.ok && result.output.includes('unsupported login-shell claim'), 'unsupported login-shell access claims are rejected');
   });
 
   withFixture(root => {

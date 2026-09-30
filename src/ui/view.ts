@@ -1,9 +1,12 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import {
-  ItemView, WorkspaceLeaf, MarkdownView, TFile, Notice, Menu,
+  ItemView, WorkspaceLeaf, MarkdownView, TFile, Notice, Menu, FileSystemAdapter,
 } from 'obsidian';
 import type GlossaPlugin from '../main';
 import { ContextManager } from '../context/manager';
+import { enqueueMessage, takeSteering, disarmGoal, canContinueGoal, goalPrompt, goalStatusTool, recordDiagnostic, exportDiagnostics } from '../agent/session_runtime';
+import { renderSessionControls, openGoalModal } from './session_controls';
+import { filterPrunedToolContext } from '../utils/context_pruning';
+import { pruneUnderPressure } from '../utils/context_pressure';
 import {
   getCurrentSelection, resolveFile, resolveWebUrl,
   resolveDroppedFile,
@@ -12,17 +15,26 @@ import {
   type SelectionInfo,
 } from '../context/sources';
 import { BUILTIN_SLASH_COMMANDS, applySlashTemplate } from '../commands/slash';
-import { Popup, type PopupItem } from './popup';
+import { Popup, type PopupItem, type PopupOptions } from './popup';
+import { modelPickerItems, modelPickerOptions } from './model_picker';
+import { cliModelItems } from './cli_picker';
+import { openEffortModal } from './effort_modal';
+import { CLI_BRAND_ICONS, CLI_TERMINAL_ICON, CLI_PROVIDER_LABELS } from './cli_icons';
+import { cliModelLabel, reconcileCliEffort } from '../providers/cli_catalog';
+import { renderEditSummary } from './edit_summary';
+import { openLearningModal } from './learning_modal';
+import { correctionContext } from '../agent/learning_contract';
+import { summarizeToolActivity } from '../utils/tool_activity';
 import { ICON, AURORA_ORB_SVG } from './icons';
 import { el, clear, uid, debounce, setStyle, setVars, setTrustedSvg } from '../utils/dom';
 import { estimateTokens, formatTokenCount } from '../utils/tokens';
 import { buildProvider, supportsNativePdfInput } from '../providers/registry';
 import type { ChatMessage, ContextItem, ContextItemRef, ChatSession, Endpoint, ToolEvent, PlanItem } from '../types';
-import { modelContextWindow, reasoningOptionsForEndpoint } from '../types';
+import { effectiveProxy, modelContextWindow, reasoningOptionsForEndpoint, customEffortValue } from '../types';
 import { CustomApiProvider } from '../providers/custom_api';
 import type { MessageInput } from '../providers/types';
 import { runAgentLoop } from '../agent/loop';
-import { compactSession, applyCompact, estimateSessionTokens, latestProviderInputTokens, undoCompact as undoCompactInSession } from '../agent/compact';
+import { compactSession, applyCompact, estimateSessionTokens, undoCompact as undoCompactInSession } from '../agent/compact';
 import {
   metaFor,
   activityDescriptionFor,
@@ -139,12 +151,14 @@ interface ContextTokenBreakdown {
 }
 
 export class GlossaView extends ItemView {
+  private readonly toolCardEvents = new WeakMap<HTMLElement, ToolEvent>();
+  private editSummaryRevision = 0;
   plugin: GlossaPlugin;
   ctx: ContextManager;
 
   // DOM
   private rootEl: HTMLElement;
-  private modelBtn: HTMLElement;
+  private modelBtn: HTMLButtonElement;
   private tokenBadge: HTMLElement;
   private updatePillEl: HTMLElement;
   private updatePopoverEl: HTMLElement | null = null;
@@ -169,6 +183,21 @@ export class GlossaView extends ItemView {
 
   // State
   private session: ChatSession;
+  private sessionControlsEl: HTMLElement;
+  private queueKind: 'steer' | 'followup' = 'steer';
+  private queueButton: HTMLButtonElement;
+  private runtimeButton: HTMLButtonElement;
+  private cliProviderButton: HTMLButtonElement;
+  private cliCatalogStatus: HTMLElement;
+  private runtimeModelSlot: HTMLElement;
+  private apiProviderButton: HTMLButtonElement;
+  private cliCatalogRequests = new Map<string, { controller: AbortController; promise: Promise<void>; signature: string }>();
+  private cliCatalogAttempts = new Map<string, number>();
+  private cliCatalogErrors = new Map<string, string>();
+  private viewClosed = false;
+  private goalArmed = false;
+  private queueArmed = false;
+  private autoContinue = false;
   private streaming = false;
   /** Cursor into session.messages user-msgs for ↑/↓ history recall. -1 = not in
    *  history-nav mode (user is drafting fresh text). */
@@ -234,6 +263,7 @@ export class GlossaView extends ItemView {
   getIcon() { return 'glossa'; }
 
   async onOpen() {
+    this.viewClosed = false;
     this.rootEl = this.containerEl.children[1] as HTMLElement;
     this.rootEl.empty();
     this.rootEl.addClass('glossa-view');
@@ -246,6 +276,8 @@ export class GlossaView extends ItemView {
     this.buildHeader();
     this.planBoardEl = el('div', { className: 'nc-plan-board', parent: this.rootEl });
     setStyle(this.planBoardEl, { display: 'none' });
+    this.sessionControlsEl = el('div', { parent: this.rootEl });
+    this.renderSessionControls();
     this.threadRailEl = el('div', {
       className: 'nc-thread-rail',
       parent: this.rootEl,
@@ -275,6 +307,7 @@ export class GlossaView extends ItemView {
     // Re-render any header / input chrome whose strings come from `t()` when
     // the user toggles language in settings — no plugin reload required.
     this.langUnsub = onLanguageChange(() => this.rebuildChrome());
+    this.ensureCliCatalog();
   }
 
   private langUnsub: (() => void) | null = null;
@@ -337,6 +370,9 @@ export class GlossaView extends ItemView {
   }
 
   async onClose() {
+    this.viewClosed = true;
+    for (const request of this.cliCatalogRequests.values()) request.controller.abort();
+    this.cancelStream();
     activeDocument.removeEventListener('selectionchange', this.onDomSelectionChange);
     this.popup.destroy();
     this.langUnsub?.();
@@ -352,10 +388,6 @@ export class GlossaView extends ItemView {
   private buildHeader() {
     const header = el('div', { className: 'nc-header', parent: this.rootEl });
 
-    // Plan / Act segmented control — aurora knob slides between the two
-    // options. Click anywhere on the container toggles; the click handler
-    // resolves the target mode from the segment that was hit so clicking
-    // the already-active side is a no-op rather than a flip.
     this.modeToggle = el('div', { className: 'nc-mode-seg', parent: header });
     this.modeToggle.setAttribute('role', 'group');
     this.modeToggle.setAttribute('aria-label', 'Run mode');
@@ -367,6 +399,7 @@ export class GlossaView extends ItemView {
     actSeg.setAttribute('aria-label', 'Act mode');
     this.updateModeToggle();
     const pickMode = async (target: 'plan' | 'act') => {
+      if (this.streaming) return;
       if (this.plugin.settings.runMode === target) return;
       this.plugin.settings.runMode = target;
       await this.plugin.saveSettings();
@@ -394,9 +427,20 @@ export class GlossaView extends ItemView {
     setTrustedSvg(histBtn, ICON.history);
     histBtn.onclick = () => this.toggleHistoryPopover(histBtn);
 
+    const taskBtn = el('button', { className: 'nc-icon-btn', parent: header, text: '◎', type: 'button', attrs: { 'aria-label': bi('Create task', '创建持续任务'), title: bi('Create task', '创建持续任务') } });
+    taskBtn.onclick = () => {
+      if (this.streaming || this.session.goal) { this.sessionControlsEl.scrollIntoView({ block: 'nearest' }); return; }
+      openGoalModal(this.app, goal => { this.session.goal = goal; this.renderSessionControls(); this.persistSession(); });
+    };
+
     const exportBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('export_chat'), type: 'button', attrs: { 'aria-label': t('export_chat') } });
     setTrustedSvg(exportBtn, ICON.upload);
-    exportBtn.onclick = () => { void this.exportChatToNote(); };
+    exportBtn.onclick = (event) => {
+      const menu = new Menu();
+      menu.addItem(item => item.setTitle(t('export_chat')).setIcon('file-text').onClick(() => this.exportChatToNote()));
+      menu.addItem(item => item.setTitle(bi('Export diagnostics (metadata only)', '导出诊断（仅元数据）')).setIcon('activity').onClick(() => this.downloadDiagnostics()));
+      menu.showAtMouseEvent(event);
+    };
 
     const settingsBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('settings'), type: 'button', attrs: { 'aria-label': t('settings') } });
     setTrustedSvg(settingsBtn, ICON.cog);
@@ -410,6 +454,8 @@ export class GlossaView extends ItemView {
     this.updateUpdatePill();
     this.renderCostBar();
     this.refreshComposerPills?.();
+    this.updateRuntimeButton();
+    this.ensureCliCatalog();
   }
 
   private updateUpdatePill() {
@@ -515,6 +561,8 @@ export class GlossaView extends ItemView {
     this.modeToggle.title = mode === 'plan' ? t('plan_tooltip') : t('act_tooltip');
     for (const btn of Array.from(this.modeToggle.querySelectorAll<HTMLButtonElement>('.nc-mode-seg-opt'))) {
       btn.setAttribute('aria-pressed', String(btn.dataset.opt === mode));
+      btn.disabled = this.streaming;
+      btn.title = this.streaming ? bi('Stop the current run to change mode', '停止当前运行后可切换模式') : btn.dataset.opt === 'plan' ? t('plan_tooltip') : t('act_tooltip');
     }
   }
   /** History popover anchored to the history icon. Click toggles, Esc / outside
@@ -531,14 +579,16 @@ export class GlossaView extends ItemView {
     // popover feel like a modal. We want a Raycast / Cursor task-list feel
     // (small floating panel, surrounding page stays alive). Outside-click
     // still closes via the document-level listener below.
-    const host = activeWindow.createDiv();
+    const ownerDocument = anchor.ownerDocument;
+    const ownerWindow = ownerDocument.win;
+    const host = ownerWindow.createDiv();
     host.className = 'nc-history-popover';
-    activeDocument.body.appendChild(host);
+    ownerDocument.body.appendChild(host);
     this.histPopEl = host;
 
     // Position below the anchor, right-aligned. Use rAF so we measure after
     // the host has been laid out.
-    window.requestAnimationFrame(() => this.positionHistoryPopover(anchor));
+    ownerWindow.requestAnimationFrame(() => this.positionHistoryPopover(anchor));
 
     const cleanupView = renderHistoryPopover(host, this.plugin, {
       onPick: (s) => {
@@ -550,38 +600,36 @@ export class GlossaView extends ItemView {
       onClear: () => this.handleHistoryCleared(),
     });
 
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') { ev.preventDefault(); this.closeHistoryPopover(); }
-    };
     const onDocClick = (ev: MouseEvent) => {
       const t = ev.target as Node;
       if (host.contains(t) || anchor.contains(t)) return;
+      if ((ev.target as Element)?.closest?.('.menu, .modal-container')) return;
       this.closeHistoryPopover();
     };
     const onScroll = () => this.positionHistoryPopover(anchor);
-    activeDocument.addEventListener('keydown', onKey, true);
     // Defer mousedown registration so the same click that opened the
     // popover doesn't immediately close it.
-    window.setTimeout(() => activeDocument.addEventListener('mousedown', onDocClick, true), 0);
-    window.addEventListener('resize', onScroll);
+    const clickTimer = ownerWindow.setTimeout(() => ownerDocument.addEventListener('mousedown', onDocClick, true), 0);
+    ownerWindow.addEventListener('resize', onScroll);
     this.histPopCleanup = () => {
-      activeDocument.removeEventListener('keydown', onKey, true);
-      activeDocument.removeEventListener('mousedown', onDocClick, true);
-      window.removeEventListener('resize', onScroll);
+      ownerWindow.clearTimeout(clickTimer);
+      ownerDocument.removeEventListener('mousedown', onDocClick, true);
+      ownerWindow.removeEventListener('resize', onScroll);
       cleanupView();
     };
   }
   private positionHistoryPopover(anchor: HTMLElement) {
     if (!this.histPopEl) return;
     const r = anchor.getBoundingClientRect();
-    const popW = 320;
-    const popMaxH = Math.min(460, window.innerHeight - r.bottom - 24);
+    const ownerWindow = anchor.ownerDocument.win;
+    const popW = Math.min(360, ownerWindow.innerWidth - 16);
+    const popMaxH = Math.max(120, Math.min(480, ownerWindow.innerHeight - r.bottom - 24));
     setStyle(this.histPopEl, { width: `${popW}px` });
     setStyle(this.histPopEl, { maxHeight: `${popMaxH}px` });
     // Right-align with the anchor, clamped inside viewport.
     let left = r.right - popW;
-    left = Math.max(8, Math.min(window.innerWidth - popW - 8, left));
-    const top = Math.min(window.innerHeight - popMaxH - 8, r.bottom + 6);
+    left = Math.max(8, Math.min(ownerWindow.innerWidth - popW - 8, left));
+    const top = Math.max(8, Math.min(ownerWindow.innerHeight - popMaxH - 8, r.bottom + 6));
     setStyle(this.histPopEl, { left: `${left}px` });
     setStyle(this.histPopEl, { top: `${top}px` });
   }
@@ -882,10 +930,10 @@ export class GlossaView extends ItemView {
     const current = items.filter(it => it.isCurrent);
     const groups: Array<[string, ContextItem[]]> = [];
     if (explicit.length) groups.push([bi('Attached', '附件'), explicit]);
-    if (current.length) groups.push([bi('Current', '当前'), current]);
+    if (current.length) groups.push(['', current]);
     for (const [label, groupItems] of groups) {
       const group = el('div', { className: 'nc-context-group' + (groupItems.some(it => it.isCurrent) ? ' current' : ' attached'), parent: this.contextBarEl });
-      el('span', { className: 'nc-context-group-label', text: label, parent: group });
+      if (label) el('span', { className: 'nc-context-group-label', text: label, parent: group });
       const row = el('div', { className: 'nc-context-group-items', parent: group });
     for (const it of groupItems) {
       const pill = el('span', {
@@ -901,8 +949,7 @@ export class GlossaView extends ItemView {
       }
       el('span', { className: 'nc-pill-label', text: it.label, title: it.detail || it.label, parent: pill });
       if (it.isCurrent) {
-        // The group label already says Current; repeating it inside the chip
-        // makes the composer read as "CURRENT ... CURRENT".
+        // The filename alone identifies the automatically attached file.
       } else if (it.kind === 'image') {
         el('span', { className: 'nc-pill-meta', text: 'IMG', parent: pill });
       } else {
@@ -1027,6 +1074,7 @@ export class GlossaView extends ItemView {
     for (const message of selected.messages) this.renderMessage(message);
     if (selected.hasNewer) this.renderHistoryNavigation('newer', selected.window, selected.totalTurns);
     this.compactAllProcessGroups();
+    void this.refreshEditSummaries();
 
     window.requestAnimationFrame(() => {
       this.messagesEl.classList.remove('no-anim');
@@ -1583,8 +1631,9 @@ export class GlossaView extends ItemView {
   }
 
   private renderToolCard(box: HTMLElement, ev: ToolEvent) {
+    this.toolCardEvents.set(box, ev);
     clear(box);
-    box.classList.remove('pending', 'running', 'success', 'error', 'denied');
+    box.classList.remove('pending', 'running', 'success', 'error', 'denied', 'cancelled');
     box.classList.add(ev.status);
     const meta = metaFor(ev.name);
     setVars(box, { ['--tool-color']: meta.color });
@@ -1620,8 +1669,9 @@ export class GlossaView extends ItemView {
     const elapsedEl = el('span', { className: 'nc-tool-event-elapsed', text: formatElapsed(elapsed), parent: hdr });
 
     // Status pill
-    const statusText = ev.status === 'success' ? '✓' : ev.status === 'error' ? '✕' : ev.status === 'denied' ? '−' : '·';
+    const statusText = ev.status === 'success' ? '✓' : ev.status === 'error' ? '✕' : ev.status === 'cancelled' ? '◼' : ev.status === 'denied' ? '−' : '·';
     const statusEl = el('span', { className: `nc-tool-event-status ${ev.status}`, text: statusText, parent: hdr });
+    statusEl.title = ev.status === 'cancelled' ? bi('Cancelled', '已取消') : ev.errorCode ?? ev.status;
     (box as AnyValue)._elapsedEl = elapsedEl;
     (box as AnyValue)._statusEl = statusEl;
 
@@ -1750,8 +1800,12 @@ export class GlossaView extends ItemView {
     summary.type = 'button';
     summary.setAttribute('aria-expanded', 'false');
     el('span', { className: 'nc-tool-stack-summary-icon', text: '⚙', parent: summary });
-    summary.appendText(` Ran ${cards.length} tools · ${dur} · `);
-    el('span', { className: 'nc-tool-stack-summary-ok', text: 'all ✓', parent: summary });
+    const activity = summarizeToolActivity(cards.flatMap(card => {
+      const event = this.toolCardEvents.get(card);
+      return event ? [event] : [];
+    }));
+    summary.appendText(` ${activity} · ${dur} · `);
+    el('span', { className: 'nc-tool-stack-summary-ok', text: '✓', parent: summary });
     summary.appendText(' ');
     el('span', { className: 'nc-tool-stack-summary-chev', text: '▸', parent: summary });
     summary.onclick = () => { summary.setAttribute('aria-expanded', 'true'); stack.classList.add('expanded'); this.updateToolStackCollapse(stack); };
@@ -1784,14 +1838,15 @@ export class GlossaView extends ItemView {
     for (const ui of processUis) {
       ui.wrap.classList.remove('nc-process-folded-away', 'nc-process-anchor', 'nc-process-expanded');
     }
+    const events = processUis.flatMap(ui => (ui.msg.toolEvents ?? []).filter(shouldRenderToolEvent));
+    if (events.some(event => event.status !== 'success')) return;
 
     const reasoningCount = processUis.filter(ui => ui.msg.reasoningContent?.trim()).length;
-    const toolCount = processUis.reduce((n, ui) => n + (ui.msg.toolEvents ?? []).filter(shouldRenderToolEvent).length, 0);
     const summary = el('button', { className: 'nc-process-summary' });
     summary.type = 'button';
     const roleRow = first.wrap.querySelector(':scope > .nc-msg-role');
     first.wrap.insertBefore(summary, roleRow?.nextSibling ?? first.wrap.firstChild);
-    const label = `Run · ${reasoningCount} reasoning · ${toolCount} action${toolCount === 1 ? '' : 's'}`;
+    const label = summarizeToolActivity(events) || bi(`${reasoningCount} reasoning steps`, `${reasoningCount} 段思考`);
     el('span', { className: 'nc-process-dot', parent: summary });
     el('span', { text: label, parent: summary });
     el('span', { className: 'nc-process-chev', text: '▸', parent: summary });
@@ -1831,38 +1886,65 @@ export class GlossaView extends ItemView {
     const actions = el('div', { className: 'nc-msg-actions', parent: footer });
     const mkBtn = (icon: string, label: string, onClick: () => void) => {
       const b = el('button', { parent: actions, title: label, className: 'nc-icon-action' });
+      b.setAttribute('aria-label', label);
       setTrustedSvg(b, icon);
       b.onclick = onClick;
       return b;
     };
     if (m.role === 'assistant') {
+      if (!m.compactSummary) mkBtn(ICON.brain, bi('Remember this correction', '记住这次纠正'), () => {
+        if (this.streaming) { quickNotice(bi('Wait for the reply to finish.', '请等待本轮回复完成。')); return; }
+        openLearningModal(this.plugin, correctionContext(this.session, m));
+      });
       mkBtn(ICON.refresh, t('regenerate'), () => { void this.regenerateLast(); });
       // Insert / Apply require an active markdown editor and many users never
       // use them — hidden in 0.3 to declutter the footer. They live in the
       // command palette (Glossa: Edit selection with AI…) if needed.
       mkBtn(ICON.file, t('save_as_note'), () => { void this.saveResponseAsNote(m); });
       mkBtn(ICON.history, t('fork_from'), () => this.forkFromMessage(m));
-      void this.plugin.checkpoint.listForSession(this.session.id).then(list => {
-        const cp = list.find(c => c.turnId === m.id && c.snapshots.length > 0);
-        if (cp) {
-          mkBtn(ICON.refresh, 'Rollback file edits made in this turn', () => {
-            void (async () => {
-            const paths = cp.snapshots.map(s => s.path).join('\n  • ');
+    }
+  }
+
+  private async refreshEditSummaries(): Promise<void> {
+    const session = this.session;
+    const revision = ++this.editSummaryRevision;
+    try {
+      const entries = await this.plugin.checkpoint.listForSession(session.id);
+      if (this.session !== session || revision !== this.editSummaryRevision) return;
+      this.messagesEl.querySelectorAll('.nc-edit-summary').forEach(card => card.remove());
+      for (const entry of entries) {
+        const messages = session.messages.filter(message => message.role === 'assistant'
+          && (message.turnId === entry.turnId || message.id === entry.turnId));
+        // Put the summary after the final visible segment, outside folded process rows.
+        const last = messages[messages.length - 1];
+        const ui = last ? this.msgUIs.get(last.id) : null;
+        if (!ui) continue;
+        const card = renderEditSummary(this.messagesEl, entry, {
+          open: path => { void this.app.workspace.openLinkText(path, '', false); },
+          busy: () => this.streaming || this.session !== session,
+          undo: async paths => {
+            if (this.streaming || this.session !== session) return;
+            const targets = entry.snapshots.filter(file => file.after?.change && !file.restoredAt && (!paths || paths.includes(file.path)));
             const { confirmModal } = await import('./confirm_modal');
             const ok = await confirmModal(this.app, {
-              title: 'Rollback file edits',
-              body: `Rollback will overwrite ${cp.snapshots.length} file(s):\n  • ${paths}\n\nContinue?`,
-              confirmText: 'Rollback',
-              danger: true,
+              title: bi('Undo file changes', '撤销文件修改'),
+              body: bi('Restore these files to their state before this turn? Files changed since then will be kept.', '将以下文件恢复到本轮修改之前？之后又被修改过的文件会保留当前内容。') + '\n\n' + targets.map(file => file.path).join('\n'),
+              confirmText: bi('Undo changes', '撤销修改'), danger: true,
             });
-            if (!ok) return;
-            const { restored, failed } = await this.plugin.checkpoint.rollback(this.session.id, m.id);
-            quickNotice(`Rolled back ${restored} file(s)${failed.length ? `, ${failed.length} failed` : ''}.`);
-            })();
-          });
-        }
-      });
-    }
+            if (!ok || this.streaming || this.session !== session) return;
+            try {
+              const result = await this.plugin.checkpoint.rollback(session.id, entry.turnId, paths);
+              quickNotice(bi(`Restored ${result.restored} files.`, `已恢复 ${result.restored} 个文件。`)
+                + (result.failed.length ? '\n' + bi('Some files could not be restored:\n', '部分文件无法恢复：\n') + result.failed.join('\n') : ''), 7000);
+            } catch (error) {
+              quickNotice(bi('Undo failed: ', '撤销失败：') + String(error), 7000);
+            }
+            await this.refreshEditSummaries();
+          },
+        });
+        if (card) ui.wrap.after(card);
+      }
+    } catch (error) { console.warn('[Glossa] edit summaries unavailable', error); }
   }
 
   private formatMessageTime(ts: number): string {
@@ -2008,7 +2090,7 @@ export class GlossaView extends ItemView {
       // markdown re-render so we don't block the new text from showing.
       this.finalizeAsstRender(this.streamingMsgUI, this.currentAsstMsg).catch(() => {});
     }
-    this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId ?? undefined };
+    this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId ?? undefined, modelSnapshot: this.currentAsstMsg?.modelSnapshot };
     this.session.messages.push(this.currentAsstMsg);
     this.streamingBuf = '';
     this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
@@ -2023,9 +2105,25 @@ export class GlossaView extends ItemView {
      ============================================================ */
   private askInlineApproval(tool: ToolImpl, args: AnyValue): Promise<ApprovalResult> {
     return new Promise(resolve => {
+      const signal = this.abortCtl?.signal;
+      let settled = false;
+      let approvalEl: HTMLElement | undefined;
+      let cleanupKeys = () => {};
+      const settle = (result: ApprovalResult) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener('abort', abort);
+        cleanupKeys();
+        resolve(result);
+      };
+      const abort = () => { approvalEl?.remove(); settle({ ok: false }); };
+      if (signal?.aborted) { abort(); return; }
+      signal?.addEventListener('abort', abort, { once: true });
       void (async () => {
       const host = this.streamingMsgUI?.wrap ?? this.messagesEl;
       const wrap = el('div', { className: 'nc-inline-approval', parent: host });
+      approvalEl = wrap;
+      const ownerDocument = wrap.ownerDocument;
       const hdr = el('div', { className: 'nc-inline-approval-hdr', parent: wrap });
       const ic = el('span', { className: 'nc-inline-approval-icon', parent: hdr });
       setTrustedSvg(ic, metaFor(tool.spec.name).icon);
@@ -2120,6 +2218,7 @@ export class GlossaView extends ItemView {
         }
       } catch { /* ignore */ }
 
+      if (settled) return;
       /* --- "Always allow" rule selector --- */
       // Show only when the tool has a path-ish arg (so folder/path scopes make sense)
       const path = (args?.path ?? args?.file_path ?? args?.target_path ?? args?.to ?? args?.from ?? args?.base_path ?? args?.template_path) as string | undefined;
@@ -2175,29 +2274,32 @@ export class GlossaView extends ItemView {
       };
       const finish = (ok: boolean) => {
         wrap.remove();
-        if (!ok) return resolve({ ok });
-        resolve({ ok, persistRule: buildRule() });
+        if (!ok) return settle({ ok });
+        settle({ ok, persistRule: buildRule() });
       };
       deny.onclick = () => finish(false);
       approve.onclick = () => finish(true);
       this.scrollToBottom();
 
       const keyH = (e: KeyboardEvent) => {
-        if (!wrap.isConnected) { activeDocument.removeEventListener('keydown', keyH, true); return; }
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); activeDocument.removeEventListener('keydown', keyH, true); finish(true); }
-        else if (e.key === 'Escape') { e.preventDefault(); activeDocument.removeEventListener('keydown', keyH, true); finish(false); }
+        if (e.isComposing || (e.target as Element)?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+        if (e.key !== 'Escape' && !wrap.contains(e.target as Node)) return;
+        if (!wrap.isConnected) { ownerDocument.removeEventListener('keydown', keyH, true); return; }
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ownerDocument.removeEventListener('keydown', keyH, true); finish(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); ownerDocument.removeEventListener('keydown', keyH, true); finish(false); }
         // 'a' (always-allow this tool globally) — only when focus isn't inside an input.
         else if ((e.key === 'a' || e.key === 'A') && !(activeDocument.activeElement?.instanceOf(HTMLInputElement) || activeDocument.activeElement?.instanceOf(HTMLTextAreaElement))) {
           e.preventDefault();
           ruleChoice = 'always-tool';
-          activeDocument.removeEventListener('keydown', keyH, true);
+          ownerDocument.removeEventListener('keydown', keyH, true);
           finish(true);
         }
       };
-      activeDocument.addEventListener('keydown', keyH, true);
+      cleanupKeys = () => ownerDocument.removeEventListener('keydown', keyH, true);
+      ownerDocument.addEventListener('keydown', keyH, true);
       })().catch((err: unknown) => {
         console.warn('[Glossa] inline approval failed', err);
-        resolve({ ok: false });
+        settle({ ok: false });
       });
     });
   }
@@ -2290,15 +2392,32 @@ export class GlossaView extends ItemView {
 
   // Composer DOM refs that survive across rebuilds.
   private permPillEl!: HTMLElement;
-  private reasoningPillEl!: HTMLElement;
+  private reasoningPillEl!: HTMLButtonElement;
 
   private buildInput() {
     const wrap = el('div', { className: 'nc-input-wrap', parent: this.rootEl });
     this.inputWrap = wrap;
 
+    const contextRow = el('div', { className: 'nc-composer-context-row', parent: wrap });
+    this.contextBarEl = el('div', { className: 'nc-context-bar', parent: contextRow });
+    this.contextBarSig = '';
+    this.renderContextBar();
+    const runtime = el('div', { className: 'nc-runtime-bar', parent: contextRow });
+    this.runtimeButton = el('button', { className: 'nc-runtime-button', parent: runtime, type: 'button' });
+    this.runtimeButton.onclick = () => this.openRuntimeMenu();
+    const providerSlot = el('div', { className: 'nc-runtime-choice nc-provider-choice', parent: runtime });
+    this.apiProviderButton = el('button', { className: 'nc-api-provider-button', parent: providerSlot, type: 'button' });
+    this.apiProviderButton.onclick = () => this.openApiProviderMenu();
+    this.cliProviderButton = el('button', { className: 'nc-cli-provider-button', parent: providerSlot, type: 'button' });
+    this.cliProviderButton.onclick = () => this.openCliProviderMenu();
+    this.runtimeModelSlot = el('div', { className: 'nc-runtime-choice nc-model-choice', parent: runtime });
+    this.modelBtn = el('button', { className: 'nc-model-chip', parent: this.runtimeModelSlot, title: 'Pick model', type: 'button' });
+    this.updateModelBtn();
+    this.modelBtn.onclick = () => this.openEndpointMenu();
+    this.cliCatalogStatus = el('span', { className: 'nc-cli-catalog-status', parent: wrap, attrs: { role: 'status', 'aria-live': 'polite' } });
+
     this.selectionPreviewEl = el('div', { className: 'nc-selection-preview', parent: wrap });
     setStyle(this.selectionPreviewEl, { display: 'none' });
-    this.contextBarEl = el('div', { className: 'nc-context-bar', parent: wrap });
 
     const inputId = `glossa-input-${uid()}`;
     const labelId = `${inputId}-label`;
@@ -2375,12 +2494,12 @@ export class GlossaView extends ItemView {
       if (this.popup.onKey(e)) { e.preventDefault(); return; }
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        if (this.canSubmitComposer() && !this.streaming) void this.submit();
+        if (this.canSubmitComposer()) void this.submit();
         return;
       }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        if (this.canSubmitComposer() && !this.streaming) void this.submit();
+        if (this.canSubmitComposer()) void this.submit();
         return;
       }
       if (e.key === 'ArrowUp' && this.caretAtTop()) {
@@ -2410,13 +2529,6 @@ export class GlossaView extends ItemView {
     this.updatePermPill();
     this.permPillEl.onclick = () => this.openPermissionMenu();
 
-    // (3) Model chip — moved below the textarea per user feedback. Sits right
-    //     after the permission pill so the "current behaviour" cluster
-    //     (permissions + model) reads as a single group on the left.
-    this.modelBtn = el('button', { className: 'nc-model-chip', parent: footer, title: 'Pick endpoint / model', type: 'button' });
-    this.updateModelBtn();
-    this.modelBtn.onclick = () => this.openEndpointMenu();
-
     // (spacer)
     el('span', { className: 'nc-input-footer-spacer', parent: footer });
 
@@ -2426,6 +2538,14 @@ export class GlossaView extends ItemView {
     this.reasoningPillEl.onclick = () => { void this.openReasoningMenu(); };
 
     // (4) Send / stop
+    this.queueButton = el('button', { className: 'nc-composer-pill nc-queue-button', parent: footer, type: 'button' });
+    this.queueButton.onclick = e => {
+      const menu = new Menu();
+      const supportsSteer = this.activeEndpoint()?.kind === 'custom-api';
+      if (supportsSteer) menu.addItem(i => i.setTitle(bi('Send at next step', '下一步补充')).setChecked(this.queueKind === 'steer').onClick(() => { this.queueKind = 'steer'; this.queueComposer(); }));
+      menu.addItem(i => i.setTitle(bi('Queue for next turn', '排队到下一轮')).setChecked(this.queueKind === 'followup').onClick(() => { this.queueKind = 'followup'; this.queueComposer(); }));
+      menu.showAtMouseEvent(e);
+    };
     this.submitBtn = el('button', { className: 'nc-submit-btn nc-submit-icon-only', parent: footer, type: 'button' });
     this.updateSubmitBtn();
     this.submitBtn.onclick = () => {
@@ -2475,13 +2595,13 @@ export class GlossaView extends ItemView {
   /** Show or hide the shared popup against `anchor`. If the popup is already
    *  open against the SAME anchor, second click hides it (toggle). If open
    *  against a different anchor, switch to the new one. */
-  private togglePopup(anchor: HTMLElement, items: PopupItem[]) {
+  private togglePopup(anchor: HTMLElement, items: PopupItem[], options?: PopupOptions) {
     this.closeHistoryPopover();
     if (this.popup.isOpen() && this.popup.currentAnchor() === anchor) {
       this.popup.hide();
       return;
     }
-    this.popup.show(anchor, items);
+    this.popup.show(anchor, items, options);
   }
 
   private openPermissionMenu() {
@@ -2507,13 +2627,14 @@ export class GlossaView extends ItemView {
   private reasoningOptionsForActive(): { v: import('../types').ReasoningEffort; label: string }[] {
     const ep = this.activeEndpoint();
     if (!ep) return [];
-    return reasoningOptionsForEndpoint(ep).map(v => ({ v, label: t(`effort_${v}`) }));
+    return reasoningOptionsForEndpoint(ep).map(v => ({ v, label: v === 'off' && ep.kind !== 'custom-api' ? bi('Auto (CLI default)', '自动（CLI 默认）') : t(`effort_${v}`) }));
   }
   private updateReasoningPill() {
     if (!this.reasoningPillEl) return;
     clear(this.reasoningPillEl);
     const ep = this.activeEndpoint();
-    const effort = (ep?.reasoningEffort ?? 'off');
+    const configured = ep?.reasoningEffort ?? 'off';
+    const effort = customEffortValue(ep?.customReasoningEffort) || (ep?.kind !== 'custom-api' && !reasoningOptionsForEndpoint(ep).includes(configured) ? 'off' : configured);
     const ic = el('span', { className: 'nc-pill-glyph', parent: this.reasoningPillEl });
     // Lucide `sparkles` — same icon ChatGPT and Cursor use for reasoning /
     // thinking. Universally readable, brand-neutral.
@@ -2522,26 +2643,38 @@ export class GlossaView extends ItemView {
     const map: Record<string, string> = {
       off: '·', none: '0', minimal: 'MIN', low: 'L', medium: 'M', high: 'H', xhigh: 'X', max: 'MAX', ultra: 'U',
     };
-    el('span', { className: 'nc-pill-sub', text: map[effort] ?? 'M', parent: this.reasoningPillEl });
+    el('span', { className: 'nc-pill-sub', text: ep?.kind !== 'custom-api' && effort === 'off' ? bi('Auto', '自动') : map[effort] ?? effort, parent: this.reasoningPillEl });
     el('span', { className: 'nc-pill-caret', text: '▾', parent: this.reasoningPillEl });
     this.reasoningPillEl.title = bi(`Reasoning effort: ${effort}`, `思考强度：${effort}`);
     this.reasoningPillEl.setAttribute('aria-label', this.reasoningPillEl.title);
     this.reasoningPillEl.setAttribute('aria-disabled', String(!ep));
     this.reasoningPillEl.classList.toggle('disabled', !ep);
+    this.reasoningPillEl.disabled = !ep || this.streaming;
   }
   private async openReasoningMenu() {
     const ep = this.activeEndpoint();
-    if (!ep) return;
+    if (!ep || this.streaming) return;
     const cur = ep.reasoningEffort ?? 'off';
     const items: PopupItem[] = this.reasoningOptionsForActive().map(o => ({
       label: o.label,
-      checked: cur === o.v,
+      checked: !ep.customReasoningEffort && cur === o.v,
       onSelect: async () => {
+        if (this.streaming || this.activeEndpoint() !== ep) return;
         ep.reasoningEffort = o.v;
+        delete ep.customReasoningEffort;
         await this.plugin.saveSettings();
         this.updateReasoningPill();
       },
     }));
+    items.push({ label: bi('Custom effort…', '自定义 effort…'), hint: ep.customReasoningEffort, checked: !!ep.customReasoningEffort, onSelect: () => {
+      openEffortModal(this.app, ep, async value => {
+        if (this.streaming || this.activeEndpoint() !== ep) return;
+        ep.customReasoningEffort = value;
+        if (!value) ep.reasoningEffort = 'off';
+        await this.plugin.saveSettings();
+        this.updateReasoningPill();
+      });
+    } });
     this.togglePopup(this.reasoningPillEl, items);
   }
 
@@ -2621,6 +2754,12 @@ export class GlossaView extends ItemView {
   }
 
   private updateSubmitBtn() {
+    this.updateModeToggle();
+    this.updateRuntimeButton();
+    if (this.queueButton) {
+      this.queueButton.hidden = !this.streaming;
+      this.queueButton.textContent = this.queueKind === 'steer' && this.activeEndpoint()?.kind === 'custom-api' ? bi('Add input ▾', '补充 ▾') : bi('Queue ▾', '排队 ▾');
+    }
     clear(this.submitBtn);
     const ic = el('span', { className: 'nc-btn-icon', parent: this.submitBtn });
     if (this.streaming) {
@@ -2655,6 +2794,7 @@ export class GlossaView extends ItemView {
   }
 
   private updateModelBtn() {
+    if (!this.modelBtn) return;
     clear(this.modelBtn);
     const active = this.activeEndpoint();
     if (!active) {
@@ -2665,9 +2805,7 @@ export class GlossaView extends ItemView {
       this.modelBtn.setAttribute('aria-label', this.modelBtn.title);
       return;
     }
-    // Show ONLY the user-defined label. The underlying model id moves into
-    // the tooltip — the chip stays compact and the label drives identity.
-    el('span', { className: 'nc-model-label', text: active.label, parent: this.modelBtn });
+    el('span', { className: 'nc-model-label', text: active.kind === 'custom-api' ? active.model || bi('Default model', '默认模型') : cliModelLabel(active) || bi('CLI default model', 'CLI 默认模型'), parent: this.modelBtn });
     const a = el('span', { className: 'nc-arrow', parent: this.modelBtn });
     setTrustedSvg(a, ICON.arrowDown);
     const model = active.model ?? bi('(default)', '（默认）');
@@ -2676,9 +2814,15 @@ export class GlossaView extends ItemView {
   }
 
   private openEndpointMenu() {
+    if (this.streaming) return;
     const active = this.activeEndpoint();
-    const eps = this.plugin.settings.endpoints;
-    const items: PopupItem[] = [];
+    if (active && active.kind !== 'custom-api') { this.openCliModelMenu(active); return; }
+    const eps = active ? [active] : [];
+    const items = modelPickerItems(eps, active?.id ?? '', active?.model ?? '', async (endpoint, model) => {
+      if (this.streaming || this.activeEndpoint() !== endpoint) return;
+      endpoint.model = model;
+      await this.plugin.saveSettings();
+    });
 
     if (!active && eps.length === 0) {
       items.push({
@@ -2689,26 +2833,13 @@ export class GlossaView extends ItemView {
       return;
     }
 
-    // Section 1: models of the active endpoint
+    // Model choices and detection belong to the selected API provider.
     if (active) {
-      const models = active.availableModels && active.availableModels.length
-        ? active.availableModels
-        : (active.model ? [active.model] : []);
-      for (const m of models.slice(0, 25)) {
-        items.push({
-          label: m,
-          section: active.label,
-          checked: active.model === m,
-          onSelect: async () => {
-            active.model = m;
-            await this.plugin.saveSettings();
-          },
-        });
-      }
       if (active.kind === 'custom-api') {
         items.push({
           label: bi('↻ Detect models', '↻ 检测可用模型'),
-          section: active.label,
+          section: bi('Manage', '管理'),
+          alwaysVisible: true,
           onSelect: async () => {
             try {
               quickNotice(bi('Detecting models…', '检测中…'));
@@ -2733,30 +2864,17 @@ export class GlossaView extends ItemView {
       }
     }
 
-    // Section 2: switch endpoint
-    const others = eps.filter(x => x.id !== this.plugin.settings.activeEndpointId);
-    for (const ep of others) {
-      items.push({
-        label: ep.label,
-        section: bi('Switch endpoint', '切换 endpoint'),
-        onSelect: async () => {
-          this.plugin.settings.activeEndpointId = ep.id;
-          await this.plugin.saveSettings();
-        },
-      });
-    }
-
-    // Section 3: manage
     items.push({
       label: bi('Manage endpoints…', '管理 endpoint…'),
       section: bi('More', '更多'),
+      alwaysVisible: true,
       onSelect: () => {
         (this.app as AnyValue).setting.open();
         (this.app as AnyValue).setting.openTabById(this.plugin.manifest.id);
       },
     });
 
-    this.togglePopup(this.modelBtn, items);
+    this.togglePopup(this.modelBtn, items, modelPickerOptions());
   }
 
   /* ============================================================
@@ -3080,19 +3198,18 @@ export class GlossaView extends ItemView {
         });
         // Then a role:'tool' message for each tool result (skipped only if the event was denied with no result)
         for (const ev of m.toolEvents) {
-          if (ev.result == null && ev.status !== 'success' && ev.status !== 'error' && ev.status !== 'denied') continue;
           out.push({
             role: 'tool',
             toolCallId: ev.id,
             toolName: ev.name,
             content: compactHistoricalToolResult({
               toolName: ev.name,
-              result: String(ev.result ?? ''),
+              result: String(ev.result ?? (ev.status === 'success' ? '' : 'Tool did not complete; recheck state before retrying.')),
               status: ev.status,
               isRecent: keepFullToolContext,
             }),
             toolContentBlocks: keepFullToolContext ? ev.contentBlocks : undefined,
-            toolIsError: ev.status === 'error' || ev.status === 'denied',
+            toolIsError: ev.status !== 'success',
           });
         }
       } else {
@@ -3103,7 +3220,7 @@ export class GlossaView extends ItemView {
         });
       }
     }
-    return out;
+    return filterPrunedToolContext(out, new Set(this.session.prunedToolCallIds ?? []));
   }
 
   /** Run a one-shot summarisation request, replace the older messages in this session
@@ -3111,7 +3228,7 @@ export class GlossaView extends ItemView {
    *  and from the `/compact` slash command (manual trigger). */
   private async runAutoCompact(ep: Endpoint, reason: 'auto' | 'manual') {
     if (this.session.messages.length < 4) { if (reason === 'manual') quickNotice('Not enough history to compact.'); return; }
-    const vaultRoot = (this.app.vault.adapter as AnyValue).basePath as string | undefined;
+    const vaultRoot = this.app.vault.adapter instanceof FileSystemAdapter ? this.app.vault.adapter.getBasePath() : undefined;
     const provider = buildProvider(ep, this.plugin.settings.globalProxy, vaultRoot);
     const keepRecent = 2;
 
@@ -3156,24 +3273,36 @@ export class GlossaView extends ItemView {
   /* ============================================================
      Submit — runs the agent loop (with tools if endpoint supports it)
      ============================================================ */
-  private async submit() {
-    if (this.streaming || this.submitInFlight) return;
+  private async submit(queuedText?: string, pendingId?: string) {
+    if (this.streaming) { if (!queuedText) this.queueComposer(); return; }
+    if (this.submitInFlight) return;
+    const token = this.sessionToken;
     this.submitInFlight = true;
+    this.autoContinue = false;
     try {
-      await this.submitPrepared();
+      await this.submitPrepared(queuedText, pendingId);
     } finally {
       this.submitInFlight = false;
+      if (token === this.sessionToken && !this.autoContinue && this.goalArmed) {
+        this.goalArmed = false; disarmGoal(this.session); this.persistSession();
+      }
       this.updateSubmitBtn();
+      this.renderSessionControls();
+      if (token === this.sessionToken && this.autoContinue) {
+        const next = this.queueArmed ? this.session.inbox?.[0] : undefined;
+        if (next) void this.submit(next.text, next.id);
+        else if (canContinueGoal(this.session.goal, this.goalArmed)) void this.submit(goalPrompt(this.session.goal));
+      }
     }
   }
 
-  private async submitPrepared() {
+  private async submitPrepared(queuedText?: string, pendingId?: string) {
     if (this.streaming) return;
     const submitSessionToken = this.sessionToken;
     await this.pendingComposerAttachments.wait();
     if (this.streaming || submitSessionToken !== this.sessionToken) return;
-    const raw = this.inputEl.value.trim();
-    const hasExplicitImage = this.ctx.list().some(item => item.kind === 'image' && !item.isCurrent);
+    const raw = queuedText ?? this.inputEl.value.trim();
+    const hasExplicitImage = !queuedText && this.ctx.list().some(item => item.kind === 'image' && !item.isCurrent);
     if (!raw && !hasExplicitImage) return;
 
     // Clear the input IMMEDIATELY so Enter feels snappy. If a downstream
@@ -3181,6 +3310,7 @@ export class GlossaView extends ItemView {
     // original text so the user can fix the issue and retry.
     const inputBackup = this.inputEl.value;
     const restoreInput = () => {
+      if (queuedText !== undefined) return;
       if (submitSessionToken !== this.sessionToken) return;
       this.inputEl.value = inputBackup;
       this.recomputeInputHeight();
@@ -3190,17 +3320,16 @@ export class GlossaView extends ItemView {
     // content drifts upward and fades as the message bubble takes its place.
     // No-op for reduced-motion users; skipped for long inputs to avoid a
     // huge translucent block flashing across the screen.
-    this.playSendFlyout(inputBackup);
-    this.inputEl.value = '';
+    if (queuedText === undefined) { this.playSendFlyout(inputBackup); this.inputEl.value = ''; }
     this.recomputeInputHeight();
     this.historyCursor = -1; this.historyDraft = '';
 
     // 1) If the line starts with a known `/<trigger> [arg]`, expand to its full template
     // 2) Then resolve any legacy {{...}} markers
     // Both happen at submit time so the textarea itself never grew.
-    const slashExpansion = await this.expandSlashTrigger(raw);
+    const slashExpansion = queuedText !== undefined ? { text: raw, expanded: false, embeddedSelection: false, embeddedCurrentFile: false } : await this.expandSlashTrigger(raw);
     if (submitSessionToken !== this.sessionToken) return;
-    const markerExpansion = await this.resolveSlashMarkers(slashExpansion.text);
+    const markerExpansion = queuedText !== undefined ? slashExpansion : await this.resolveSlashMarkers(slashExpansion.text);
     if (submitSessionToken !== this.sessionToken) return;
     const text = markerExpansion.text || (hasExplicitImage ? 'Analyze the attached image(s).' : '');
     const ep = this.activeEndpoint();
@@ -3220,10 +3349,11 @@ export class GlossaView extends ItemView {
     let preSubmitCompacted = false;
     const effectiveWindow = this.effectiveContextWindow(epReady.model);
     if (this.plugin.settings.autoCompactEnabled) {
-      const reported = latestProviderInputTokens(this.session);
-      const used = reported ?? estimateSessionTokens(this.session);
       const budget = effectiveWindow.maxCtx;
       const threshold = budget * (this.plugin.settings.autoCompactThresholdPct / 100);
+      const pressure = pruneUnderPressure(this.buildModelHistory('', undefined), threshold);
+      if (pressure.ids.length) this.recordPruning(pressure.ids);
+      const used = pressure.after;
       if (used > threshold) {
         await this.runAutoCompact(epReady, 'auto');
         if (submitSessionToken !== this.sessionToken) return;
@@ -3241,7 +3371,7 @@ export class GlossaView extends ItemView {
         this.renderSelectionPreview();
       }
     }
-    const selectionContextBlock = this.currentSelection
+    const selectionContextBlock = !queuedText && this.currentSelection
       ? `### Selection (from ${this.currentSelection.source}${this.currentSelection.file ? `, ${this.currentSelection.file.path}` : ''}):\n\n${this.currentSelection.text}`
       : '';
     const recentUserTexts = this.session.messages
@@ -3262,9 +3392,9 @@ export class GlossaView extends ItemView {
     // Refresh the open source at send time. This picks up current Markdown
     // edits and lazily resolves non-Markdown files using the requested task
     // (for example front + ending pages for /summarize).
-    await this.hydrateCurrentContextForPrompt(raw, embeddedSelection || embeddedCurrentFile);
+    if (queuedText === undefined) await this.hydrateCurrentContextForPrompt(raw, embeddedSelection || embeddedCurrentFile);
     if (submitSessionToken !== this.sessionToken) return;
-    const turnContextItems = this.ctx.list();
+    const turnContextItems = queuedText === undefined ? this.ctx.list() : [];
     const hasExplicitAttachments = turnContextItems.some(it => !it.isCurrent);
 
     // Save only lightweight metadata refs — never the resolved file/image contents.
@@ -3281,29 +3411,35 @@ export class GlossaView extends ItemView {
       // what lets later turns retain attached PDF/file text without persisting
       // image data URIs in chat storage.
       displayContent: raw,
-      selectionEcho: this.currentSelection ? {
+      selectionEcho: !queuedText && this.currentSelection ? {
         text: this.currentSelection.text,
         source: this.currentSelection.source,
         file: this.currentSelection.file?.path,
       } : undefined,
     };
     this.session.messages.push(userMsg);
+    if (pendingId) this.session.inbox = this.session.inbox?.filter(m => m.id !== pendingId);
+    if (this.goalArmed && this.session.goal?.phase === 'active') this.session.goal.rounds++;
+    recordDiagnostic(this.session, { at: Date.now(), kind: 'start', runtime: epReady.kind, model: epReady.model });
     this.historyWindow = latestHistoryWindow(this.session.messages);
     this.renderSessionHistory({ scrollToBottom: true });
-    this.ctx.resetUnpinned();
+    if (queuedText === undefined) this.ctx.resetUnpinned();
 
     // Input + history cursor were already cleared at the top of submit() so the
     // box feels instant. We just reset the selection echo here.
-    this.currentSelection = null;
+    if (queuedText === undefined) this.currentSelection = null;
     this.renderSelectionPreview();
 
     // Start a new assistant message — fresh turnId for this user turn.
     this.currentTurnId = uid();
     const turnIdForThisRun = this.currentTurnId;
-    this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId };
+    this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId,
+      modelSnapshot: { endpointId: epReady.id, model: epReady.model ?? '' } };
     this.session.messages.push(this.currentAsstMsg);
     this.streamingBuf = '';
     this.streaming = true;
+    this.abortCtl = new AbortController();
+    this.renderSessionControls();
     // Mirror streaming state to the view root so CSS animations (act pulse,
     // future skeleton effects) can scope themselves to active streams and
     // stay calm when idle. See styles.css .glossa-streaming.
@@ -3323,7 +3459,7 @@ export class GlossaView extends ItemView {
     let loopHadError = false;
     try {
 
-    const vaultRoot = (this.app.vault.adapter as AnyValue).basePath as string | undefined;
+    const vaultRoot = this.app.vault.adapter instanceof FileSystemAdapter ? this.app.vault.adapter.getBasePath() : undefined;
     const provider = buildProvider(epReady, this.plugin.settings.globalProxy, vaultRoot);
     // Hard cap = a hair below the effective model window so we leave room for
     // the system prompt + assistant response. The previous code displayed the
@@ -3350,6 +3486,7 @@ export class GlossaView extends ItemView {
       new Notice(`⚠ HARD context cap exceeded: had to drop ${forcedDrops.length} pinned/current item(s): ${forcedDrops.map(d => d.label).join(', ')}. Compress or remove items to keep them.`, 10000);
     }
     const sysPrompt = await this.buildSystemPrompt();
+    if (submitSessionToken !== this.sessionToken || this.abortCtl.signal.aborted) return;
     // Slash commands are self-contained task instructions, so they do not need
     // a prior-turn continuity hint. Their attached/open source context still
     // participates unless it was embedded verbatim above.
@@ -3397,8 +3534,6 @@ export class GlossaView extends ItemView {
     };
     this.updateTokenBadge();
     this.renderCostBar();
-
-    this.abortCtl = new AbortController();
 
     // Custom API → we control the tool-use protocol → enable our tool dispatch.
     // CLI providers → either single-shot (no tools) or fullAgent (their own tool dispatch).
@@ -3461,15 +3596,31 @@ export class GlossaView extends ItemView {
       nativePdfInput: supportsNativePdfInput(epReady),
       checkpoint: this.plugin.checkpoint,
       sessionId: this.session.id,
-      turnId: this.currentAsstMsg?.id,
+      turnId: turnIdForThisRun,
       mcp: this.plugin.mcp,
       approver: (tool, args) => this.askInlineApproval(tool, args),
+      contextBudget: this.plugin.settings.autoCompactEnabled ? Math.max(1, effectiveWindow.maxCtx * (this.plugin.settings.autoCompactThresholdPct / 100) - estimateTokens(sysPrompt) - responseReserve) : undefined,
+      initialPrunedIds: this.session.prunedToolCallIds,
+      onPruned: ids => { if (live()) this.recordPruning(ids); },
+      takeSteering: async () => {
+        if (!live() || !this.queueArmed) return [];
+        const items = takeSteering(this.session);
+        for (const item of items) {
+          const msg: ChatMessage = { id: item.id, role: 'user', content: item.text, timestamp: Date.now() };
+          this.session.messages.push(msg);
+          this.renderMessage(msg);
+        }
+        if (items.length) { this.renderSessionControls(); await this.flushPersistNow(); }
+        return items.map(item => item.text);
+      },
+      runtimeTools: this.session.goal?.phase === 'active' && this.goalArmed ? [goalStatusTool(this.session.goal, async () => { if (live()) { this.renderSessionControls(); await this.flushPersistNow(); } })] : [],
 
       // Reactive compaction: when the server says the prompt is too long, summarise
       // the session and return a fresh message array for the loop to retry with.
       // Skip if we already compacted pre-submit in this turn (loop.ts also has
       // its own once-per-turn guard, but defence-in-depth here saves the LLM call).
       onContextOverflow: async () => {
+        if (!live()) return null;
         if (preSubmitCompacted) {
           quickNotice('Pre-submit compaction already happened — refusing second pass to avoid burning a duplicate LLM call. Increase context window or open a fresh chat.', 6000);
           return null;
@@ -3481,6 +3632,8 @@ export class GlossaView extends ItemView {
         }
         quickNotice('Context window exceeded — compacting and retrying…', 3000);
         await this.runAutoCompact(epReady, 'auto');
+        if (!live()) return null;
+        recordDiagnostic(this.session, { at: Date.now(), kind: 'compact' });
         preSubmitCompacted = true;     // suppress further reactive compactions this turn
         // Reinstate the assistant bubble at the tail (loop will continue streaming into it)
         if (this.currentAsstMsg) {
@@ -3492,11 +3645,7 @@ export class GlossaView extends ItemView {
         }
         // Rebuild the message array for the loop from the compacted session, excluding
         // the assistant placeholder + the user turn itself (the loop appends both).
-        const history = this.buildModelHistory(userMsg.id, this.currentAsstMsg?.id);
-        return [
-          ...history,
-          { role: 'user', content: finalUserContent },
-        ];
+        return this.buildModelHistory('', this.currentAsstMsg?.id);
       },
       onText: (delta) => {
         if (!live()) return;
@@ -3528,6 +3677,7 @@ export class GlossaView extends ItemView {
       },
       onToolEnd: (ev) => {
         if (!live()) return;
+        if (ev.status !== 'pending' && ev.status !== 'running') recordDiagnostic(this.session, { at: Date.now(), kind: 'tool', tool: ev.name, status: ev.status, code: ev.errorCode, durationMs: Math.max(0, (ev.endedAt ?? Date.now()) - ev.startedAt), skillVersion: ev.skillVersion });
         if (!this.currentAsstMsg || !this.streamingMsgUI) return;
         const list = this.currentAsstMsg.toolEvents ?? [];
         const idx = list.findIndex(t => t.id === ev.id);
@@ -3548,6 +3698,7 @@ export class GlossaView extends ItemView {
       },
       onStepBoundary: async () => {
         if (!live()) return;
+        recordDiagnostic(this.session, { at: Date.now(), kind: 'step' });
         if (this.currentAsstMsg && this.streamingMsgUI) {
           this.currentAsstMsg.content = this.streamingBuf;
           this.streamingMsgUI.wrap.classList.remove('streaming');
@@ -3558,7 +3709,7 @@ export class GlossaView extends ItemView {
         // Re-check after the await — session may have switched while
         // finalizeAsstRender was awaiting (markdown/MathJax can be slow).
         if (!live()) return;
-        this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId ?? undefined };
+        this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId ?? undefined, modelSnapshot: this.currentAsstMsg?.modelSnapshot };
         this.session.messages.push(this.currentAsstMsg);
         this.streamingBuf = '';
         this.lastChunkWasTool = false;
@@ -3571,6 +3722,7 @@ export class GlossaView extends ItemView {
       onError: (err) => {
         if (!live()) return;
         loopHadError = true;
+        recordDiagnostic(this.session, { at: Date.now(), kind: 'error', code: 'RUN_FAILED' });
         this.streamingBuf += `\n\n**[error]** ${err}`;
         if (this.currentAsstMsg) this.currentAsstMsg.content = this.streamingBuf;
         this.scheduleStreamingRender();
@@ -3589,6 +3741,8 @@ export class GlossaView extends ItemView {
         }
       },
     });
+
+    if (!live()) return;
 
     // Flush + finalize — runs for ALL termination paths (success / error / abort / max-steps).
     // Strip streaming class + reasoning "streaming…" label from EVERY assistant message
@@ -3611,13 +3765,19 @@ export class GlossaView extends ItemView {
       // keeps animating forever on the dead card.
       for (const ev of (ui.msg.toolEvents ?? [])) {
         if (ev.status === 'running' || ev.status === 'pending') {
-          ev.status = 'denied';
+          ev.status = 'cancelled';
+          ev.errorCode = 'CANCELLED';
           ev.endedAt = Date.now();
           this.upsertToolEvent(ui, ev);
         }
       }
     }
     const cancelled = !!this.abortCtl?.signal.aborted;
+    this.autoContinue = !loopHadError && !cancelled;
+    if (this.session.goal?.phase === 'active' && (!this.autoContinue || this.session.goal.rounds >= this.session.goal.maxRounds)) {
+      disarmGoal(this.session); this.goalArmed = false;
+    }
+    recordDiagnostic(this.session, { at: Date.now(), kind: 'end', status: cancelled ? 'cancelled' : loopHadError ? 'error' : 'success', durationMs: Date.now() - userMsg.timestamp });
     this.closeOpenPlanItems(loopHadError || cancelled ? 'stopped' : 'completed');
     this.compactProcessForTurn(turnIdForThisRun);
 
@@ -3637,6 +3797,9 @@ export class GlossaView extends ItemView {
     if (needsTitle && text.trim()) this.session.title = text.slice(0, 60);
     await this.flushPersistNow();
     } catch (err) {
+      if (submitSessionToken !== this.sessionToken) return;
+      this.autoContinue = false; this.goalArmed = false; disarmGoal(this.session);
+      recordDiagnostic(this.session, { at: Date.now(), kind: 'error', code: 'SUBMIT_FAILED' });
       this.closeOpenPlanItems('stopped');
       // Surface the error to the user AND release the streaming lock.
       console.error('[Glossa] submit failed', err);
@@ -3663,9 +3826,10 @@ export class GlossaView extends ItemView {
       this.updateSubmitBtn();
       this.streamingMsgUI = null;
       this.currentAsstMsg = null;
+      await this.refreshEditSummaries();
     }
-    // Drop one-shot context (images, ephemeral attachments) after submit; keep pinned + current.
-    this.ctx.resetUnpinned();
+    // Consumed attachments were cleared when this turn started. Attachments
+    // added during the run belong to the user's next draft and must survive.
   }
 
   /** After streaming ends, render the final message via Obsidian (math / wikilinks / mermaid). */
@@ -3714,8 +3878,248 @@ export class GlossaView extends ItemView {
     else ui.wrap.classList.remove('has-tools');
   }
 
+  private queueComposer() {
+    const text = this.inputEl.value.trim();
+    if (!text) { this.inputEl.focus(); return; }
+    if (this.pendingComposerAttachments.size || this.ctx.list().some(item => !item.isCurrent && !item.pinned)) {
+      quickNotice(bi('The running queue accepts text. Keep these attachments for a manual send after this run.', '运行中队列仅支持文字，附件请保留到本轮结束后手动发送。')); return;
+    }
+    const kind = this.activeEndpoint()?.kind === 'custom-api' ? this.queueKind : 'followup';
+    if (!enqueueMessage(this.session, text, kind)) { quickNotice(bi('The queue is full (20 messages).', '队列已满（最多 20 条）。')); return; }
+    this.queueArmed = true;
+    this.inputEl.value = '';
+    this.recomputeInputHeight();
+    this.renderSessionControls();
+    this.persistSession();
+  }
+
+  private updateRuntimeButton() {
+    if (!this.runtimeButton) return;
+    const ep = this.activeEndpoint();
+    const cli = ep && ep.kind !== 'custom-api';
+    this.rootEl?.classList.toggle('is-cli-runtime', !!cli);
+    clear(this.runtimeButton);
+    setTrustedSvg(el('span', { className: 'nc-runtime-glyph', parent: this.runtimeButton }), cli ? CLI_TERMINAL_ICON : ICON.globe);
+    el('span', { text: cli ? 'CLI' : 'API', parent: this.runtimeButton });
+    el('span', { className: 'nc-pill-caret', text: '▾', parent: this.runtimeButton });
+    this.runtimeButton.disabled = this.streaming;
+    this.runtimeButton.title = bi('Switch between API and local CLI', '切换 API / 本机 CLI');
+    this.runtimeButton.setAttribute('aria-label', bi('Switch runtime', '切换运行方式'));
+    this.runtimeButton.setAttribute('aria-haspopup', 'listbox');
+    if (this.modelBtn) {
+      this.modelBtn.disabled = this.streaming;
+    }
+    if (this.reasoningPillEl) this.reasoningPillEl.disabled = this.streaming || !ep;
+    if (this.apiProviderButton) {
+      this.apiProviderButton.hidden = !!cli;
+      this.apiProviderButton.disabled = this.streaming;
+      clear(this.apiProviderButton);
+      const label = ep?.kind === 'custom-api' ? ep.label : bi('Provider', '模型商');
+      el('span', { className: 'nc-provider-label', text: label, parent: this.apiProviderButton });
+      el('span', { className: 'nc-pill-caret', text: '▾', parent: this.apiProviderButton });
+      this.apiProviderButton.title = bi(`API provider: ${label}`, `API 模型商：${label}`);
+      this.apiProviderButton.setAttribute('aria-label', this.apiProviderButton.title);
+      this.apiProviderButton.setAttribute('aria-haspopup', 'listbox');
+    }
+    if (!this.cliProviderButton) return;
+    this.cliProviderButton.hidden = !cli;
+    this.cliProviderButton.disabled = this.streaming;
+    clear(this.cliProviderButton);
+    if (cli) {
+      const label = CLI_PROVIDER_LABELS[ep.kind];
+      setTrustedSvg(el('span', { className: 'nc-cli-brand', parent: this.cliProviderButton }), CLI_BRAND_ICONS[ep.kind]);
+      el('span', { className: 'nc-provider-label', text: label, parent: this.cliProviderButton });
+      el('span', { className: 'nc-pill-caret', text: '▾', parent: this.cliProviderButton });
+      this.cliProviderButton.setAttribute('aria-label', bi(`CLI provider: ${label}`, `CLI 提供方：${label}`));
+      this.cliProviderButton.setAttribute('aria-haspopup', 'listbox');
+      this.cliProviderButton.title = bi(`CLI provider: ${label}`, `CLI 提供方：${label}`);
+    }
+    if (this.cliCatalogStatus) {
+      this.cliCatalogStatus.textContent = cli && this.cliCatalogRequests.has(ep.id) ? bi('Reading models…', '正在读取模型…') : cli && this.cliCatalogErrors.has(ep.id) ? bi('Models unavailable', '模型未就绪') : '';
+      this.cliCatalogStatus.title = cli ? this.cliCatalogErrors.get(ep.id) ?? '' : '';
+    }
+  }
+
+  private openRuntimeMenu() {
+    if (this.streaming) return;
+    const cli = this.activeEndpoint()?.kind !== 'custom-api' && !!this.activeEndpoint();
+    this.togglePopup(this.runtimeButton, [
+      { label: bi('API agent', 'API 助手'), iconSvg: ICON.globe, checked: !cli, onSelect: () => this.selectRuntime('custom-api') },
+      { label: bi('Local CLI', '本机 CLI'), iconSvg: CLI_TERMINAL_ICON, checked: cli, onSelect: () => {
+        const saved = this.plugin.settings.endpoints.find(ep => ep.id === this.plugin.settings.lastCliEndpointId && ep.kind !== 'custom-api');
+        return this.selectRuntime(saved?.kind ?? this.plugin.settings.endpoints.find(ep => ep.kind !== 'custom-api')?.kind ?? 'codex-cli');
+      } },
+    ]);
+  }
+
+  private openCliProviderMenu() {
+    if (this.streaming) return;
+    this.togglePopup(this.cliProviderButton, (['codex-cli', 'claude-code-cli', 'grok-cli'] as const).map(kind => ({
+      label: CLI_PROVIDER_LABELS[kind], iconSvg: CLI_BRAND_ICONS[kind],
+      trailingCheck: true,
+      checked: this.activeEndpoint()?.kind === kind, onSelect: () => this.selectRuntime(kind),
+    })));
+  }
+
+  private openApiProviderMenu() {
+    if (this.streaming) return;
+    const items: PopupItem[] = this.plugin.settings.endpoints.filter(ep => ep.kind === 'custom-api').map(endpoint => ({
+      label: endpoint.label,
+      checked: this.activeEndpoint()?.id === endpoint.id,
+      onSelect: async () => {
+        if (this.streaming || !this.plugin.settings.endpoints.includes(endpoint)) return;
+        this.plugin.settings.activeEndpointId = endpoint.id;
+        this.plugin.settings.lastApiEndpointId = endpoint.id;
+        this.session.endpointId = endpoint.id;
+        await this.plugin.saveSettings();
+        this.updateRuntimeButton(); this.updateModelBtn(); this.updateReasoningPill();
+        this.persistSession();
+      },
+    }));
+    items.push({ label: bi('Manage providers…', '管理模型商…'), alwaysVisible: true, section: bi('Manage', '管理'), onSelect: () => this.openPluginSettings() });
+    this.togglePopup(this.apiProviderButton, items, { searchPlaceholder: bi('Search providers…', '搜索模型商…'), emptyText: bi('No matching providers', '没有匹配的模型商') });
+  }
+
+  private async selectRuntime(kind: Endpoint['kind']) {
+    if (this.streaming) return;
+    const settings = this.plugin.settings, active = this.activeEndpoint();
+    const remembered = kind === 'custom-api' ? settings.lastApiEndpointId : settings.lastCliEndpointId;
+    let endpoint = settings.endpoints.find(ep => ep.kind === kind && ep.id === remembered) ?? settings.endpoints.find(ep => ep.kind === kind);
+    if (kind !== 'custom-api' && !(this.app.vault.adapter instanceof FileSystemAdapter)) { quickNotice(bi('Requires a local filesystem vault.', '需要本机文件系统库。')); return; }
+    if (!endpoint) {
+      if (kind === 'custom-api') { this.openPluginSettings(); return; }
+      endpoint = { id: uid(), kind, label: CLI_PROVIDER_LABELS[kind], cliFullAgent: true, model: '' };
+      settings.endpoints.push(endpoint);
+    }
+    if (active?.kind === 'custom-api') settings.lastApiEndpointId = active.id;
+    else if (active) settings.lastCliEndpointId = active.id;
+    for (const [id, request] of this.cliCatalogRequests) if (id !== endpoint.id) request.controller.abort();
+    settings.activeEndpointId = endpoint.id;
+    if (kind === 'custom-api') settings.lastApiEndpointId = endpoint.id;
+    else settings.lastCliEndpointId = endpoint.id;
+    this.session.endpointId = endpoint.id;
+    reconcileCliEffort(endpoint);
+    this.updateRuntimeButton(); this.updateModelBtn(); this.updateReasoningPill();
+    await this.plugin.saveSettings();
+    this.persistSession();
+    this.ensureCliCatalog();
+  }
+
+  private ensureCliCatalog() {
+    const ep = this.activeEndpoint();
+    if (ep && ep.kind !== 'custom-api' && !this.viewClosed && !this.streaming) void this.refreshCliCatalog(ep);
+  }
+
+  private refreshCliCatalog(ep: Endpoint, force = false): Promise<void> {
+    if (this.viewClosed || ep.kind === 'custom-api' || !(this.app.vault.adapter instanceof FileSystemAdapter)) return Promise.resolve();
+    const binaryPath = ep.binaryPath ?? '', proxy = effectiveProxy(ep, this.plugin.settings.globalProxy);
+    const signature = `${binaryPath}\n${proxy ?? ''}`;
+    const pending = this.cliCatalogRequests.get(ep.id);
+    if (pending && !pending.controller.signal.aborted && pending.signature === signature) return pending.promise;
+    pending?.controller.abort();
+    const attemptKey = `${ep.id}\n${signature}`;
+    if (!force && ep.cliModels?.length && ep.cliModelsBinaryPath === binaryPath && Date.now() - (ep.cliModelsUpdatedAt ?? 0) < 10 * 60_000) return Promise.resolve();
+    if (!force && Date.now() - (this.cliCatalogAttempts.get(attemptKey) ?? 0) < 60_000) return Promise.resolve();
+    const controller = new AbortController(), cwd = this.app.vault.adapter.getBasePath();
+    this.cliCatalogAttempts.set(attemptKey, Date.now());
+    this.cliCatalogErrors.delete(ep.id);
+    const promise = (async () => {
+      try {
+        const { discoverLocalCliModels } = await import('../providers/local_cli');
+        const models = await discoverLocalCliModels({ ...ep }, cwd, proxy, controller.signal);
+        if (controller.signal.aborted || this.viewClosed || (ep.binaryPath ?? '') !== binaryPath || !this.plugin.settings.endpoints.includes(ep)) return;
+        ep.cliModels = models; ep.cliModelsUpdatedAt = Date.now(); ep.cliModelsBinaryPath = binaryPath;
+        if (!this.streaming) reconcileCliEffort(ep);
+        await this.plugin.saveSettings();
+      } catch (error) {
+        if (!controller.signal.aborted && !this.viewClosed) {
+          const detail = error instanceof Error ? error.message.slice(0, 300) : '';
+          const message = bi('Could not read CLI models. Check installation, login and proxy; use Refresh models to retry.', '无法读取 CLI 模型。请检查安装、登录和代理，再点击“刷新模型列表”重试。') + (detail ? `\n${detail}` : '');
+          this.cliCatalogErrors.set(ep.id, message);
+          if (force) quickNotice(message, 6000);
+        }
+      } finally {
+        if (this.cliCatalogRequests.get(ep.id)?.controller === controller) this.cliCatalogRequests.delete(ep.id);
+        if (!this.viewClosed) {
+          this.updateRuntimeButton(); this.updateModelBtn(); this.updateReasoningPill();
+          if (!this.streaming && this.activeEndpoint() === ep && this.popup.isOpen() && this.popup.currentAnchor() === this.modelBtn) this.showCliModelMenu(ep);
+        }
+      }
+    })();
+    this.cliCatalogRequests.set(ep.id, { controller, promise, signature });
+    this.updateRuntimeButton();
+    return promise;
+  }
+
+  private openCliModelMenu(ep: Endpoint) {
+    if (this.popup.isOpen() && this.popup.currentAnchor() === this.modelBtn) { this.popup.hide(); return; }
+    this.showCliModelMenu(ep);
+    void this.refreshCliCatalog(ep);
+  }
+
+  private showCliModelMenu(ep: Endpoint) {
+    const items = cliModelItems(ep, async model => {
+      if (this.streaming || this.activeEndpoint() !== ep) return;
+      ep.model = model; reconcileCliEffort(ep);
+      await this.plugin.saveSettings();
+      this.updateModelBtn(); this.updateReasoningPill();
+    });
+    items.push({ label: bi('Refresh models', '刷新模型列表'), iconSvg: ICON.refresh, section: bi('Manage', '管理'), alwaysVisible: true,
+      hint: this.cliCatalogRequests.has(ep.id) ? bi('Reading…', '读取中…') : this.cliCatalogErrors.has(ep.id) ? bi('Retry', '重试') : undefined,
+      onSelect: async () => { if (!this.streaming) { await this.refreshCliCatalog(ep, true); if (!this.viewClosed && !this.streaming && this.activeEndpoint() === ep && !this.popup.isOpen()) this.showCliModelMenu(ep); } },
+    });
+    items.push({ label: bi('CLI settings…', 'CLI 设置…'), section: bi('Manage', '管理'), alwaysVisible: true, onSelect: () => this.openPluginSettings() });
+    this.popup.show(this.modelBtn, items, modelPickerOptions());
+  }
+
+  private renderSessionControls() {
+    if (!this.sessionControlsEl) return;
+    this.rootEl?.classList.toggle('has-task', !!this.session.goal);
+    renderSessionControls(this.sessionControlsEl, this.session, {
+      busy: this.streaming || this.submitInFlight,
+      pause: () => this.cancelStream(),
+      resume: () => {
+        const ep = this.activeEndpoint();
+        if (ep?.kind !== 'custom-api' || ep.useObsidianFetch) {
+          quickNotice(bi('Persistent tasks require an API endpoint with tools enabled.', '持续任务需要启用工具调用的 API 接入。')); return;
+        }
+        const goal = this.session.goal;
+        if (!goal || goal.rounds >= goal.maxRounds) return;
+        this.goalArmed = true;
+        goal.phase = 'active'; goal.blocker = undefined;
+        this.renderSessionControls(); this.persistSession();
+        void this.submit(goalPrompt(goal));
+      },
+      removeGoal: () => { this.goalArmed = false; delete this.session.goal; this.renderSessionControls(); this.persistSession(); },
+      removeMessage: id => { this.session.inbox = this.session.inbox?.filter(item => item.id !== id); this.renderSessionControls(); this.persistSession(); },
+      editMessage: (id, text) => { const item = this.session.inbox?.find(m => m.id === id); if (item) item.text = text; this.renderSessionControls(); this.persistSession(); },
+      sendMessage: item => { this.queueArmed = true; void this.submit(item.text, item.id); },
+    });
+  }
+
+  private recordPruning(ids: string[]) {
+    this.session.prunedToolCallIds = [...new Set([...(this.session.prunedToolCallIds ?? []), ...ids])].slice(-4000);
+    recordDiagnostic(this.session, { at: Date.now(), kind: 'prune', count: ids.length });
+    this.persistSession();
+  }
+
+  private downloadDiagnostics() {
+    const document = this.rootEl.ownerDocument;
+    const url = URL.createObjectURL(new Blob([exportDiagnostics(this.session, this.plugin.manifest.version)], { type: 'application/json' }));
+    const link = document.win.createEl('a');
+    link.href = url; link.download = `glossa-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link); link.click(); link.remove();
+    document.defaultView?.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   private cancelStream() {
+    this.queueArmed = false;
+    this.goalArmed = false;
+    this.autoContinue = false;
+    disarmGoal(this.session);
     this.abortCtl?.abort();
+    this.renderSessionControls();
+    this.persistSession();
   }
 
   /** Mirrors upstream Claude Code's two-zone system prompt:
@@ -3857,6 +4261,7 @@ export class GlossaView extends ItemView {
     // dropped by the gates in submit() / on* callbacks.
     this.sessionToken++;
     this.session = this.newSession();
+    this.goalArmed = false; this.queueArmed = false; this.renderSessionControls();
     this.historyWindow = latestHistoryWindow(this.session.messages);
     this.pendingRegeneratePrompt = null;
     this.recentVisualContext = null;
@@ -3885,6 +4290,8 @@ export class GlossaView extends ItemView {
     // next line and corrupt the loaded session.)
     this.sessionToken++;
     this.session = s;
+    disarmGoal(this.session);
+    this.goalArmed = false; this.queueArmed = false; this.renderSessionControls();
     this.historyWindow = latestHistoryWindow(this.session.messages);
     this.pendingRegeneratePrompt = null;
     this.recentVisualContext = null;
@@ -3906,6 +4313,7 @@ export class GlossaView extends ItemView {
    *  immediate write at terminal points (stream end, view close, snapshot). */
   private _persistTimer: AnyValue = null;
   private sessionHasMeaningfulContent(session: ChatSession): boolean {
+    if (session.goal || session.inbox?.length) return true;
     return (session.messages ?? []).some(m =>
       (m.content ?? '').trim().length > 0 ||
       (m.displayContent ?? '').trim().length > 0 ||
@@ -4115,4 +4523,3 @@ function pillIcon(it: ContextItem): string {
     default:           return ICON.file;
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

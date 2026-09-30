@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- PDF.js is a dynamic host boundary validated before use. */
 import { loadPdfJs, type App, type TFile } from 'obsidian';
 import {
   awaitWithAbortSignal,
@@ -108,4 +107,3 @@ function clamp(value: number, min: number, max: number): number {
 async function yieldToMain(): Promise<void> {
   await new Promise<void>(resolve => window.setTimeout(resolve, 0));
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after PDF.js boundary. */

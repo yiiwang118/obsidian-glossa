@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * templater_render — bridge to the Templater plugin.
  *
@@ -110,4 +109,3 @@ export const templaterRender: ToolImpl = buildTool({
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

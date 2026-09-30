@@ -29,6 +29,14 @@ exports.run = async function run(t, loadModule) {
     t.eq(body.reasoning_effort, effort, `${effort} reaches the OpenAI-compatible request body`);
   }
 
+  const manual = new customApi.CustomApiProvider({ ...endpoint, reasoningEffort: 'off', customReasoningEffort: 'deep' });
+  const manualBody = {}; manual.applyOpenAIReasoning(manualBody);
+  t.eq(manualBody.reasoning_effort, 'deep', 'manual effort reaches OpenAI-compatible request unchanged');
+  const anthropicBody = {}; manual.applyAnthropicThinking(anthropicBody);
+  t.eq(anthropicBody.output_config.effort, 'deep', 'manual Anthropic effort is an explicit output parameter');
+  t.eq(types.customEffortValue(' high '), 'high', 'manual effort trims surrounding whitespace');
+  t.eq(types.customEffortValue(''), undefined, 'empty manual effort restores default');
+  t.throws(()=>types.customEffortValue('high\\n--evil'), 'manual effort rejects control characters and flags');
   const offProvider = new customApi.CustomApiProvider({ ...endpoint, reasoningEffort: 'off' });
   const offBody = {};
   offProvider.applyOpenAIReasoning(offBody);

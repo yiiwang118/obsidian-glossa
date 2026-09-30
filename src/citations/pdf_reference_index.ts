@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, TFile, loadPdfJs } from 'obsidian';
 import { textItemsToString } from '../utils/pdf';
 
@@ -572,4 +571,3 @@ const STOP_WORDS = new Set([
   'references',
   'bibliography',
 ]);
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Re-enable review lint rules after dynamic boundary module. */

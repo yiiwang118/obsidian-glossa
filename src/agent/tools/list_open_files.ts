@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * list_open_files — enumerate every currently-open editor tab + its cursor.
  *
@@ -84,4 +83,3 @@ export const listOpenFiles: ToolImpl = buildTool({
     return [`${out.length} tab${out.length === 1 ? '' : 's'} open (★ = focused):`, ...lines].join('\n');
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

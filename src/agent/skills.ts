@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * Skills system — vault-stored prompt skills the model can discover and invoke.
  * Mirrors upstream Claude Code's SkillTool. Each skill lives at
@@ -11,11 +10,14 @@
  */
 import type { App } from 'obsidian';
 import { TFile as TFileCls, TFolder } from 'obsidian';
+import { loadLearnedSkills } from './learning_store';
 
-/** Source of a skill — drives precedence (managed > user > project > legacy > bundled). */
-export type SkillSource = 'project' | 'project-nested' | 'legacy' | 'user' | 'bundled';
+/** Source of a skill; learned entries never shadow a manually authored or built-in skill. */
+export type SkillSource = 'project' | 'project-nested' | 'legacy' | 'user' | 'bundled' | 'learned';
 
 export interface Skill {
+  /** Immutable revision of an explicitly enabled learned skill. */
+  learningVersion?: string;
   /** Folder name (kebab-case, no spaces). */
   name: string;
   /** Human title (frontmatter `title:`) — falls back to folder name. */
@@ -448,13 +450,15 @@ export function clearNestedSkillDirs(): void {
  *  vault API doesn't expose realpath, so we use `(path, sizeHint)` — for
  *  bundled skills the virtual path is unique enough. */
 function skillIdentity(s: Skill): string {
+  if (s.source === 'learned') return `${s.source}:${s.path}:${s.name}`;
   return `${s.source}:${s.path}`;
 }
 
 // ── Multi-source discovery + precedence ────────────────────────────────────
 /** Source precedence (highest wins on folder-name collision):
- *  project (.glossa/skills) > project-nested > legacy (.note-codex/skills) > user > bundled */
+ *  project (.glossa/skills) > project-nested > legacy (.note-codex/skills) > user > bundled > learned */
 const SOURCE_PRIORITY: Record<SkillSource, number> = {
+  learned: 0,
   project: 5,
   'project-nested': 4,
   legacy: 3,
@@ -472,7 +476,7 @@ const SOURCE_PRIORITY: Record<SkillSource, number> = {
 //   - any vault.modify event on a SKILL.md path
 //   - nested skill dir discovery
 const DISCOVER_TTL_MS = 2500;
-let discoverCache: { skills: Skill[]; expiresAt: number } | null = null;
+let discoverCache: { app: App; skills: Skill[]; expiresAt: number } | null = null;
 
 /** Drop the discoverSkills cache. Called by the bundled-skill register/clear
  *  helpers and by main.ts when a SKILL.md is modified. */
@@ -498,14 +502,18 @@ export async function discoverSkills(app: App): Promise<Skill[]> {
   // otherwise repeat it 5-10x. Invalidation is signal-driven (see
   // invalidateDiscoverCache).
   const now = Date.now();
-  if (discoverCache && discoverCache.expiresAt > now) {
+  if (discoverCache?.app === app && discoverCache.expiresAt > now) {
     return discoverCache.skills;
   }
   // Load from all disk sources in parallel — they're independent.
-  const [projectSkills, legacySkills, nestedSkills] = await Promise.all([
+  const [projectSkills, legacySkills, nestedSkills, learnedSkills] = await Promise.all([
     loadSkillsFromRoot(app, PROJECT_SKILL_ROOTS[0].root, 'project'),
     loadSkillsFromRoot(app, PROJECT_SKILL_ROOTS[1].root, 'legacy'),
     loadNestedSkills(app, nestedSkillDirs),
+    loadLearnedSkills(app.vault.adapter).catch(error => {
+      console.warn('[Glossa] learned skills unavailable', error);
+      return [];
+    }),
   ]);
 
   // Combine sources in priority order so that on name-collision, higher
@@ -513,6 +521,7 @@ export async function discoverSkills(app: App): Promise<Skill[]> {
   const all: Skill[] = [
     ...projectSkills,
     ...nestedSkills,
+    ...learnedSkills,
     ...legacySkills,
     ...getBundledSkills(),
   ];
@@ -536,7 +545,7 @@ export async function discoverSkills(app: App): Promise<Skill[]> {
 
   const out = Array.from(byIdentity.values());
   out.sort((a, b) => a.name.localeCompare(b.name));
-  discoverCache = { skills: out, expiresAt: now + DISCOVER_TTL_MS };
+  discoverCache = { app, skills: out, expiresAt: now + DISCOVER_TTL_MS };
   return out;
 }
 
@@ -545,4 +554,3 @@ export async function getSkill(app: App, name: string): Promise<Skill | null> {
   const all = await discoverSkills(app);
   return all.find(s => s.name === name) ?? null;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment -- Re-enable review lint rules after dynamic boundary module. */

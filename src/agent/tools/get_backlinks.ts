@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * get_backlinks — list every note that links INTO the given path.
  *
@@ -160,4 +159,3 @@ export const getBacklinks: ToolImpl = buildTool({
     return lines.join('\n');
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

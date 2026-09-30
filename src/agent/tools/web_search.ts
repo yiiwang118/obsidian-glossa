@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { requestUrl } from 'obsidian';
 import { buildTool, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects } from '../../utils/safe_web';
@@ -699,4 +698,3 @@ function decodeXml(text: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'");
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

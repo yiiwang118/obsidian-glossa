@@ -1,9 +1,9 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
 import type { ButtonComponent, SettingDefinitionItem } from 'obsidian';
 import type GlossaPlugin from './main';
 import type { Endpoint, CustomPrompt, SlashCommand, SelectionTranslateMode } from './types';
 import { reasoningOptionsForEndpoint } from './types';
+import { openEffortModal } from './ui/effort_modal';
 import { uid, setStyle, setTrustedSvg } from './utils/dom';
 import { CustomApiProvider } from './providers/custom_api';
 import { customApiUrl, parseExtraBody } from './providers/custom_api_config';
@@ -59,12 +59,6 @@ function parseClampedInt(value: string, fallback: number, min: number, max: numb
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
-}
-
-function parseNonNegativeFloat(value: string, fallback = 0): number {
-  const parsed = Number.parseFloat(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(0, parsed);
 }
 
 interface AlignedSelectOption<T extends string> {
@@ -159,57 +153,6 @@ const PRESETS: Preset[] = [
   { name: 'DeepInfra', color: '#9d50ff', baseUrl: 'https://api.deepinfra.com/v1/openai',                   defaultModel: 'Qwen/Qwen2.5-72B-Instruct', apiStyle: 'openai' },
   { name: 'SiliconFlow', color: '#00b96b', baseUrl: 'https://api.siliconflow.cn/v1',                       defaultModel: 'deepseek-ai/DeepSeek-V2.5', apiStyle: 'openai' },
 ];
-
-function renderWarningHint(parent: HTMLElement, text: string) {
-  const hint = parent.createDiv({ cls: 'nc-info-hint nc-warning-hint' });
-  hint.createEl('strong', { text: bi('Warning', '警告') });
-  hint.appendText(` — ${text}`);
-  return hint;
-}
-
-function configOverrideValue(overrides: string | undefined, key: string): string | null {
-  const rx = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*["']?([^"']+)["']?$`);
-  for (const line of (overrides ?? '').split('\n')) {
-    const m = line.trim().match(rx);
-    if (m) return m[1].trim();
-  }
-  return null;
-}
-
-function codexSafetyWarning(ep: Endpoint): string | null {
-  if (ep.kind !== 'codex-cli') return null;
-  const overrideSandbox = configOverrideValue(ep.codexConfigOverrides, 'sandbox_mode') as Endpoint['codexSandboxMode'] | null;
-  const overrideApproval = configOverrideValue(ep.codexConfigOverrides, 'approval_policy') as Endpoint['codexApprovalPolicy'] | null;
-  const sandbox = overrideSandbox ?? ep.codexSandboxMode ?? 'read-only';
-  const approval = overrideApproval ?? ep.codexApprovalPolicy ?? (sandbox === 'read-only' ? 'never' : 'on-request');
-  const warnings: string[] = [];
-
-  if (overrideSandbox || overrideApproval) {
-    warnings.push('free-form config overrides can bypass Glossa safety defaults');
-  }
-  if (sandbox === 'danger-full-access') {
-    warnings.push('danger-full-access lets Codex access files outside the vault and run unrestricted commands');
-  } else if (sandbox === 'workspace-write') {
-    warnings.push('workspace-write lets Codex modify files in its working directory');
-  }
-  if ((sandbox === 'workspace-write' || sandbox === 'danger-full-access') && approval === 'never') {
-    warnings.push('approval_policy=never means Codex-side approval prompts may be auto-approved');
-  }
-  if (!ep.cliFullAgent && sandbox !== 'read-only') {
-    warnings.push('non-agent Codex chat should stay read-only; override sandbox only if you understand the local side effects');
-  }
-  return warnings.length ? warnings.join('; ') + '.' : null;
-}
-
-function localCliWarning(kind: Endpoint['kind']): string | null {
-  if (kind === 'codex-cli') {
-    return 'This endpoint spawns the local codex binary and may inherit shell proxy/API-key environment. Keep sandbox read-only unless you intentionally want local file access.';
-  }
-  if (kind === 'claude-code-cli') {
-    return 'This endpoint spawns the local claude binary. Full-agent options, extra directories, MCP config, or allowed tools can let that process read or modify local files.';
-  }
-  return null;
-}
 
 /* ============================================================
    Settings tab
@@ -641,6 +584,7 @@ export class GlossaSettingTab extends PluginSettingTab {
   }
 
   private skillSourceLabel(source: Skill['source']): string {
+    if (source === 'learned') return bi('Learned', '学习所得');
     if (source === 'bundled') return bi('Built in', '内置');
     if (source === 'project') return bi('Vault', 'Vault');
     if (source === 'project-nested') return bi('Project', '项目');
@@ -826,7 +770,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       .setName(bi('Download folder', '下载目录'))
       .setDesc(bi('Default vault folder for download_file when no path is given.', 'download_file 没指定路径时的默认 vault 目录。'))
       .addText(t => t
-        .setPlaceholder('Downloads/Glossa')
+        .setPlaceholder(bi('Vault-relative folder', '仓库内相对目录'))
         .setValue(this.plugin.settings.webDefaultDownloadFolder)
         .onChange(async v => {
           this.plugin.settings.webDefaultDownloadFolder = v.trim() || 'Downloads/Glossa';
@@ -1514,10 +1458,6 @@ export class GlossaSettingTab extends PluginSettingTab {
       this.refresh();
     };
 
-    const cliWarn = localCliWarning(ep.kind);
-    if (cliWarn) renderWarningHint(card, cliWarn);
-    const codexWarn = codexSafetyWarning(ep);
-    if (codexWarn) renderWarningHint(card, codexWarn);
 
     const basic = card.createDiv({ cls: 'nc-endpoint-basic' });
     const advanced = this.createSettingsGroup(
@@ -1530,12 +1470,6 @@ export class GlossaSettingTab extends PluginSettingTab {
       .setName(bi('Display name', '显示名称'))
       .setDesc(bi('The name shown in the model picker.', '显示在模型选择器中的名称。'))
       .addText(t => t.setValue(ep.label).onChange(async v => { ep.label = v; await this.plugin.saveSettings(); }));
-
-    if (ep.kind !== 'custom-api') {
-      new Setting(basic)
-        .setName(bi('Unavailable in community build', '社区审核版不可用'))
-        .setDesc(bi('Local CLI providers are disabled in this release package. Create a Custom API endpoint instead.', '此发布包已禁用本地 CLI provider。请改用 Custom API endpoint。'));
-    }
 
     if (ep.kind === 'custom-api') {
       let requestUrlSetting: Setting | undefined;
@@ -1656,179 +1590,25 @@ export class GlossaSettingTab extends PluginSettingTab {
       });
     }
 
-    if (ep.kind === 'codex-cli' || ep.kind === 'claude-code-cli') {
-      new Setting(basic).setName(t('cli_binary_path')).setDesc(t('cli_binary_path_desc'))
-        .addText(tx => tx.setValue(ep.binaryPath ?? '').onChange(async v => { ep.binaryPath = v; await this.plugin.saveSettings(); }))
-        .addButton(b => b.setButtonText('Auto').onClick(async () => {
-          new Notice(bi('Local CLI providers are disabled in the community review build.', '社区审核版已禁用本地 CLI provider。'));
+    if (ep.kind !== 'custom-api') {
+      new Setting(basic).setName(bi('Executable path', '可执行文件路径'))
+        .setDesc(bi('Leave empty to detect an installed CLI. Sign in using its terminal command first.', '留空自动检测已安装的 CLI。请先在终端完成该 CLI 的登录。'))
+        .addText(tx => tx.setValue(ep.binaryPath ?? '').onChange(async value => { ep.binaryPath = value.trim(); await this.plugin.saveSettings(); }))
+        .addButton(button => button.setButtonText(bi('Detect', '检测')).onClick(async () => {
+          button.setDisabled(true);
+          try {
+            const { findLocalCli } = await import('./providers/local_cli');
+            const found = await findLocalCli(ep.kind, ep.binaryPath);
+            new Notice(found ? bi(`CLI found: ${found}`, `已检测到 CLI：${found}`) : bi('CLI not found. Set the full executable path.', '未找到 CLI，请填写完整可执行文件路径。'));
+          } finally { button.setDisabled(false); }
         }));
-      new Setting(basic).setName(t('cli_default_model'))
-        .setDesc(t('cli_default_model_desc'))
-        .addText(tx => tx.setValue(ep.model ?? '').onChange(async v => { ep.model = v; await this.plugin.saveSettings(); }));
-      const cliReasoningSetting = new Setting(basic)
-        .setName(t('reasoning_effort'))
-        .setDesc(t('reasoning_effort_desc_cli'));
-      const cliReasoningOptions = reasoningOptionsForEndpoint(ep);
-      createAlignedSelect(
-        cliReasoningSetting.controlEl,
-        this.selectPopup,
-        cliReasoningOptions.map(value => ({ value, label: t(`effort_${value}`) })),
-        cliReasoningOptions.includes(ep.reasoningEffort ?? 'off') ? (ep.reasoningEffort ?? 'off') : 'off',
-        async value => {
-          ep.reasoningEffort = value;
-          await this.plugin.saveSettings();
-        },
-        t('reasoning_effort'),
-      );
-      new Setting(basic).setName(t('cli_working_dir')).setDesc(t('cli_working_dir_desc'))
-        .addText(t => t.setValue(ep.cwd ?? '').onChange(async v => { ep.cwd = v; await this.plugin.saveSettings(); }))
-        .addButton(b => b.setButtonText('Use vault').onClick(async () => {
-          const vaultPath = (this.app.vault.adapter as AnyValue).basePath;
-          if (vaultPath) { ep.cwd = vaultPath; await this.plugin.saveSettings(); this.refresh(); new Notice('Set to vault root.'); }
-        }));
-
-      new Setting(basic).setName(t('cli_full_agent'))
-        .setDesc(t('cli_full_agent_desc'))
-        .addToggle(tg => tg.setValue(!!ep.cliFullAgent).onChange(async v => { ep.cliFullAgent = v; await this.plugin.saveSettings(); this.refresh(); }));
-
-      if (ep.kind === 'codex-cli') {
-        const appServerActive = ep.codexUseAppServer !== false;
-        // Banner reflecting the active mode. With app-server (default), tokens
-        // truly stream — same protocol codex's native TUI uses. Legacy `codex exec`
-        // mode arrives in chunks at completion.
-        const hint = advanced.createDiv({ cls: 'nc-info-hint' });
-        hint.createEl('strong', { text: appServerActive ? bi('app-server ✓', 'app-server ✓') : bi('legacy exec', 'legacy exec') });
-        hint.appendText(appServerActive
-          ? bi(' — token-level streaming.', ' — token 级流式。')
-          : bi(' — completion only, no token stream.', ' — 整段返回，无 token 流。'));
-
-        new Setting(advanced)
-          .setName(bi('app-server protocol', 'app-server 协议'))
-          .setDesc(bi('Off = fall back to legacy exec.', '关闭则用 legacy exec。'))
-          .addToggle(tg => tg.setValue(ep.codexUseAppServer !== false).onChange(async v => {
-            ep.codexUseAppServer = v;
-            await this.plugin.saveSettings();
-            this.refresh();
-          }));
-
-        const sandboxSetting = new Setting(advanced)
-          .setName(t('codex_sandbox'))
-          .setDesc(t('codex_sandbox_desc'));
-        createAlignedSelect(
-          sandboxSetting.controlEl,
-          this.selectPopup,
-          [
-            { value: '', label: bi('Default', '默认') },
-            { value: 'read-only', label: bi('Read only', '只读') },
-            { value: 'workspace-write', label: bi('Workspace write', '工作区可写') },
-            { value: 'danger-full-access', label: bi('Danger full access', '完全访问'), hint: bi('High risk', '高风险') },
-          ] as const,
-          ep.codexSandboxMode ?? '',
-          async value => {
-            ep.codexSandboxMode = value || undefined;
-            await this.plugin.saveSettings();
-            const warn = codexSafetyWarning(ep);
-            if (warn) new Notice(`Warning: ${warn}`, 10000);
-            this.refresh();
-          },
-          t('codex_sandbox'),
-        );
-        const approvalSetting = new Setting(advanced)
-          .setName(t('codex_approval'))
-          .setDesc(t('codex_approval_desc'));
-        createAlignedSelect(
-          approvalSetting.controlEl,
-          this.selectPopup,
-          [
-            { value: '', label: bi('Default', '默认') },
-            { value: 'untrusted', label: 'Untrusted' },
-            { value: 'on-failure', label: 'On failure' },
-            { value: 'on-request', label: 'On request' },
-            { value: 'never', label: 'Never', hint: bi('High risk', '高风险') },
-          ] as const,
-          ep.codexApprovalPolicy ?? '',
-          async value => {
-            ep.codexApprovalPolicy = value || undefined;
-            await this.plugin.saveSettings();
-            const warn = codexSafetyWarning(ep);
-            if (warn) new Notice(`Warning: ${warn}`, 10000);
-            this.refresh();
-          },
-          t('codex_approval'),
-        );
-        new Setting(advanced).setName(t('codex_use_oss'))
-          .addToggle(tg => tg.setValue(!!ep.codexUseOss).onChange(async v => { ep.codexUseOss = v; await this.plugin.saveSettings(); }));
-        new Setting(advanced).setName(t('codex_config_overrides'))
-          .setDesc(t('codex_config_overrides_desc'))
-          .addTextArea(tx => { tx.inputEl.rows = 4; tx.setValue(ep.codexConfigOverrides ?? '').onChange(async v => { ep.codexConfigOverrides = v; await this.plugin.saveSettings(); }); });
-        new Setting(advanced).setName(bi('Diagnose', '诊断'))
-          .setDesc(bi('"say pong" probe + event log.', '"say pong" 探测 + 事件日志。'))
-          .addButton(b => b.setButtonText(bi('🔬 Run', '🔬 运行')).onClick(async () => {
-            b.setButtonText('Running…').setDisabled(true);
-            try {
-              const epDec = await this.plugin.getDecryptedEndpoint(ep);
-              if (!epDec) { new Notice('Endpoint locked.'); return; }
-              const provider: AnyValue = await this.buildProviderFor(epDec);
-              if (!provider?.runDiagnostic) { new Notice('Diagnostic not supported for this provider.'); return; }
-              // Track progress for the user — update button text as events arrive
-              let lastEvent = '';
-              const result = await provider.runDiagnostic({
-                timeoutMs: 60_000,
-                onEvent: (line: string) => {
-                  try {
-                    const ev = JSON.parse(line);
-                    const t = ev?.item?.type ? `${ev.type}·${ev.item.type}` : (ev.type ?? 'event');
-                    if (t !== lastEvent) { lastEvent = t; b.setButtonText(`… ${t}`); }
-                  } catch { /* ignore */ }
-                },
-              });
-              new CodexDiagnosticModal(this.plugin.app, result).open();
-            } catch (e) {
-              new Notice(bi(`Diagnostic failed: ${e.message}`, `诊断失败：${e.message}`), 8000);
-            } finally {
-              b.setButtonText(bi('🔬 Run', '🔬 运行')).setDisabled(false);
-            }
-          }));
-      }
-
-      if (ep.kind === 'claude-code-cli') {
-        new Setting(advanced).setName(t('claude_bare'))
-          .setDesc(t('claude_bare_desc'))
-          .addToggle(tg => tg.setValue(ep.bareMode ?? !ep.cliFullAgent).onChange(async v => { ep.bareMode = v; await this.plugin.saveSettings(); }));
-        new Setting(advanced).setName(t('claude_max_turns'))
-          .setDesc(t('claude_max_turns_desc'))
-          .addText(tx => tx.setValue(String(ep.maxTurns ?? 1)).onChange(async v => {
-            ep.maxTurns = parseClampedInt(v, 1, 1, 25);
-            await this.plugin.saveSettings();
-          }));
-        new Setting(advanced).setName(bi('Allowed tools', '允许工具'))
-          .setDesc(bi('--allowedTools, space-separated.', '--allowedTools，空格分隔。'))
-          .addText(t => t.setValue(ep.claudeAllowedTools ?? '').onChange(async v => { ep.claudeAllowedTools = v; await this.plugin.saveSettings(); }));
-        new Setting(advanced).setName(bi('Disallowed tools', '禁用工具'))
-          .setDesc('CLI flag for disallowed tools.')
-          .addText(t => t.setValue(ep.claudeDisallowedTools ?? '').onChange(async v => { ep.claudeDisallowedTools = v; await this.plugin.saveSettings(); }));
-        new Setting(advanced).setName(bi('Extra dirs', '额外目录'))
-          .setDesc(bi('--add-dir, one per line.', '--add-dir，一行一个。'))
-          .addTextArea(t => { t.inputEl.rows = 3; t.setValue(ep.claudeAddDirs ?? '').onChange(async v => { ep.claudeAddDirs = v; await this.plugin.saveSettings(); }); });
-        new Setting(advanced).setName(bi('MCP config', 'MCP 配置'))
-          .setDesc('--mcp-config')
-          .addText(t => t.setValue(ep.claudeMcpConfig ?? '').onChange(async v => { ep.claudeMcpConfig = v; await this.plugin.saveSettings(); }));
-        new Setting(advanced).setName(bi('Budget (USD)', '预算 (USD)'))
-          .setDesc(bi('--max-budget-usd. 0 = no cap.', '--max-budget-usd。0 = 不限。'))
-          .addText(t => t.setValue(String(ep.claudeMaxBudgetUSD ?? '')).onChange(async v => { ep.claudeMaxBudgetUSD = parseNonNegativeFloat(v); await this.plugin.saveSettings(); }));
-        new Setting(advanced).setName(bi('Fallback model', '备用模型'))
-          .setDesc('--fallback-model')
-          .addText(t => t.setValue(ep.claudeFallbackModel ?? '').onChange(async v => { ep.claudeFallbackModel = v; await this.plugin.saveSettings(); }));
-      }
-
-      new Setting(advanced).setName(bi('Extra args', '额外参数'))
-        .setDesc(bi('One per line.', '一行一个。'))
-        .addTextArea(t => t.setValue((ep.cliExtraArgs ?? []).join('\n'))
-          .onChange(async v => { ep.cliExtraArgs = v.split('\n').map(s => s.trim()).filter(Boolean); await this.plugin.saveSettings(); }));
-
-      new Setting(advanced).setName(bi('Debug', '调试'))
-        .setDesc(bi('Log spawn + events to devtools.', '把 spawn + 事件打到 devtools。'))
-        .addToggle(tg => tg.setValue(!!ep.cliDebug).onChange(async v => { ep.cliDebug = v; await this.plugin.saveSettings(); }));
+      new Setting(basic).setName(bi('Model', '模型'))
+        .setDesc(bi('Leave empty to use the model configured in the CLI.', '留空使用 CLI 自身配置的模型。'))
+        .addText(tx => tx.setValue(ep.model ?? '').onChange(async value => { ep.model = value.trim(); await this.plugin.saveSettings(); }));
+      new Setting(advanced).setName(bi('Local execution', '本机执行'))
+        .setDesc(bi('Uses your existing CLI login and the current vault as its working directory. Plan is read-only; Act allows vault writes when the permission selector permits them. No permission bypass. CLI changes do not have Glossa undo checkpoints.', '复用 CLI 已有登录，以当前库作为工作目录。Plan 只读；Act 按权限选择器允许库内修改。不绕过 CLI 权限。CLI 修改不提供 Glossa 撤销检查点。'));
+      if (ep.kind === 'claude-code-cli') new Setting(advanced).setName(bi('Claude Code compatibility', 'Claude Code 兼容性'))
+        .setDesc(bi('Requires a version supporting restricted mode. Uses Read, Glob, Grep and, in Act, Edit and Write. Shell tools and external MCP servers are disabled.', '需要支持 restricted 模式的新版 Claude Code。使用读取与搜索工具，Act 额外启用 Edit、Write；关闭 Shell 工具及外部 MCP 服务。'));
     }
 
     // Custom API: offer requestUrl fallback for proxy support
@@ -1840,7 +1620,7 @@ export class GlossaSettingTab extends PluginSettingTab {
 
     // Proxy override — only meaningful for CLI providers (HTTPS_PROXY env var) OR
     // custom-api when requestUrl is used (system proxy follows). Hide otherwise.
-    const proxyApplies = ep.kind === 'codex-cli' || ep.kind === 'claude-code-cli' || ep.useObsidianFetch;
+    const proxyApplies = ep.kind !== 'custom-api' || ep.useObsidianFetch;
     if (proxyApplies) {
       const proxyModeSetting = new Setting(advanced).setName(bi('Proxy mode', '代理模式'))
         .setDesc(ep.kind === 'custom-api'
@@ -1921,10 +1701,19 @@ export class GlossaSettingTab extends PluginSettingTab {
       reasoningOptions.includes(ep.reasoningEffort ?? 'off') ? (ep.reasoningEffort ?? 'off') : 'off',
       async value => {
         ep.reasoningEffort = value;
+        delete ep.customReasoningEffort;
         await this.plugin.saveSettings();
       },
       t('reasoning_effort'),
     );
+    reasoningSetting.addButton(button => button.setButtonText(ep.customReasoningEffort || bi('Custom…', '自定义…')).onClick(() => {
+      openEffortModal(this.app, ep, async value => {
+        ep.customReasoningEffort = value;
+        if (!value) ep.reasoningEffort = 'off';
+        await this.plugin.saveSettings();
+        button.setButtonText(value || bi('Custom…', '自定义…'));
+      });
+    }));
   }
 
   private renderSlashCmd(parent: HTMLElement, c: SlashCommand) {
@@ -2188,10 +1977,6 @@ class AddEndpointModal extends Modal {
       apiKey: '',          // populated by storeApiKey() in caller
       proxyMode: 'global',
     };
-    if (ep.kind === 'claude-code-cli' && !ep.maxTurns) ep.maxTurns = 1;
-    if (ep.kind === 'claude-code-cli' && ep.bareMode == null) ep.bareMode = true;
-    const warn = localCliWarning(ep.kind) ?? codexSafetyWarning(ep);
-    if (warn) new Notice(`Warning: ${warn}`, 10000);
     void this.onSave(ep, this.plainKey);
     this.close();
   }
@@ -2212,102 +1997,3 @@ class AddEndpointModal extends Modal {
 /* ============================================================
    Codex diagnostic modal — full transcript of the test run
    ============================================================ */
-class CodexDiagnosticModal extends Modal {
-  constructor(app: App, private result: AnyValue) { super(app); }
-
-  onOpen() {
-    const { contentEl, modalEl } = this;
-    modalEl.addClass('nc-codex-diag-modal');
-    contentEl.empty();
-    contentEl.createEl('h2', { text: 'Codex CLI diagnostic' });
-    const r = this.result;
-
-    // Verdict block at the top
-    const verdict = contentEl.createDiv({ cls: 'nc-codex-diag-verdict' });
-    verdict.textContent = r.diagnosis;
-    if (r.diagnosis.startsWith('✅')) verdict.addClass('ok');
-    else if (r.diagnosis.startsWith('⚠'))  verdict.addClass('warn');
-    else verdict.addClass('fail');
-
-    // Summary table
-    const summary = contentEl.createDiv({ cls: 'nc-codex-diag-summary' });
-    const row = (k: string, v: string) => {
-      const r1 = summary.createDiv({ cls: 'nc-codex-diag-row' });
-      r1.createSpan({ text: k, cls: 'nc-codex-diag-k' });
-      r1.createSpan({ text: v, cls: 'nc-codex-diag-v' });
-    };
-    row('Version check', r.version.ok ? `✓ ${r.version.message}` : `✗ ${r.version.message}`);
-    row('Working dir', r.cwd);
-    row('Exit code', String(r.exitCode));
-    row('Duration', `${r.durationMs}ms`);
-    // Surface model arg explicitly — easy to miss in the long Command pre.
-    const mIdx = r.args.indexOf('-m');
-    const modelArg = mIdx >= 0 ? r.args[mIdx + 1] : '';
-    row('Model arg', modelArg || '(none — codex uses ~/.codex/config.toml)');
-    row('PATH', (r.env.PATH ?? '').slice(0, 200) + ((r.env.PATH?.length ?? 0) > 200 ? '…' : ''));
-    row('OPENAI_API_KEY', r.env.OPENAI_API_KEY ?? '(not set)');
-    // Where the proxy (if any) is coming from. "settings" = user filled Global
-    // proxy URL field. "shell-rc" = auto-captured from $SHELL -lic 'env' at
-    // startup. "none" = neither — codex will go direct.
-    const pSource = r.env.proxySource ?? 'none';
-    row('Proxy source', pSource === 'settings' ? 'Settings → Network → Proxy'
-                       : pSource === 'shell-rc' ? `auto-detected from ~/.zshrc (HTTPS=${r.env.shellProxyHTTPS ?? '(empty)'})`
-                       : '⚠ NONE — fill Settings → Network → Proxy');
-
-    // Args
-    contentEl.createEl('h4', { text: 'Command' });
-    const cmd = contentEl.createEl('pre', { cls: 'nc-codex-diag-pre' });
-    cmd.textContent = `codex ${r.args.map((a: string) => /\s|"/.test(a) ? `'${a}'` : a).join(' ')}`;
-
-    // Event timeline — most useful section for debugging
-    if (r.eventTimeline?.length) {
-      contentEl.createEl('h4', { text: `Event timeline (${r.eventTimeline.length} events)` });
-      const tl = contentEl.createDiv({ cls: 'nc-codex-diag-timeline' });
-      for (const ev of r.eventTimeline) {
-        const row = tl.createDiv({ cls: 'nc-codex-diag-tl-row' });
-        row.createSpan({ cls: 'nc-codex-diag-tl-time', text: `+${(ev.at / 1000).toFixed(2)}s` });
-        row.createSpan({ cls: 'nc-codex-diag-tl-type', text: ev.type });
-        if (ev.payload) row.createSpan({ cls: 'nc-codex-diag-tl-payload', text: ev.payload });
-      }
-    }
-
-    // Parsed text
-    contentEl.createEl('h4', { text: `Parsed reply (${r.parsedText.length} chars)` });
-    contentEl.createEl('pre', { cls: 'nc-codex-diag-pre', text: r.parsedText || '(none)' });
-
-    // stdout
-    contentEl.createEl('h4', { text: `stdout (${r.stdout.length} bytes)` });
-    contentEl.createEl('pre', { cls: 'nc-codex-diag-pre nc-codex-diag-stream', text: r.stdout.slice(0, 6000) || '(empty)' });
-
-    // stderr
-    contentEl.createEl('h4', { text: `stderr (${r.stderr.length} bytes)` });
-    contentEl.createEl('pre', { cls: 'nc-codex-diag-pre nc-codex-diag-stream', text: r.stderr.slice(0, 6000) || '(empty)' });
-
-    const footer = contentEl.createDiv({ cls: 'modal-button-container' });
-    setStyle(footer, { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' });
-    // Quick-fix button when no proxy was detected.
-    const haveProxy = !!(r.env.HTTPS_PROXY || r.env.HTTP_PROXY || r.env.ALL_PROXY);
-    if (!haveProxy && /Reconnect|timeout|network|connection|tls|dns/i.test(r.diagnosis)) {
-      footer.createEl('button', { text: 'Open proxy settings', cls: 'mod-warning' }).onclick = () => {
-        this.close();
-        // Defer-and-scroll: re-open settings, then scroll the proxy input into view.
-        window.setTimeout(() => {
-          (this.app as AnyValue).setting.open();
-          (this.app as AnyValue).setting.openTabById('glossa');
-          window.setTimeout(() => {
-            // Find by stable data-glossa-id, NOT by label text. The label was
-            // renamed multiple times (Global proxy URL → Proxy → 代理) and
-            // every rename broke this scroll-to-field jump.
-            const target = activeDocument.querySelector('[data-glossa-id="global-proxy"]');
-            if (target) {
-              target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              target.querySelector('input')?.focus();
-            }
-          }, 200);
-        }, 50);
-      };
-    }
-    footer.createEl('button', { text: 'Close' }).onclick = () => this.close();
-  }
-}
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

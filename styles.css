@@ -3610,10 +3610,87 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 }
 /* Tighter scrollbar inside the popup so a 10+ item list doesn't waste width. */
 .nc-popup::-webkit-scrollbar { width: 6px; }
+.nc-popup.nc-popup-searchable {
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100vw - 16px));
+  min-width: min(220px, calc(100vw - 16px));
+  height: min(360px, calc(100vh - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.nc-popup-search-wrap { flex: 0 0 auto; padding: 6px; }
+.nc-popup input.nc-popup-search {
+  width: 100%;
+  margin: 0;
+  box-sizing: border-box;
+  font: inherit;
+  background: var(--background-secondary);
+}
+.nc-popup-results { flex: 1; min-height: 0; overflow-y: auto; }
+.nc-popup-empty { padding: 16px 10px; color: var(--text-muted); }
 .nc-popup::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--text-faint) 40%, transparent);
   border-radius: 3px;
 }
+
+/* Completed file changes remain visible below a turn's folded activity. */
+.glossa-view .nc-edit-summary {
+  margin: 6px 0 18px;
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  font-size: 12px;
+}
+.nc-edit-summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.nc-edit-summary-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+button.nc-edit-summary-path {
+  flex: 1 1 140px;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-normal);
+  font: inherit;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.nc-edit-summary-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; color: var(--text-muted); }
+button.nc-edit-summary-undo {
+  height: auto;
+  padding: 3px 7px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 5px;
+  box-shadow: none;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font: inherit;
+}
+button.nc-edit-summary-undo:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.nc-edit-summary-add { color: var(--text-success, #218c4c); }
+.nc-edit-summary-del { color: var(--text-error); }
+.nc-edit-summary-status, .nc-edit-summary-file.is-undone { color: var(--text-muted); }
+.nc-tool-stack-summary, .nc-process-summary { white-space: normal; text-align: left; }
 .nc-popup-item {
   position: relative;
   display: flex; align-items: center; gap: 8px;
@@ -8078,3 +8155,241 @@ button.nc-aligned-select[aria-expanded="true"] .nc-aligned-select-chevron {
   text-align: right;
   white-space: nowrap;
 }
+/* User-directed skill learning. Host theme variables also work in popouts. */
+.modal.nc-learning-modal {
+  width: min(760px, 94vw);
+  max-height: 90vh;
+}
+.nc-learning-modal .modal-content { overflow-y: auto; }
+.nc-learning-form { border: 0; padding: 0; margin: 0; min-width: 0; }
+.nc-learning-field { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; min-width: 0; }
+.nc-learning-field > span { font-weight: 500; }
+.nc-learning-field input,
+.nc-learning-field textarea,
+.nc-learning-field select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+.nc-learning-field textarea { resize: vertical; line-height: 1.5; }
+.nc-learning-muted { color: var(--text-muted); font-size: var(--font-ui-small); line-height: 1.6; overflow-wrap: anywhere; }
+.nc-learning-status { margin-bottom: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.nc-learning-error { color: var(--text-error); white-space: pre-wrap; overflow-wrap: anywhere; }
+.nc-learning-card { border: 1px solid var(--background-modifier-border); border-radius: 10px; padding: 12px; margin: 12px 0; min-width: 0; }
+.nc-learning-card h3 { margin-top: 0; }
+.nc-learning-card summary { cursor: pointer; overflow-wrap: anywhere; }
+.nc-learning-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.nc-learning-version { border-top: 1px solid var(--background-modifier-border); margin-top: 12px; padding-top: 8px; }
+.nc-learning-output,
+.nc-learning-diff { max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--font-ui-small); background: var(--background-secondary); padding: 10px; border-radius: 6px; }
+.nc-learning-check { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+.nc-learning-check-row { display: flex; align-items: center; gap: 8px; }
+.nc-learning-check-row .nc-learning-field { flex: 1; }
+.nc-learning-close { margin-top: 16px; }
+.nc-learning-modal button { white-space: normal; height: auto; min-height: 30px; }
+/* Theme-safe controls: one focus surface, predictable native button geometry. */
+.glossa-view .nc-mode-seg {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 2px;
+  width: auto;
+  min-width: 106px;
+  height: 32px;
+  padding: 3px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 9px;
+  background: var(--background-secondary);
+  box-shadow: none;
+  isolation: isolate;
+}
+.glossa-view .nc-mode-seg::before,
+.glossa-view .nc-mode-seg::after { display: none; }
+.glossa-view .nc-mode-seg > button.nc-mode-seg-opt {
+  appearance: none;
+  flex: 1;
+  position: static;
+  min-width: 45px;
+  height: 24px;
+  padding: 0 8px;
+  line-height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 500;
+  transform: none;
+}
+.glossa-view .nc-mode-seg > button.nc-mode-seg-opt[aria-pressed="true"] {
+  background: var(--background-primary);
+  color: var(--text-normal);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+  font-weight: 600;
+}
+.glossa-view .nc-mode-seg > button.nc-mode-seg-opt:disabled { opacity: .65; cursor: default; }
+.glossa-view .nc-mode-seg > button.nc-mode-seg-opt:focus-visible,
+.nc-history-pop button:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+.nc-history-pop .nc-history-pop-search {
+  min-width: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 9px;
+  background: var(--background-primary);
+  box-shadow: none;
+}
+.nc-history-pop .nc-history-pop-search:focus-within {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+.nc-history-pop .nc-history-pop-search > input.nc-history-pop-search-input,
+.nc-history-pop .nc-history-pop-search > input.nc-history-pop-search-input:hover,
+.nc-history-pop .nc-history-pop-search > input.nc-history-pop-search-input:focus,
+.nc-history-pop .nc-history-pop-search > input.nc-history-pop-search-input:focus-visible {
+  appearance: none;
+  min-width: 0;
+  width: 100%;
+  height: 34px;
+  padding: 0 8px 0 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 13px;
+}
+.nc-history-pop .nc-history-folders { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 12px 10px; border-bottom: 1px solid var(--background-modifier-border); }
+.nc-history-pop button.nc-history-folder,
+.nc-history-pop button.nc-history-row-more {
+  appearance: none;
+  height: 27px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nc-history-pop button.nc-history-folder:hover,
+.nc-history-pop button.nc-history-row-more:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.nc-history-pop button.nc-history-folder[aria-pressed="true"] { background: color-mix(in srgb, var(--interactive-accent) 10%, transparent); color: var(--interactive-accent); border-color: color-mix(in srgb, var(--interactive-accent) 20%, transparent); }
+.nc-history-pop .nc-history-pop-row { min-height: 42px; gap: 8px; }
+.nc-history-pop .nc-history-pop-row-title { flex: 1; min-width: 0; }
+.nc-history-pop button.nc-history-row-more { flex: 0 0 27px; padding: 0; }
+.nc-history-folder-form { display: flex; gap: 6px; width: 100%; padding-top: 4px; }
+.nc-history-pop .nc-history-folder-form input[type="text"] { width: 0; flex: 1; min-width: 0; }
+.nc-history-pop input.nc-history-pop-rename,
+.nc-history-pop .nc-history-folder-form input[type="text"] { border: 1px solid var(--background-modifier-border); border-radius: 7px; background: var(--background-primary); box-shadow: none; }
+.nc-history-pop input.nc-history-pop-rename:focus,
+.nc-history-pop .nc-history-folder-form input[type="text"]:focus { border-color: var(--interactive-accent); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 12%, transparent); }
+.glossa-view .nc-input-wrap > textarea.nc-input,
+.glossa-view .nc-input-wrap > textarea.nc-input:focus { border: 0; outline: 0; box-shadow: none; background: transparent; }
+.glossa-view .nc-tool-event.cancelled { border-color: var(--background-modifier-border); }
+
+/* Session controls share the same quiet surfaces as the composer. */
+.glossa-view .nc-session-controls { flex: 0 1 auto; max-height: min(32vh, 300px); overflow-y: auto; margin: 0 12px; scrollbar-gutter: stable; }
+.glossa-view .nc-session-controls[hidden] { display: none; }
+.nc-goal-card, .nc-inbox { border: 1px solid var(--background-modifier-border); border-radius: 10px; background: var(--background-primary); margin: 0 0 10px; padding: 10px 12px; }
+.nc-goal-heading, .nc-inbox-meta { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 11px; }
+.nc-goal-heading > :last-child { margin-left: auto; }
+.nc-goal-phase { font-weight: 600; }
+.nc-goal-phase.active { color: var(--interactive-accent); }
+.nc-goal-phase.complete { color: var(--text-success, var(--text-normal)); }
+.nc-goal-card p, .nc-inbox-item p { margin: 6px 0; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12px; }
+.nc-goal-objective { font-weight: 550; }
+.nc-goal-progress { color: var(--text-muted); }
+.nc-goal-blocker { color: var(--text-warning, var(--text-muted)); }
+.nc-goal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11px; color: var(--text-muted); }
+.glossa-view .nc-session-controls button { height: 25px; border: 1px solid var(--background-modifier-border); box-shadow: none; border-radius: 6px; padding: 2px 8px; background: var(--background-primary); color: var(--text-muted); font-size: 11px; }
+.glossa-view .nc-session-controls button:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.nc-inbox-item + .nc-inbox-item { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--background-modifier-border); }
+.nc-inbox-meta > span { margin-right: auto; }
+.nc-inbox-item p { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.nc-inbox-item textarea { width: 100%; min-height: 60px; resize: vertical; }
+.glossa-view .nc-input-footer { flex-wrap: wrap; gap: 5px; align-items: center; }
+.glossa-view .nc-input-footer button.nc-queue-button { height: 25px; font-size: 11px; padding: 0 7px; color: var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 8%, transparent); }
+.glossa-view .nc-input-footer button.nc-queue-button[hidden] { display: none; }
+.glossa-view .nc-header { gap: 5px; padding: 10px 12px; border-bottom: 1px solid var(--background-modifier-border); box-shadow: none; }
+.glossa-view .nc-header button.nc-icon-btn { width: 28px; height: 28px; min-width: 28px; border: 0; border-radius: 7px; background: transparent; box-shadow: none; color: var(--text-muted); }
+.glossa-view .nc-header button.nc-icon-btn:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.glossa-view .nc-input-wrap { border: 1px solid var(--background-modifier-border); background: var(--background-primary); box-shadow: 0 2px 8px rgb(0 0 0 / 3%); border-radius: 12px; }
+.glossa-view .nc-input-wrap:focus-within { border-color: color-mix(in srgb, var(--interactive-accent) 55%, var(--background-modifier-border)); }
+.glossa-view .nc-input-wrap::before, .glossa-view .nc-input-wrap::after { display: none; }
+.glossa-view button.nc-composer-pill, .glossa-view button.nc-model-chip { box-shadow: none; border: 1px solid transparent; background: transparent; }
+.glossa-view button.nc-composer-pill:hover, .glossa-view button.nc-model-chip:hover { background: var(--background-modifier-hover); }
+.nc-goal-modal label { display: flex; flex-direction: column; gap: 6px; margin: 14px 0; color: var(--text-muted); font-size: 13px; }
+.nc-goal-modal textarea { width: 100%; resize: vertical; }
+.nc-goal-modal p { color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.nc-goal-modal input[type="number"] { width: 90px; }
+@container glossa (max-width: 380px) {
+  .glossa-view .nc-header { gap: 3px; padding: 8px; }
+  .glossa-view .nc-mode-seg { min-width: 98px; }
+  .glossa-view .nc-session-controls { margin-inline: 8px; }
+}
+.glossa-view .nc-input-footer .nc-submit-btn { margin-inline-start: auto; flex: 0 0 34px; }
+.glossa-view .nc-input-footer .nc-model-chip { min-width: 0; max-width: 160px; }
+.glossa-view.has-task .nc-empty { min-height: 0; padding-block: 20px; }
+.glossa-view.has-task .nc-example-chips { display: none; }
+.glossa-view.has-task .nc-empty-orb svg { width: 54px; height: 54px; }
+.glossa-view.has-task .nc-empty-title { font-size: 36px; }
+@media (prefers-reduced-motion: reduce) {
+  .glossa-view *, .nc-history-pop * { scroll-behavior: auto; }
+}
+/* Composer actions keep one stable row for both API and CLI. */
+.glossa-view .nc-input-footer {
+  display: grid;
+  grid-template-columns: 28px minmax(64px, 1fr) auto auto 34px;
+  grid-template-rows: 32px;
+  gap: 6px;
+}
+.glossa-view .nc-input-footer .nc-composer-icon-btn { grid-row: 1; grid-column: 1; }
+.glossa-view .nc-input-footer .nc-perm-pill { grid-row: 1; grid-column: 2; justify-self: start; }
+.glossa-view .nc-input-footer .nc-reasoning-pill { grid-row: 1; grid-column: 3; }
+.glossa-view .nc-input-footer .nc-queue-button { grid-row: 1; grid-column: 4; }
+.glossa-view .nc-input-footer .nc-submit-btn { grid-row: 1; grid-column: 5; margin: 0; }
+.glossa-view .nc-input-footer-spacer { display: none; }
+
+/* Runtime/model selection and compact file references share one composer row. */
+.glossa-view .nc-composer-context-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.glossa-view .nc-runtime-bar { display: grid; grid-template-columns: 54px minmax(50px, .8fr) minmax(64px, 1.2fr); align-items: center; flex: 1 1 288px; min-width: 0; max-width: 288px; margin-inline-start: auto; height: 28px; border: 1px solid var(--background-modifier-border); border-radius: 7px; overflow: hidden; }
+.glossa-view .nc-runtime-choice { display: flex; flex: 1; min-width: 0; border-inline-start: 1px solid var(--background-modifier-border); }
+.glossa-view .nc-runtime-bar .nc-runtime-button { flex: 0 0 auto; }
+.glossa-view .nc-runtime-choice > button { flex: 1; justify-content: flex-start; min-width: 0; max-width: 100%; }
+.glossa-view .nc-runtime-choice .nc-model-label, .glossa-view .nc-runtime-choice .nc-provider-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 100%; }
+.glossa-view .nc-runtime-choice .nc-arrow, .glossa-view .nc-runtime-choice .nc-pill-caret { flex: 0 0 auto; margin-inline-start: auto; }
+.glossa-view .nc-composer-context-row .nc-context-bar { flex: 0 1 105px; max-width: 25%; flex-direction: row; overflow-x: auto; scrollbar-width: thin; gap: 4px; }
+.glossa-view .nc-composer-context-row .nc-context-group { flex: 0 0 auto; max-width: 100%; }
+.glossa-view .nc-composer-context-row .nc-context-group-label { display: none; }
+.glossa-view .nc-composer-context-row .nc-context-group-items { flex-wrap: nowrap; max-width: 100%; }
+.glossa-view .nc-composer-context-row .nc-pill { flex: 0 0 auto; max-width: 130px; min-width: 0; }
+.glossa-view .nc-composer-context-row .nc-context-group.current .nc-pill { flex: 1; max-width: 100%; }
+.glossa-view .nc-composer-context-row .nc-pill-label { min-width: 0; max-width: 100%; font-size: 11px; }
+.glossa-view .nc-runtime-bar button { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; height: 28px; padding: 0 6px; border: 0; border-radius: 0; background: transparent; color: var(--text-normal); font-size: var(--nc-font-sm, 12px); font-weight: 500; box-shadow: none; white-space: nowrap; }
+.glossa-view .nc-runtime-bar button:hover { background: var(--background-modifier-hover); }
+.glossa-view .nc-runtime-bar button:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: -2px; }
+.glossa-view .nc-runtime-bar button:disabled { opacity: .5; cursor: default; }
+.glossa-view .nc-runtime-bar button[hidden] { display: none; }
+.nc-runtime-glyph, .nc-cli-brand { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 16px; }
+.nc-runtime-glyph svg, .nc-cli-brand svg { display: block; width: 16px; height: 16px; }
+.nc-cli-brand { color: #111; }
+.theme-dark .nc-cli-brand { color: #fff; }
+.glossa-view .nc-cli-catalog-status { margin-inline-start: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 10px; }
+.glossa-view .nc-cli-catalog-status:empty { display: none; }
+.glossa-view .nc-runtime-bar .nc-runtime-glyph { display: none; }
+.glossa-view .nc-runtime-bar .nc-cli-brand, .glossa-view .nc-runtime-bar .nc-cli-brand svg { width: 13px; height: 13px; flex-basis: 13px; }
+.nc-popup-trailing-check { margin-inline-start: auto; color: var(--interactive-accent); }
+.nc-popup-positioning { visibility: hidden; }
+.nc-cli-logo-openai { color: #111; }
+.theme-dark .nc-cli-logo-openai { color: #fff; }
+
+.glossa-view .nc-reasoning-pill .nc-pill-sub { max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nc-effort-modal label { display: flex; flex-direction: column; gap: 6px; }
+.nc-effort-modal input { width: 100%; }
+.nc-effort-modal p { color: var(--text-muted); font-size: 13px; }
+.nc-effort-modal .nc-effort-error { color: var(--text-error); }
+.nc-effort-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }

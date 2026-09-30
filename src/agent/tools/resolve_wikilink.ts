@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * resolve_wikilink — figure out what `[[name]]` actually resolves to in this vault.
  *
@@ -46,4 +45,3 @@ export const resolveWikilink: ToolImpl = buildTool({
     return `Resolved: (none)\nExists: false\nLinkpath: ${head}\n\n[[${link}]] is a dangling / unresolved wikilink in the current vault.`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

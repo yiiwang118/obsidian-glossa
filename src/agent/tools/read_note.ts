@@ -1,8 +1,7 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import { setStyle } from '../../utils/dom';
 import { formatNoteRead } from '../../utils/note_read';
-import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
+import { assertVaultPath, buildTool, normalizePathFields, toolSuccess, toolFailure, type ToolImpl } from './_shared';
 
 function inputRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -126,9 +125,9 @@ export const readNote: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e) { return toolFailure('INVALID_PATH', `Error: ${e.message}`); }
     const f = app.vault.getAbstractFileByPath(path);
-    if (!(f instanceof TFile)) return `Error: file not found: ${path}`;
+    if (!(f instanceof TFile)) return toolFailure('FILE_NOT_FOUND', `Error: file not found: ${path}`);
     const text = await app.vault.read(f);
     try {
       const input = inputRecord(args);
@@ -137,17 +136,16 @@ export const readNote: ToolImpl = buildTool({
         endLine: optionalNumber(input.end_line),
         maxLines: optionalNumber(input.max_lines),
       });
-      if (input.include_outgoing_links !== true) return body;
+      if (input.include_outgoing_links !== true) return toolSuccess(body);
       const limit = optionalNumber(input.outgoing_link_limit) ?? 12;
       const links = app.metadataCache.getFileCache(f)?.links ?? [];
-      return body + formatCompactOutgoingLinks(
+      return toolSuccess(body + formatCompactOutgoingLinks(
         links,
         link => app.metadataCache.getFirstLinkpathDest(link, path)?.path ?? null,
         limit,
-      );
+      ));
     } catch (error) {
-      return `Error: ${error instanceof Error ? error.message : String(error)}`;
+      return toolFailure('READ_FAILED', `Error: ${error instanceof Error ? error.message : String(error)}`);
     }
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-member-access -- Re-enable review lint rules after dynamic boundary module. */

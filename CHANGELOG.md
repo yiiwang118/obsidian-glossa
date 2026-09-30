@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] — 2026-09-30
+
+### Added
+- Persistent history folders with creation, rename, move, unfiled filtering, and non-destructive folder removal.
+- Editable running-input queues, next-step API steering, and persistent task cards with explicit resume, blockers and bounded rounds.
+- Structured tool outcome metadata, separate model/UI projections, and local metadata-only diagnostic export.
+- Pressure-triggered pruning before summarization, preserving recent reads, errors, writes and tool-call pairing.
+- Desktop Codex/Claude Code/Grok runtime switching with executable detection, existing login reuse, proxy support, streamed events and cancellation of owned processes.
+- User-directed skill learning from a correction: editable drafts, workflow diffs, positive/negative text examples, paired model comparisons, explicit activation, and version history with disable/restore controls.
+- Local feedback provenance with original model and loaded skill revision; immutable saved versions, stale-edit protection, bounded history, and validation invalidation when a draft or example changes.
+- Shared searchable model menus for chat and translation, with provider grouping, current-model indicators, keyboard navigation, and all discovered models available.
+- Per-turn file change cards showing actual created, modified, and deleted files with bounded, exact line statistics, file navigation, and single-file or whole-turn undo.
+- Post-tool checkpoint metadata and stale-content checks that keep later edits intact during undo; moves, renames, and non-text files remain in file recovery because text snapshots cannot fully restore them.
+
+### Changed
+- Load CLI host modules through Obsidian’s desktop CommonJS boundary so Chromium does not try to fetch Node imports as URLs.
+- Align file chips left and compact three-part API / CLI, provider/app and model controls right; scope API model choices to the selected provider and remove redundant Current labels. Discover native model catalogs and per-model effort options, remember runtime selections, and pass effort settings to Codex, Claude Code and Grok. Support manual provider-native effort values alongside the detected menu.
+- Simplify Plan/Act into stable, accessible buttons, prevent changes during execution, remove double input focus borders, and keep model selection and editing actions on separate composer rows.
+- Keep history menus open while using folder actions and bind history popovers to their owning window.
+- Scope the local review scanner's subprocess exception to an audited desktop module; retain all other restrictions and verify shell-free launches.
+- Describe completed tool activity by reads, searches, web actions, and file changes instead of a tool count alone; keep failed and unfinished process groups expanded.
+- Preserve model menu placement while filtering and close the translation model menu before its parent panel on Escape.
+
+### Fixed
+- Show menus only after their initial anchor position is calculated, avoiding a first-frame jump while opening model search.
+- Cancel pending update checks, migration notices and skill activation work on unload, unregister plugin-bridge listeners, and flush debounced settings/history without leaving a delayed write behind.
+- Keep late update responses from changing settings or showing notices after the plugin is disabled.
+- Remove source-level lint suppressions that conflict with the public community scanner; preserve their exact local file/rule boundaries and check community rules independently in the build gate.
+- Use a neutral download-folder placeholder while preserving the configured path and default directory.
+- Document external CLI temporary files, network services, and provider account/payment requirements in both READMEs.
+
 ## [0.8.0] — 2026-09-24
 
 ### Added
@@ -344,7 +375,7 @@ Polish release after the 0.5 UI and context updates.
 - Fixed Markdown rendering paths that could wake MathJax unnecessarily for non-math content.
 
 ### Changed
-- Refined the empty-state branding, command suggestions, tool rows, reasoning rows, and action summaries for a cleaner AI Studio-inspired UI.
+- Refined the empty-state branding, command suggestions, tool rows, reasoning rows, and action summaries for a cleaner sidebar UI.
 - Improved settings modal spacing and endpoint form layout across light and dark themes.
 
 ## [0.5.0] — 2026-06-26
@@ -352,7 +383,7 @@ Polish release after the 0.5 UI and context updates.
 Major UI and agent-experience refresh.
 
 ### Added
-- Added an AI Studio-inspired visual refresh for the sidebar, input composer, action rows, and status pills.
+- Added a visual refresh for the sidebar, input composer, action rows, and status pills.
 - Added richer PDF browsing behavior and clearer PDF context handling in the agent pipeline.
 - Added support for displaying uploaded file context in the active conversation flow.
 

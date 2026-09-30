@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * set_selection — set the cursor / selection in the currently-active editor.
  *
@@ -84,4 +83,3 @@ export const setSelection: ToolImpl = buildTool({
     return 'Error: provide either {from,to} OR heading OR block.';
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Re-enable review lint rules after dynamic boundary module. */

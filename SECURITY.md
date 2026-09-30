@@ -45,7 +45,7 @@ For attackers reading this: yes, we know. Recent audit findings already addresse
 - `assertVaultPath` URL-decoding to block `..%2F` traversal
 - `checkpoint.snapshot` write mutex (FIFO queue) to prevent read-modify-write races
 - `chats.json` / `checkpoints.json` atomic write via tmp+rename
-- Local CLI and MCP subprocess sources are excluded from the community review build
+- Local CLI execution is isolated in a desktop-only boundary: no shell interpolation, no arbitrary extra arguments, explicit native permission limits, and owned-process cancellation. Codex and Claude Code disable external MCP configuration. Grok uses native sandbox profiles and a built-in tool allowlist; its local configuration still applies. Grok prompt files are private, temporary and removed on exit/cancellation. See PRIVACY.md for native CLI boundaries.
 - AES-GCM-256 with PBKDF2 (200k iterations) for at-rest API-key encryption
 
 ## Bounty

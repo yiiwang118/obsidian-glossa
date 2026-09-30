@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { buildTool, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects, parseHttpUrl } from '../../utils/safe_web';
 import { decodeUtf8, extractWebMarkdown, fetchBytesWithCap, summarizeMarkdown, type WebFetchBytesResult, type WebFetchOptions } from '../../utils/web_content';
@@ -124,4 +123,3 @@ function errorMessage(error: unknown): string {
   if (typeof error === 'number' || typeof error === 'boolean' || typeof error === 'bigint') return String(error);
   return 'Unknown error';
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

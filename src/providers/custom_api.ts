@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { requestUrl } from 'obsidian';
-import { isDeepSeekEndpoint, mapOpenAIReasoningEffort, type Endpoint } from '../types';
+import { customEffortValue, isDeepSeekEndpoint, mapOpenAIReasoningEffort, type Endpoint } from '../types';
 import { nativeStreamingHttpRequest } from '../utils/native_http';
 import type { LLMProvider, ChatRequest, ChatChunk, ToolContentBlock } from './types';
 import { customApiBody, customApiUrl } from './custom_api_config';
@@ -32,7 +31,7 @@ function redactErrorBody(s: string): string {
 }
 
 function withReasoningEffortHint(ep: Endpoint, message: string): string {
-  const effort = ep.reasoningEffort;
+  const effort = customEffortValue(ep.customReasoningEffort) || ep.reasoningEffort;
   if (!effort || effort === 'off') return message;
   return `${message}\nReasoning effort "${effort}" was sent unchanged. The selected model or gateway may not support this value.`;
 }
@@ -60,7 +59,7 @@ export class CustomApiProvider implements LLMProvider {
   defaultModel() { return this.ep.model ?? ''; }
 
   private applyOpenAIReasoning(body: AnyValue): void {
-    const effort = this.ep.reasoningEffort;
+    const effort = customEffortValue(this.ep.customReasoningEffort) || this.ep.reasoningEffort;
     if (isDeepSeekEndpoint(this.ep)) {
       if (effort === 'off') {
         body.thinking = { type: 'disabled' };
@@ -68,11 +67,16 @@ export class CustomApiProvider implements LLMProvider {
       }
       if (effort) body.thinking = { type: 'enabled' };
     }
-    const mapped = mapOpenAIReasoningEffort(this.ep, effort);
+    const mapped = mapOpenAIReasoningEffort(this.ep, this.ep.reasoningEffort);
     if (mapped) body.reasoning_effort = mapped;
   }
 
   private applyAnthropicThinking(body: AnyValue): void {
+    const custom = customEffortValue(this.ep.customReasoningEffort);
+    if (custom) {
+      body.output_config = { effort: custom };
+      return;
+    }
     // An explicit thinking mode must not inherit an automatic thinking budget.
     if (this.ep.extraBody && Object.prototype.hasOwnProperty.call(this.ep.extraBody, 'thinking')) return;
     if (!this.ep.reasoningEffort || this.ep.reasoningEffort === 'off') return;
@@ -776,4 +780,3 @@ const ANTHROPIC_KNOWN_MODELS = [
   'claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5',
   'claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest',
 ];
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

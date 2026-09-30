@@ -117,6 +117,16 @@ exports.run = async function(t) {
     fs.writeFileSync(path.join(root, 'main.js'), 'console.log("ok");\n//# sourceMappingURL=main.js.map\n');
     const sourceMap = runScan(root);
     t.ok(!sourceMap.ok && sourceMap.output.includes('source map marker'), 'bundle sourcemap marker is rejected');
+    // The desktop exception remains limited to an audited module.
+    writeFixture(root, { 'main.js': 'console.log("ok");\n', 'manifest.json': JSON.stringify({isDesktopOnly:true}), 'src/providers/local_cli.ts': fs.readFileSync(path.resolve(__dirname,'../src/providers/local_cli.ts'),'utf8') });
+    t.ok(runScan(root).ok,'audited desktop boundary accepted');
+    const boundary=path.join(root,'src/providers/local_cli.ts');
+    const source=fs.readFileSync(boundary,'utf8');
+    fs.writeFileSync(boundary,source.replace('shell: false','shell: true'));
+    t.ok(!runScan(root).ok,'shell execution cannot slip through the desktop exception');
+    fs.writeFileSync(boundary,source);
+    writeFixture(root,{'src/ambient.ts':'export const host = import("node:child_process");'});
+    t.ok(!runScan(root).ok,'dynamic subprocess import outside the boundary rejected');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

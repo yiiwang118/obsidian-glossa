@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * patch_canvas — surgical node/edge edits to a .canvas file.
  *
@@ -131,4 +130,3 @@ function validateNewNode(node: AnyValue): string | null {
   if (node.type === 'link' && typeof node.url !== 'string') return 'link node requires a URL';
   return null;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

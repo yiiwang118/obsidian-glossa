@@ -34,10 +34,18 @@ function lineForIndex(text, index) {
   return text.slice(0, index).split('\n').length;
 }
 
+const DESKTOP_CLI = 'src/providers/local_cli.ts';
+const DESKTOP_LABELS = new Set(['Node filesystem require marker', 'Node filesystem source marker', 'Node child_process require marker', 'Node child_process source marker', 'Node os/system identity marker', 'Node os/system identity source marker', 'process.env marker', 'process.env source marker']);
+
 function scanText(file, text, checks) {
+  const start = file === 'main.js' ? text.indexOf(`// ${DESKTOP_CLI}\n`) : -1;
+  const end = start < 0 ? -1 : text.indexOf('\n// src/', start + 1);
   for (const check of checks) {
     const re = new RegExp(check.pattern.source, check.pattern.flags.includes('g') ? check.pattern.flags : `${check.pattern.flags}g`);
     for (const match of text.matchAll(re)) {
+      // Desktop CLI is an explicit, reviewed capability. All other modules
+      // retain the original ban. The boundary receives additional AST checks.
+      if (DESKTOP_LABELS.has(check.label) && (file === DESKTOP_CLI || (start >= 0 && match.index > start && end > match.index))) continue;
       fail(`${file}:${lineForIndex(text, match.index ?? 0)} contains ${check.label}`);
     }
   }
@@ -49,7 +57,7 @@ const bundleChecks = [
   { label: 'Node filesystem require marker', pattern: /require\(["'](?:node:)?fs["']\)/ },
   { label: 'Node child_process require marker', pattern: /child_process|spawn\(|execFile|execSync/ },
   { label: 'Node os/system identity marker', pattern: /require\(["'](?:node:)?os["']\)|os\.hostname|os\.userInfo|networkInterfaces/ },
-  { label: 'process.env marker', pattern: /process\.env/ },
+  { label: 'process.env marker', pattern: /(?:process|processApi)\.env/ },
   { label: 'vault enumeration marker', pattern: /getMarkdownFiles|getFiles\(|vault\.getFiles/ },
   { label: 'command dispatch marker', pattern: /executeCommandById|commands\.executeCommand|Command palette ID/i },
   { label: 'MCP marketplace marker', pattern: /MCP_CATALOG|mcp_marketplace/ },
@@ -63,7 +71,8 @@ const sourceChecks = [
   { label: 'Node filesystem source marker', pattern: /(?:import\s+(?:type\s+)?[^;]*\s+from\s+["'](?:node:)?fs["']|require\s*\(\s*["'](?:node:)?fs["']\s*\))/ },
   { label: 'Node child_process source marker', pattern: /(?:import\s+(?:type\s+)?[^;]*\s+from\s+["'](?:node:)?child_process["']|require\s*\(\s*["'](?:node:)?child_process["']\s*\)|\bspawn\s*\(|\bexecFile\s*\(|\bexecSync\s*\()/ },
   { label: 'Node os/system identity source marker', pattern: /(?:import\s+(?:type\s+)?[^;]*\s+from\s+["'](?:node:)?os["']|require\s*\(\s*["'](?:node:)?os["']\s*\)|\bos\.(?:hostname|userInfo|networkInterfaces)\b|\bnetworkInterfaces\s*\()/ },
-  { label: 'process.env source marker', pattern: /\bprocess\.env\b/ },
+  { label: 'process.env source marker', pattern: /\b(?:process|processApi)\.env\b/ },
+  { label: 'dynamic Node import outside desktop boundary', pattern: /\bimport\s*\(\s*["']node:(?:child_process|os|process)["']\s*\)/ },
   { label: 'vault enumeration source marker', pattern: /\b(?:getMarkdownFiles|getFiles)\s*\(/ },
   { label: 'command dispatch source marker', pattern: /\bexecuteCommandById\b|\bcommands\.executeCommand\b|Command palette ID/i },
   { label: 'unsafe HTML sink marker', pattern: /\.innerHTML\b|\.outerHTML\b|insertAdjacentHTML|createContextualFragment|document\.write|\.srcdoc\b|\bsrcdoc\s*=/ },
@@ -84,12 +93,35 @@ scanText('main.js', readText('main.js'), bundleChecks);
 scanText('styles.css', readText('styles.css'), cssChecks);
 for (const file of listFiles('src', p => p.endsWith('.ts'))) {
   const source = readText(file);
-  scanText(file, source, sourceChecks);
+  scanText(file, source, file === DESKTOP_CLI ? sourceChecks.filter(c => c.label !== 'dynamic Node import outside desktop boundary') : sourceChecks);
   scanTopTypeUnions(file, source);
 }
+scanDesktopBoundary();
 
 if (process.exitCode) process.exit(process.exitCode);
 console.log('review:scan ok');
+
+function scanDesktopBoundary() {
+  if (!fs.existsSync(path.join(ROOT, DESKTOP_CLI))) return;
+  const manifest = JSON.parse(readText('manifest.json'));
+  if (manifest.isDesktopOnly !== true) fail('Local CLI requires manifest.isDesktopOnly=true');
+  const source = readText(DESKTOP_CLI);
+  if (!source.includes('if (!Platform.isDesktopApp) throw new Error(')) fail('CLI boundary must guard desktop access');
+  if (/\b(?:exec|execFile|execSync|eval)\s*\(|shell:\s*true|hostname|userInfo|networkInterfaces|readFile/.test(source)) fail('CLI boundary contains an unapproved host capability');
+  const tree = ts.createSourceFile(DESKTOP_CLI, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let launches = 0;
+  function visit(node) {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'spawn') {
+      launches++;
+      const options = node.arguments[2];
+      const noShell = options && ts.isObjectLiteralExpression(options) && options.properties.some(p => ts.isPropertyAssignment(p) && p.name.getText(tree) === 'shell' && p.initializer.kind === ts.SyntaxKind.FalseKeyword);
+      if (!noShell) fail('Every CLI launch must explicitly set shell:false');
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(tree);
+  if (launches !== 4) fail('CLI launch boundaries changed; review detection, model metadata, execution and owned-process cleanup');
+}
 
 function scanTopTypeUnions(file, source) {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);

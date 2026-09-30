@@ -1,12 +1,17 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { TFile } from 'obsidian';
 import type GlossaPlugin from '../main';
+import { textFingerprint } from './text_edit_engine';
+import { summarizeFileChange, type FileChangeSummary } from '../utils/edit_summary';
 
 export interface FileSnapshot {
   path: string;
   existed: boolean;
   contentBefore: string | null;
   takenAt: number;
+  after?: { fingerprint: string | null; change: FileChangeSummary | null };
+  restoredAt?: number;
+  /** Renames and non-text files cannot be fully restored by text snapshots. */
+  undoBlocked?: boolean;
 }
 
 export interface SessionCheckpoint {
@@ -16,10 +21,14 @@ export interface SessionCheckpoint {
   snapshots: FileSnapshot[];
 }
 
+function isTextSnapshotPath(path: string): boolean {
+  return /\.(?:md|markdown|txt|canvas|base|json|jsonl|ya?ml|csv|tsv|xml|html?|css|js|ts|log|tex|bib|svg)$/i.test(path);
+}
+
 /**
  * Lightweight checkpoint manager: before each dangerous tool call we snapshot the target
- * file's current content into <plugin>/checkpoints/<sessionId>.json (append-only).
- * Rollback restores any chosen turn.
+ * file's current content into <plugin>/checkpoints.json.
+ * Post-tool metadata describes the result; undo checks for intervening edits.
  */
 export class CheckpointManager {
   private path: string;
@@ -103,9 +112,9 @@ export class CheckpointManager {
         const f = this.plugin.app.vault.getAbstractFileByPath(p);
         if (f instanceof TFile) {
           const content = await this.plugin.app.vault.read(f);
-          entry.snapshots.push({ path: p, existed: true, contentBefore: content, takenAt: Date.now() });
+          entry.snapshots.push({ path: p, existed: true, contentBefore: content, takenAt: Date.now(), undoBlocked: !isTextSnapshotPath(p) });
         } else {
-          entry.snapshots.push({ path: p, existed: false, contentBefore: null, takenAt: Date.now() });
+          entry.snapshots.push({ path: p, existed: false, contentBefore: null, takenAt: Date.now(), undoBlocked: !isTextSnapshotPath(p) });
         }
       }
       // Cap to last 200 turn-checkpoints to bound disk
@@ -115,29 +124,89 @@ export class CheckpointManager {
   }
 
   async listForSession(sessionId: string): Promise<SessionCheckpoint[]> {
+    await this.writeChain;
     return (await this.read()).filter(e => e.sessionId === sessionId);
   }
 
-  /** Restore everything captured in this turn. */
-  async rollback(sessionId: string, turnId: string): Promise<{ restored: number; failed: string[] }> {
+  /** Record the actual post-tool state, including partial writes after a failure. */
+  async recordAfter(sessionId: string, turnId: string, paths: string[], undoBlocked = false): Promise<void> {
+    return this.withWriteMu(async () => {
+      const entries = await this.read();
+      const entry = entries.find(e => e.sessionId === sessionId && e.turnId === turnId);
+      if (!entry) return;
+      for (const snapshot of entry.snapshots.filter(s => paths.includes(s.path))) {
+        const content = await this.readFile(snapshot.path);
+        snapshot.after = {
+          fingerprint: content === null ? null : textFingerprint(content),
+          change: summarizeFileChange(snapshot.existed ? snapshot.contentBefore ?? '' : null, content),
+        };
+        if (!isTextSnapshotPath(snapshot.path) && snapshot.after.change) {
+          snapshot.after.change.adds = null;
+          snapshot.after.change.dels = null;
+          snapshot.undoBlocked = true;
+        }
+        snapshot.undoBlocked ||= undoBlocked;
+        delete snapshot.restoredAt;
+      }
+      await this.write(entries);
+    });
+  }
+
+  private async readFile(path: string): Promise<string | null> {
+    const file = this.plugin.app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile) return this.plugin.app.vault.read(file);
+    if (file) throw new Error(`Path is not a file: ${path}`);
+    return null;
+  }
+
+  /** Restore selected files only while their contents still match this turn's result. */
+  async rollback(sessionId: string, turnId: string, paths?: string[]): Promise<{ restored: number; failed: string[] }> {
+    return this.withWriteMu(async () => {
     const entries = await this.read();
     const entry = entries.find(e => e.sessionId === sessionId && e.turnId === turnId);
     if (!entry) return { restored: 0, failed: [] };
+    const snapshots = entry.snapshots.filter(s => !s.restoredAt && (!paths || paths.includes(s.path))
+      && (!s.after || s.after.change));
+    const current = new Map<string, string | null>();
+    // Preflight all selected paths before writing any of them.
+    for (const s of snapshots) {
+      if (!s.after || s.undoBlocked) return { restored: 0, failed: [`${s.path}: no verifiable undo snapshot`] };
+      try {
+        const content = await this.readFile(s.path);
+        if ((content === null ? null : textFingerprint(content)) !== s.after.fingerprint) {
+          return { restored: 0, failed: [`${s.path}: changed since this turn; kept current content`] };
+        }
+        current.set(s.path, content);
+      } catch (error) {
+        return { restored: 0, failed: [`${s.path}: ${error instanceof Error ? error.message : String(error)}`] };
+      }
+    }
     let restored = 0; const failed: string[] = [];
-    for (const s of entry.snapshots) {
+    for (const s of snapshots) {
       try {
         const f = this.plugin.app.vault.getAbstractFileByPath(s.path);
         if (s.existed) {
-          if (f instanceof TFile) await this.plugin.app.vault.modify(f, s.contentBefore ?? '');
-          else await this.plugin.app.vault.create(s.path, s.contentBefore ?? '');
-          restored++;
+          if (f instanceof TFile) await this.plugin.app.vault.process(f, content => {
+            if (content !== current.get(s.path)) throw new Error('File changed during undo; kept current content');
+            return s.contentBefore ?? '';
+          });
+          else {
+            if (f || current.get(s.path) !== null) throw new Error('File changed during undo');
+            await this.plugin.app.vault.create(s.path, s.contentBefore ?? '');
+          }
         } else {
-          if (f instanceof TFile) await this.plugin.app.fileManager.trashFile(f);
-          restored++;
+          if (!(f instanceof TFile) || await this.plugin.app.vault.read(f) !== current.get(s.path)) {
+            throw new Error('File changed during undo; kept current content');
+          }
+          await this.plugin.app.fileManager.trashFile(f);
         }
+        s.restoredAt = Date.now();
+        restored++;
       } catch (e) { failed.push(`${s.path}: ${e.message}`); }
     }
+    await this.write(entries);
     return { restored, failed };
+    });
   }
 }
 
@@ -181,4 +250,3 @@ export function pathsTouchedByTool(name: string, args: AnyValue): string[] {
     default: return [];
   }
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

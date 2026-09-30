@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 /**
  * open_in_editor — open a vault file in the editor, optionally jumping to a
  * line / heading / block, and optionally selecting it.
@@ -143,4 +142,3 @@ export const openInEditor: ToolImpl = buildTool({
     return `Opened ${path} (${mode})${targetDesc}.`;
   },
 });
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Re-enable review lint rules after dynamic boundary module. */

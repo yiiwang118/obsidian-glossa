@@ -1,5 +1,6 @@
 import obsidianmd from 'eslint-plugin-obsidianmd';
 import globals from 'globals';
+import boundaryOverrides from './scripts/lint_boundaries.mjs';
 import { defineConfig, globalIgnores } from 'eslint/config';
 
 export default defineConfig(
@@ -29,7 +30,6 @@ export default defineConfig(
   {
     files: ['src/**/*.ts'],
     rules: {
-      'obsidianmd/ui/sentence-case': ['warn', { brands: ['Glossa', 'Markdown'] }],
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unsafe-assignment': 'error',
       '@typescript-eslint/no-unsafe-member-access': 'error',
@@ -50,4 +50,5 @@ export default defineConfig(
       }],
     },
   },
+  ...boundaryOverrides,
 );

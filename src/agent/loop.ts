@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import { App } from 'obsidian';
 import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, isReadOnlyTool, normalizeToolResult, validateToolInput, type ToolImpl, type ToolRunResult } from './tools';
 import { askApproval, type ApprovalResult } from './approval';
@@ -13,6 +12,7 @@ import { getSkill } from './skills';
 import { clearSkillScopedAllowedTools, isAllowedForSkill, pushSkillFrame } from './skill_scoped_allow';
 import { persistLargeResult } from './tool_result_store';
 import { ToolFailureGuard, toolResultLooksLikeError } from './tool_failure_guard';
+import { pruneUnderPressure } from '../utils/context_pressure';
 import {
   collectRecordedPrunedToolCallIds,
   filterPrunedToolContext,
@@ -71,7 +71,7 @@ export interface AgentLoopOptions {
   /** Active endpoint's kind ('custom-api' / 'codex-cli' / 'claude-code-cli').
    *  When codex-cli + fullAgent, we route edits exclusively through codex's
    *  `apply_patch` envelope (the model is trained on it). */
-  endpointKind?: 'custom-api' | 'codex-cli' | 'claude-code-cli';
+  endpointKind?: 'custom-api' | 'codex-cli' | 'claude-code-cli' | 'grok-cli';
   endpointFullAgent?: boolean;
   maxSteps: number;
   autoApproveTools: string[];
@@ -104,6 +104,11 @@ export interface AgentLoopOptions {
    *  caller is expected to compact the conversation and return a fresh message array
    *  to re-send. Returning null aborts the turn. Called AT MOST once per turn. */
   onContextOverflow?: () => Promise<MessageInput[] | null>;
+  contextBudget?: number;
+  initialPrunedIds?: string[];
+  onPruned?: (ids: string[]) => void;
+  takeSteering?: () => Promise<string[]>;
+  runtimeTools?: ToolImpl[];
 
   // UI callbacks — onStepBoundary may be async; loop awaits it.
   onText: (delta: string) => void;
@@ -246,7 +251,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     const mcpSpecs = (opts.permissionLevel === 'read-only' || opts.runMode === 'plan')
       ? []
       : (opts.mcp?.asToolSpecs() ?? []);
-    tools = [...filtered, ...mcpSpecs];
+    tools = [...filtered, ...mcpSpecs, ...(opts.runtimeTools ?? []).map(t => t.spec)];
   }
   // Compose system prompt: base + agent suffix + budget-aware skill listing.
   // Skill block is only included when tools are active and there ARE skills.
@@ -267,6 +272,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     { role: 'user', content: opts.userContent },
   ];
   const prunedToolCallIds = collectRecordedPrunedToolCallIds(messages);
+  for (const id of opts.initialPrunedIds ?? []) prunedToolCallIds.add(id);
   const failureGuard = new ToolFailureGuard();
 
   // Reset skill-scoped allow frames at turn boundary. Skills invoked in
@@ -337,8 +343,21 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
   // setting label in the UI reads "max assistant turns" — see settings.ts.
   let totalToolCalls = 0;
   for (let step = 0; step < opts.maxSteps; step++) {
+    if (opts.signal?.aborted) { opts.onFinal(totalUsage); return; }
+    const steering = await opts.takeSteering?.() ?? [];
+    for (const content of steering) messages.push({ role: 'user', content });
     if (step > 0 && !skipNextBoundary) await opts.onStepBoundary();
     skipNextBoundary = false;
+    const pressure = pruneUnderPressure(filterPrunedToolContext(messages, prunedToolCallIds), opts.contextBudget ?? Infinity);
+    if (pressure.ids.length) {
+      for (const id of pressure.ids) prunedToolCallIds.add(id);
+      opts.onPruned?.(pressure.ids);
+    }
+    if (pressure.after > (opts.contextBudget ?? Infinity) && !compactRetriedThisTurn && opts.onContextOverflow) {
+      const fresh = await opts.onContextOverflow();
+      compactRetriedThisTurn = true;
+      if (fresh) messages.splice(0, messages.length, ...fresh);
+    }
 
     // Convergence nudge — inject once when the model is meandering. We do not
     // expose a completion tool; the natural stop condition is a final answer
@@ -365,6 +384,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         tools,
         model: opts.model,
         signal: opts.signal,
+        execution: { mode: opts.runMode, permission: opts.permissionLevel },
         // attach images only on the FIRST step's user message
         attachedImages: step === 0 ? opts.attachedImages : undefined,
       })) {
@@ -425,6 +445,13 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     // Reactive compaction: the server said the prompt is too long → ask the caller to
     // shrink the conversation, then retry the SAME step with the new message array.
     if (contextOverflowSeen) {
+      // First recover by removing old read results, without a model call.
+      const compactReads = pruneUnderPressure(filterPrunedToolContext(messages, prunedToolCallIds), 1);
+      if (compactReads.ids.length) {
+        for (const id of compactReads.ids) prunedToolCallIds.add(id);
+        opts.onPruned?.(compactReads.ids);
+        step--; skipNextBoundary = true; continue;
+      }
       if (compactRetriedThisTurn || !opts.onContextOverflow) {
         opts.onError('Context window exceeded and reactive compaction is unavailable or already retried this turn.');
         opts.onFinal(totalUsage); return;
@@ -507,7 +534,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     const fileEditBatching = batchSameFileEdits(toolCalls);
     const prepared: Prepared[] = [];
     for (const call of toolCalls) {
-      const tool = getTool(call.name);
+      const tool = opts.runtimeTools?.find(t => t.spec.name === call.name) ?? getTool(call.name);
       const mcpEntry = !tool ? opts.mcp?.findClient(call.name) : null;
       let effectiveArgs = fileEditBatching.leaderArgs.get(call.id) ?? call.args;
 
@@ -749,10 +776,17 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       const { call, ev, tool, mcpEntry, effectiveArgs, rewriteToWriteNote, resolved } = p;
       let modelContentBlocks: ToolContentBlock[] | undefined;
       if (resolved) {
-        ev.status = resolved.status; ev.result = resolved.result; ev.endedAt = Date.now();
+        ev.status = opts.signal?.aborted ? 'cancelled' : resolved.status; ev.result = resolved.result; ev.endedAt = Date.now();
+        ev.errorCode = ev.status === 'cancelled' ? 'CANCELLED' : resolved.status === 'denied' ? 'PERMISSION_DENIED' : resolved.status === 'error' ? 'TOOL_REJECTED' : undefined;
         opts.onToolEnd(ev);
         messages.push({ role: 'tool', toolCallId: call.id, toolName: call.name,
           toolIsError: resolved.status !== 'success', content: resolved.result });
+        return;
+      }
+      if (opts.signal?.aborted) {
+        ev.status = 'cancelled'; ev.errorCode = 'CANCELLED'; ev.result = 'Cancelled before execution.'; ev.endedAt = Date.now();
+        opts.onToolEnd(ev);
+        messages.push({ role: 'tool', toolCallId: call.id, toolName: call.name, toolIsError: true, content: ev.result });
         return;
       }
       // Snapshot files before running + activate any conditional skill whose
@@ -842,13 +876,17 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           raw = await mcpEntry.client.callTool(mcpEntry.originalName, effectiveArgs);
         }
         const norm = normalizeToolResult(raw);
+        ev.skillVersion = norm.skillVersion;
         if (norm.contextPruneRequest) {
           const visibleMessages = filterPrunedToolContext(messages, prunedToolCallIds);
           const outcome = resolveContextPruneRequest(visibleMessages, norm.contextPruneRequest, call.id);
           for (const id of outcome.acceptedToolCallIds) prunedToolCallIds.add(id);
           norm.text = formatContextPruneOutcome(norm.contextPruneRequest, outcome);
         }
-        const returnedError = toolResultLooksLikeError(norm.text);
+        // Legacy string tools retain compatibility; explicit outcomes always win.
+        const outcome = norm.status ?? (toolResultLooksLikeError(norm.text) ? 'error' : 'success');
+        const returnedError = outcome !== 'success';
+        ev.errorCode = norm.errorCode ?? (returnedError ? 'TOOL_FAILED' : undefined);
         if (!returnedError && norm.loadedToolNames?.length) {
           const loaded = loadRequestedTools(norm.loadedToolNames);
           if (loaded.blocked.length > 0) {
@@ -884,17 +922,17 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         // messages.push for role='tool'). We stash the redacted form in
         // `ev._modelBoundResult` for the loop to pick up.
         const cap = tool?.maxResultSizeChars ?? Infinity;
-        let modelBoundText = norm.text;
-        if (Number.isFinite(cap) && norm.text.length > cap) {
-          const persisted = await persistLargeResult(opts.app, call.name, call.id, norm.text);
+        let modelBoundText = norm.modelText ?? norm.text;
+        if (Number.isFinite(cap) && modelBoundText.length > cap) {
+          const persisted = await persistLargeResult(opts.app, call.name, call.id, modelBoundText);
           if (persisted) {
             modelBoundText = persisted.preview;
           } else {
             // Persistence failed — fall back to head-only truncation.
-            modelBoundText = norm.text.slice(0, cap) + `\n\n[truncated at ${cap} chars; persistence failed]`;
+            modelBoundText = modelBoundText.slice(0, cap) + `\n\n[truncated at ${cap} chars; persistence failed]`;
           }
         }
-        ev.status = returnedError ? 'error' : 'success';
+        ev.status = outcome;
         ev.result = norm.text;                        // UI gets the full text
         (ev as AnyValue)._modelBoundResult = modelBoundText; // model gets preview
         modelContentBlocks = norm.contentBlocks;
@@ -904,7 +942,19 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         const persistentBlocks = norm.contentBlocks?.filter(block => block.type !== 'document');
         ev.contentBlocks = persistentBlocks?.length ? persistentBlocks : undefined;
       } catch (e) {
-        ev.status = 'error'; ev.result = e.message ?? String(e);
+        ev.status = opts.signal?.aborted || e.name === 'AbortError' ? 'cancelled' : 'error';
+        ev.errorCode = ev.status === 'cancelled' ? 'CANCELLED' : 'TOOL_EXCEPTION';
+        ev.result = e.message ?? String(e);
+      }
+      if (tool && opts.checkpoint && opts.sessionId && opts.turnId) {
+        const paths = pathsTouchedByTool(call.name, effectiveArgs);
+        if (paths.length) {
+          try {
+            const movesFiles = call.name === 'rename_note'
+              || (call.name === 'apply_patch' && typeof effectiveArgs.patch === 'string' && /^\*\*\* Move to:/m.test(effectiveArgs.patch));
+            await opts.checkpoint.recordAfter(opts.sessionId, opts.turnId, paths, movesFiles);
+          } catch (error) { console.warn('[Glossa] could not record edit summary', error); }
+        }
       }
       ev.endedAt = Date.now();
       opts.onToolEnd(ev);
@@ -921,7 +971,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         toolName: call.name,
         content: modelBound,
         toolContentBlocks: modelContentBlocks,
-        toolIsError: ev.status === 'error',
+        toolIsError: ev.status !== 'success',
       });
     };
 
@@ -942,4 +992,3 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
   opts.onError(`Max steps (${opts.maxSteps}) reached without final answer.`);
   opts.onFinal(totalUsage);
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument -- Re-enable review lint rules after dynamic boundary module. */

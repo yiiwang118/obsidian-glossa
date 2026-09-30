@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- Dynamic plugin and host-app boundaries validate these values at runtime. */
 import type { App } from 'obsidian';
 import type { GlossaSettings, WebSearchProvider } from '../../types';
 import type { PermissionResult } from './_shared';
@@ -62,4 +61,3 @@ function errorMessage(error: unknown): string {
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : '';
 }
-/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- Re-enable review lint rules after dynamic boundary module. */

@@ -1,4 +1,6 @@
-import { Menu, type App, type Component } from 'obsidian';
+import type { App, Component } from 'obsidian';
+import { Popup, type PopupItem } from '../ui/popup';
+import { modelPickerItems, modelPickerOptions } from '../ui/model_picker';
 import type { Endpoint, GlossaSettings, SelectionTranslateMode } from '../types';
 import type { SelectionInfo } from '../context/sources';
 import { getCurrentSelection } from '../context/sources';
@@ -107,6 +109,7 @@ export function shouldRepositionSelectionTranslationOnScroll(
   if (node && popup.contains(node)) return false;
   const element = eventTargetElement(target);
   return !element?.closest([
+    '.nc-popup',
     '.glossa-view',
     '.mod-left-split',
     '.mod-right-split',
@@ -125,6 +128,7 @@ export function shouldDismissSelectionTranslationOnPointerDown(
   const element = eventTargetElement(target);
   if (!element) return true;
   return !element.closest([
+    '.nc-popup',
     '.menu',
     '.suggestion-container',
     '.mod-left-split',
@@ -332,7 +336,7 @@ export function selectionTranslationMathMarkdown(
 }
 
 export function prepareTranslationEndpoint(endpoint: Endpoint): Endpoint {
-  return { ...endpoint, reasoningEffort: 'off' };
+  return { ...endpoint, reasoningEffort: 'off', customReasoningEffort: undefined };
 }
 
 export function selectionTranslationMaxTokens(text: string, endpoint: Endpoint): number {
@@ -474,6 +478,7 @@ export function selectionTranslationSignature(selection: SelectionInfo, anchor: 
 }
 
 export class SelectionTranslationController {
+  private readonly modelMenu = new Popup();
   private popup: TranslationPopupState | null = null;
   private selectionAction: HTMLButtonElement | null = null;
   private abortController: AbortController | null = null;
@@ -565,6 +570,7 @@ export class SelectionTranslationController {
   }
 
   close(): void {
+    this.modelMenu.hide();
     this.cancelSelectionIntent();
     this.hideSelectionAction();
     this.requestSequence += 1;
@@ -584,6 +590,7 @@ export class SelectionTranslationController {
   }
 
   destroy(): void {
+    this.modelMenu.destroy();
     if (this.listenersStarted) {
       activeDocument.removeEventListener('keydown', this.handleKeyDown, true);
       activeDocument.removeEventListener('selectionchange', this.handleSelectionChange);
@@ -973,49 +980,36 @@ export class SelectionTranslationController {
     button.title = endpoint && model ? `${endpoint.label} · ${model}` : label;
   }
 
-  private showModelMenu(event: MouseEvent): void {
+  private showModelMenu(_event: MouseEvent): void {
     const popup = this.popup;
     if (!popup) return;
-    const menu = new Menu();
+    if (this.modelMenu.isOpen()) { this.modelMenu.hide(); return; }
     const active = this.host.settings.endpoints.find(
       endpoint => endpoint.id === this.host.settings.activeEndpointId,
     ) ?? null;
-    menu.addItem(item => item
-      .setTitle(bi('Follow sidebar model', '跟随侧栏模型'))
-      .setChecked(!this.host.settings.translationEndpointId)
-      .onClick(() => {
-        void this.selectTranslationModel(null, active, active?.model ?? '');
-      }));
-    menu.addSeparator();
-    for (const endpoint of this.host.settings.endpoints) {
-      const models = translationModelsForEndpoint(endpoint);
-      const candidates = models.length ? models.slice(0, 25) : [''];
-      for (const model of candidates) {
-        const title = model ? `${endpoint.label} · ${model}` : endpoint.label;
-        menu.addItem(item => item
-          .setTitle(title)
-          .setChecked(
-            endpoint.id === popup.endpointId
-            && model === popup.modelId
-            && !!this.host.settings.translationEndpointId,
-          )
-          .onClick(() => {
-            void this.selectTranslationModel(endpoint.id, endpoint, model);
-          }));
-      }
-    }
+    const items: PopupItem[] = [{
+      label: bi('Follow sidebar model', '跟随侧栏模型'),
+      checked: !this.host.settings.translationEndpointId,
+      alwaysVisible: true,
+      onSelect: () => this.selectTranslationModel(null, active, active?.model ?? ''),
+    }, ...modelPickerItems(
+      this.host.settings.endpoints,
+      this.host.settings.translationEndpointId ? popup.endpointId : '',
+      popup.modelId,
+      (endpoint, model) => this.selectTranslationModel(endpoint.id, endpoint, model),
+    )];
     const selectedEndpoint = this.host.settings.endpoints.find(
       endpoint => endpoint.id === popup.endpointId,
     );
     if (selectedEndpoint?.kind === 'custom-api') {
-      menu.addSeparator();
-      menu.addItem(item => item
-        .setTitle(bi('Refresh available models', '重新检测可用模型'))
-        .onClick(() => {
-          void this.refreshTranslationModels(selectedEndpoint);
-        }));
+      items.push({
+        label: bi('Refresh available models', '重新检测可用模型'),
+        section: bi('Manage', '管理'),
+        alwaysVisible: true,
+        onSelect: () => this.refreshTranslationModels(selectedEndpoint),
+      });
     }
-    menu.showAtMouseEvent(event);
+    this.modelMenu.show(popup.model, items, modelPickerOptions());
   }
 
   private async refreshTranslationModels(endpoint: Endpoint): Promise<void> {
@@ -1072,6 +1066,7 @@ export class SelectionTranslationController {
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      if (this.modelMenu.isOpen()) return;
       event.preventDefault();
       event.stopPropagation();
       this.close();
