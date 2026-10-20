@@ -118,6 +118,8 @@ interface MsgUI {
   msg: ChatMessage;
   wrap: HTMLElement;
   body: HTMLElement;
+  /** Final rendering owns this body; delayed stream ticks must not append to it. */
+  streamFinalized?: boolean;
   activityEl?: HTMLElement;
   elapsedEl?: HTMLElement;
   activityTimeEl?: HTMLElement;
@@ -2207,7 +2209,7 @@ export class GlossaView extends ItemView {
   /** The running turn whose output is on screen, if any. */
   private liveRun(): ChatRun | null {
     const run = this.runs.get(this.session.id);
-    return run?.ui && !this.viewClosed ? run : null;
+    return run?.ui && !run.ui.streamFinalized && !this.viewClosed ? run : null;
   }
   private scheduleStreamingRender() {
     if (this.streamRenderTimer || this.streamRenderInFlight || !this.liveRun()) return;
@@ -2244,6 +2246,9 @@ export class GlossaView extends ItemView {
           if (ui._tailEl?.isConnected) ui.body.insertBefore(wrap, ui._tailEl);
           else ui.body.appendChild(wrap);
           await renderInto(this.app, paras[i], wrap, this);
+          // Finalization or a chat/segment switch can happen during MathJax.
+          // Do not recreate a tail inside a body now owned by the final render.
+          if (this.liveRun()?.ui !== ui) return;
         }
         ui._committedParas = paras.length - 1;
       }
@@ -2278,10 +2283,12 @@ export class GlossaView extends ItemView {
         }
       }
     } catch { /* ignore */ }
-    this.streamRenderInFlight = false;
-    this.scrollToBottom();
-    const next = this.liveRun();
-    if (next && (next.ui !== ui || next.buf !== snapshot)) this.scheduleStreamingRender();
+    finally {
+      this.streamRenderInFlight = false;
+      this.scrollToBottom();
+      const next = this.liveRun();
+      if (next && (next.ui !== ui || next.buf !== snapshot)) this.scheduleStreamingRender();
+    }
   }
 
   /** Finalize the current streaming assistant message and immediately start
@@ -4256,7 +4263,11 @@ export class GlossaView extends ItemView {
 
   /** After streaming ends, render the final message via Obsidian (math / wikilinks / mermaid). */
   private async finalizeAsstRender(ui: MsgUI, m: ChatMessage) {
-    if (this.streamRenderTimer) { window.clearTimeout(this.streamRenderTimer); this.streamRenderTimer = null; }
+    const wasLive = this.liveRun()?.ui === ui;
+    // Seal the segment BEFORE waiting: an in-flight tick can otherwise enqueue
+    // another refresh after the timer is cleared and race the final render.
+    ui.streamFinalized = true;
+    if (wasLive && this.streamRenderTimer) { window.clearTimeout(this.streamRenderTimer); this.streamRenderTimer = null; }
     // Wait for any in-flight stream render to settle
     while (this.streamRenderInFlight) await new Promise(r => window.setTimeout(r, 20));
     await renderInto(this.app, m.content || '', ui.body, this, this.app.workspace.getActiveFile()?.path ?? '');
