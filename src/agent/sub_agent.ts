@@ -91,11 +91,7 @@ export async function forkSkill(opts: ForkOptions): Promise<ForkResult> {
 
   // Use dynamic import to break circular dep with loop.ts.
   const { runAgentLoop } = await import('./loop');
-  // Snapshot the parent's skill-scoped allow stack BEFORE the fork's loop
-  // runs; the fork's clearSkillScopedAllowedTools() at top-of-turn would
-  // otherwise wipe the parent's protection. Restored in finally.
-  const { snapshotFrames, restoreFrames } = await import('./skill_scoped_allow');
-  const savedFrames = snapshotFrames();
+  // The fork's loop has its own skill-scoped allows, separate from the parent's.
 
   try {
     await runAgentLoop({
@@ -129,7 +125,6 @@ export async function forkSkill(opts: ForkOptions): Promise<ForkResult> {
     collectedError = e?.message ?? String(e);
   } finally {
     activeForkDepth -= 1;
-    restoreFrames(savedFrames);
   }
 
   if (collectedError) {

@@ -1,4 +1,5 @@
 import { el, clear, setStyle, setTrustedSvg } from '../utils/dom';
+import { bi } from '../utils/i18n';
 
 export interface PopupItem {
   label: string;
@@ -58,7 +59,7 @@ export class Popup {
   private createElement(ownerDocument: Document): void {
     this.el = el('div', { className: 'nc-popup', parent: ownerDocument.body });
     this.el.setAttribute('role', 'listbox');
-    this.el.setAttribute('aria-label', 'Glossa menu');
+    this.el.setAttribute('aria-label', bi('Glossa menu', 'Glossa 菜单'));
     setStyle(this.el, { display: 'none' });
     this.el.addEventListener('mousedown', (e) => e.stopPropagation());
     // When the cursor leaves the popup, drop the mouse-induced `.selected`

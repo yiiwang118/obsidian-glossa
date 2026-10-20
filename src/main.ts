@@ -1,11 +1,12 @@
 import { Plugin, WorkspaceLeaf, Notice, addIcon } from 'obsidian';
-import { GlossaView, VIEW_TYPE_GLOSSA } from './ui/view';
+import { GlossaView, VIEW_TYPE_GLOSSA, stopChatRuns } from './ui/view';
 import { GlossaSettingTab } from './settings';
 import {
   DEFAULT_SETTINGS,
   type GlossaSettings,
   type Endpoint,
   type SelectionTranslateMode,
+  restoreDeleteTool,
 } from './types';
 import { BUILTIN_SLASH_COMMANDS, applySlashTemplate } from './commands/slash';
 import { getCurrentSelection } from './context/sources';
@@ -33,11 +34,6 @@ export default class GlossaPlugin extends Plugin {
   private cryptoHandle: SubtleKeyHandle | null = null;
   private unlocked = true;     // true when keys are readable (encryption disabled or unlocked)
 
-  embeddingIndex: {
-    size: () => number;
-    modelInfo: () => { model: string; endpointId: string };
-    search: (query: string, topK?: number) => Promise<{ path: string; chunk: number; text: string; score: number }[]>;
-  };
   checkpoint: CheckpointManager;
   mcp: AnyValue;
   updateInfo: UpdateInfo | null = null;
@@ -65,6 +61,8 @@ export default class GlossaPlugin extends Plugin {
     // De-dup
     this.settings.agentAlwaysApproveTools = [...new Set(this.settings.agentAlwaysApproveTools)];
     this.settings.agentNeverApproveTools = [...new Set(this.settings.agentNeverApproveTools)];
+    // Deleting files and folders works again, after approval.
+    restoreDeleteTool(this.settings);
     // Bump stale context budget for users created before 1M default. Use
     // `<` against the new default so any leftover value in the 100k..1M range
     // also gets corrected (the old `<= 100_000` missed the 100_001..999_999 band).
@@ -107,22 +105,17 @@ export default class GlossaPlugin extends Plugin {
     await this.saveData(this.settings);
     if (codexMigratedCount > 0) {
       // Defer past Obsidian's startup splash so the Notice is actually visible.
-      this.deferredTasks.schedule(() => new Notice(
+      this.deferredTasks.schedule(() => new Notice(bi(
         `Glossa: cleared stale 'gpt-5.4' model from ${codexMigratedCount} codex endpoint(s). ` +
         `They'll now use the model from ~/.codex/config.toml.`,
-        10_000,
-      ), 1500);
+        `Glossa：已清除 ${codexMigratedCount} 个 Codex 接口里过时的 'gpt-5.4' 模型，之后会使用 ~/.codex/config.toml 中的模型。`,
+      ), 10_000), 1500);
     }
 
     setLanguage(this.settings.uiLanguage);
     this.store = new ChatStore(this);
     await this.store.load(legacy);
 
-    this.embeddingIndex = {
-      size: () => 0,
-      modelInfo: () => ({ model: '', endpointId: '' }),
-      search: async () => [],
-    };
     this.checkpoint = new CheckpointManager(this);
     this.mcp = {
       clients: [],
@@ -163,8 +156,6 @@ export default class GlossaPlugin extends Plugin {
       callback: async () => { await this.activateView(); (this.getView() as AnyValue)?.startNewSession?.(); } });
     this.addCommand({ id: 'unlock', name: 'Unlock encrypted keys',
       callback: () => this.tryUnlock() });
-    this.addCommand({ id: 'rebuild-index', name: 'Rebuild embedding index',
-      callback: () => this.rebuildEmbeddings() });
     this.addCommand({ id: 'check-for-updates', name: 'Check for updates',
       callback: () => this.checkForUpdates({ force: true, notify: true }) });
     this.addCommand({
@@ -317,6 +308,11 @@ export default class GlossaPlugin extends Plugin {
   }
 
   onunload() {
+    // Chats keep running while panels close; unloading the plugin stops them
+    // and writes what arrived.
+    void stopChatRuns(this)
+      .then(() => this.store?.flush())
+      .catch(e => console.error('[Glossa] stopping chats failed', e));
     this.deferredTasks.dispose();
     // Flush pending settings/chat changes once instead of leaving a delayed
     // write alive after unloading. A final view-close save may also persist.
@@ -567,13 +563,6 @@ export default class GlossaPlugin extends Plugin {
   /* ============================================================
      Embedding index
      ============================================================ */
-  async rebuildEmbeddings() {
-    new Notice(bi(
-      'Semantic indexing is disabled in the community review build.',
-      '社区审核版本已关闭语义索引。',
-    ));
-  }
-
   /* ============================================================
      Persistence
      ============================================================ */
@@ -594,6 +583,7 @@ export default class GlossaPlugin extends Plugin {
   }
   async persistAll() {
     await this.saveData({ ...this.settings });
-    await this.store.persist();
+    // Chats write their own files; only a put-off index write is left.
+    await this.store.flush();
   }
 }

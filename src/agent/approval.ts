@@ -5,6 +5,7 @@ import { looksLikeEnvelope, previewEnvelope } from './patch_envelope';
 import { applyTextEdits, describeTextMatches } from './text_edit_engine';
 import { materializePatchTransaction, obsidianPatchFileStore } from './patch_transaction';
 import { setStyle } from '../utils/dom';
+import { bi } from '../utils/i18n';
 
 export interface ApprovalResult {
   ok: boolean;
@@ -34,7 +35,7 @@ class ApprovalModal extends Modal {
     modalEl.addClass('nc-approval');
     contentEl.empty();
 
-    contentEl.createEl('h3', { text: `Approve: ${this.tool.spec.name}` });
+    contentEl.createEl('h3', { text: bi(`Approve: ${this.tool.spec.name}`, `确认操作：${this.tool.spec.name}`) });
     contentEl.createEl('p', {
       text: this.tool.describe ? this.tool.describe(this.args) : this.tool.spec.name,
       cls: 'nc-approval-sub',
@@ -58,9 +59,9 @@ class ApprovalModal extends Modal {
     }
 
     const actions = contentEl.createDiv({ cls: 'nc-approval-actions' });
-    const cancel = actions.createEl('button', { text: 'Deny' });
+    const cancel = actions.createEl('button', { text: bi('Deny', '拒绝') });
     cancel.onclick = () => this.decide({ ok: false });
-    const allow = actions.createEl('button', { text: 'Approve', cls: 'mod-cta' });
+    const allow = actions.createEl('button', { text: bi('Approve', '批准'), cls: 'mod-cta' });
     allow.onclick = () => this.decide(this.buildResult());
     // Visual cue when the diff-preview marked this approval as blocked.
     // The actual gate is in buildResult() so a fast Enter cannot bypass it,
@@ -177,7 +178,7 @@ class ApprovalModal extends Modal {
     const { adds, dels } = diffStats(oldText, newText);
     wrap.createDiv({
       cls: 'nc-approval-stats',
-      text: `+${adds} −${dels}  ·  ${(newText.length)} chars`,
+      text: bi(`+${adds} −${dels}  ·  ${(newText.length)} chars`, `+${adds} −${dels}  ·  ${(newText.length)} 字符`),
     });
 
     // Interactive per-line diff with checkboxes for add/del lines.
@@ -189,7 +190,7 @@ class ApprovalModal extends Modal {
 
     if (tooBigForPerLine) {
       wrap.createDiv({ cls: 'nc-approval-warning',
-        text: `⚠ File is ${Math.max(oldLineCount, newLineCount).toLocaleString()} lines — per-line accept/reject is disabled (only safe up to 2000 lines). Approve = apply ALL changes, Deny = cancel.` });
+        text: bi(`⚠ File is ${Math.max(oldLineCount, newLineCount).toLocaleString()} lines — per-line accept/reject is disabled (only safe up to 2000 lines). Approve = apply ALL changes, Deny = cancel.`, `⚠ 文件有 ${Math.max(oldLineCount, newLineCount).toLocaleString()} 行，无法逐行选择（最多 2000 行）。批准会应用全部改动，拒绝则取消。`) });
     }
     const ops = lineDiff(oldText, newText);
     const diffBox = wrap.createDiv({ cls: 'nc-diff-box' });
@@ -206,7 +207,7 @@ class ApprovalModal extends Modal {
       line.createSpan({ text: op.type === 'add' ? '+' : op.type === 'del' ? '−' : ' ' });
       line.createSpan({ text: ` ${op.text || ' '}` });
     });
-    if (ops.length === 0) wrap.createDiv({ cls: 'nc-diff-line eq', text: '(No changes detected)' });
+    if (ops.length === 0) wrap.createDiv({ cls: 'nc-diff-line eq', text: bi('(No changes detected)', '（没有改动）') });
     // Stash for decide() to rebuild content if user toggled lines.
     (this as AnyValue).__diff = { oldText, newText, decisions };
     return wrap;
@@ -222,7 +223,7 @@ class ApprovalModal extends Modal {
   private buildResult(): ApprovalResult {
     const blockReason = (this as AnyValue).__blockApprove as string | undefined;
     if (blockReason) {
-      try { new Notice(`Approval blocked: ${blockReason}`, 5000); } catch { /* ignore */ }
+      try { new Notice(bi(`Approval blocked: ${blockReason}`, `无法批准：${blockReason}`), 5000); } catch { /* ignore */ }
       return { ok: false };
     }
     const d = (this as AnyValue).__diff as { oldText: string; newText: string; decisions: Map<number, boolean> } | undefined;
@@ -274,7 +275,7 @@ class ApprovalModal extends Modal {
     });
 
     if (parseError) {
-      wrap.createDiv({ cls: 'nc-approval-warning', text: `Parse error: ${parseError}` });
+      wrap.createDiv({ cls: 'nc-approval-warning', text: bi(`Parse error: ${parseError}`, `补丁解析失败：${parseError}`) });
       // Synchronously mark the modal as blocking-approve. The approve button
       // is rendered AFTER this preview (see onOpen ordering), so we set a
       // flag the buildResult / keydown paths check rather than relying on a
@@ -290,7 +291,7 @@ class ApprovalModal extends Modal {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      wrap.createDiv({ cls: 'nc-approval-warning', text: `Preflight failed: ${message}` });
+      wrap.createDiv({ cls: 'nc-approval-warning', text: bi(`Preflight failed: ${message}`, `预检失败：${message}`) });
       (this as AnyValue).__blockApprove = 'Envelope preflight failed.';
       return wrap;
     }
@@ -305,7 +306,7 @@ class ApprovalModal extends Modal {
     for (const f of files) tally(f.oldText, f.newText);
     wrap.createDiv({
       cls: 'nc-approval-stats',
-      text: `envelope · ${ops.length} op${ops.length === 1 ? '' : 's'} · +${totalAdds} −${totalDels}`,
+      text: bi(`envelope · ${ops.length} op${ops.length === 1 ? '' : 's'} · +${totalAdds} −${totalDels}`, `补丁 · ${ops.length} 项操作 · +${totalAdds} −${totalDels}`),
     });
 
     for (const fp of files) {
@@ -316,12 +317,12 @@ class ApprovalModal extends Modal {
       head.createSpan({ text: label });
       if (fp.warning) fileSec.createDiv({ cls: 'nc-approval-warning', text: '⚠ ' + fp.warning });
       if (fp.kind === 'delete') {
-        fileSec.createDiv({ cls: 'nc-diff-line del', text: `(file will be deleted — ${fp.oldText.split('\n').length} lines lost)` });
+        fileSec.createDiv({ cls: 'nc-diff-line del', text: bi(`(file will be deleted — ${fp.oldText.split('\n').length} lines lost)`, `（文件将被删除，共 ${fp.oldText.split('\n').length} 行）`) });
         continue;
       }
       const a = fp.oldText, b = fp.newText ?? '';
       if (a === b) {
-        fileSec.createDiv({ cls: 'nc-diff-line eq', text: '(No changes)' });
+        fileSec.createDiv({ cls: 'nc-diff-line eq', text: bi('(No changes)', '（无改动）') });
       } else {
         const box = fileSec.createDiv({ cls: 'nc-diff-box' });
         renderDiffInto(box, a, b);
@@ -331,7 +332,7 @@ class ApprovalModal extends Modal {
     // If any file has a warning that would break apply, disable approve.
     const blocking = files.some(f => f.warning);
     if (blocking) {
-      wrap.createDiv({ cls: 'nc-approval-warning', text: 'Approve disabled while warnings are above — ask the model to retry.' });
+      wrap.createDiv({ cls: 'nc-approval-warning', text: bi('Approve disabled while warnings are above — ask the model to retry.', '上面有警告时不能批准，请让模型重试。') });
       // Synchronous flag — see __blockApprove handling in decide()/keydown
       // path. Replaces the racy window.setTimeout(0) DOM-button disable.
       (this as AnyValue).__blockApprove = 'Envelope has unresolved warnings.';
@@ -348,7 +349,7 @@ class ApprovalModal extends Modal {
     for (const w of warnings) wrap.createDiv({ cls: 'nc-approval-warning', text: w });
     const disabledMsg = wrap.createDiv({
       cls: 'nc-approval-warning',
-      text: 'Approve disabled — the LLM should retry with a different patch (more unique context). Click ' + 'Deny.',
+      text: bi('Approve disabled — the LLM should retry with a different patch (more unique context). Click Deny.', '无法批准：模型需要换一个补丁重试（提供更独特的上下文）。请点击拒绝。'),
     });
     setStyle(disabledMsg, { fontWeight: '700' });
     // Same synchronous-flag pattern — see __blockApprove in decide().

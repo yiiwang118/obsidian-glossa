@@ -1,5 +1,6 @@
-import { TFile } from 'obsidian';
+import { TFile, TFolder, type App } from 'obsidian';
 import type GlossaPlugin from '../main';
+import { filesInFolder } from './tools/_shared';
 import { textFingerprint } from './text_edit_engine';
 import { summarizeFileChange, type FileChangeSummary } from '../utils/edit_summary';
 
@@ -12,7 +13,14 @@ export interface FileSnapshot {
   restoredAt?: number;
   /** Renames and non-text files cannot be fully restored by text snapshots. */
   undoBlocked?: boolean;
+  /** Part of a call that touched too many files to keep their content. */
+  contentSkipped?: boolean;
 }
+
+/** A call that touches more than this (a large folder deleted or moved) keeps
+ *  no copies; its files stay recoverable from the trash. */
+const MAX_SNAPSHOT_FILES = 300;
+const MAX_SNAPSHOT_CHARS = 8_000_000;
 
 export interface SessionCheckpoint {
   sessionId: string;
@@ -107,15 +115,22 @@ export class CheckpointManager {
         entry = { sessionId, turnId, takenAt: Date.now(), snapshots: [] };
         entries.push(entry);
       }
-      for (const p of paths) {
-        if (entry.snapshots.find(s => s.path === p)) continue;     // already snapshotted this turn
+      const fresh = paths.filter(p => !entry.snapshots.some(s => s.path === p));     // already snapshotted this turn
+      let budget = fresh.length > MAX_SNAPSHOT_FILES ? -1 : MAX_SNAPSHOT_CHARS;
+      for (const p of fresh) {
         const f = this.plugin.app.vault.getAbstractFileByPath(p);
-        if (f instanceof TFile) {
-          const content = await this.plugin.app.vault.read(f);
-          entry.snapshots.push({ path: p, existed: true, contentBefore: content, takenAt: Date.now(), undoBlocked: !isTextSnapshotPath(p) });
-        } else {
+        if (f instanceof TFolder) continue;
+        if (!(f instanceof TFile)) {
           entry.snapshots.push({ path: p, existed: false, contentBefore: null, takenAt: Date.now(), undoBlocked: !isTextSnapshotPath(p) });
+          continue;
         }
+        const content = budget >= 0 && (f.stat?.size ?? 0) <= budget ? await this.plugin.app.vault.read(f) : null;
+        if (content === null || content.length > budget) {
+          entry.snapshots.push({ path: p, existed: true, contentBefore: null, takenAt: Date.now(), undoBlocked: true, contentSkipped: true });
+          continue;
+        }
+        budget -= content.length;
+        entry.snapshots.push({ path: p, existed: true, contentBefore: content, takenAt: Date.now(), undoBlocked: !isTextSnapshotPath(p) });
       }
       // Cap to last 200 turn-checkpoints to bound disk
       while (entries.length > 200) entries.shift();
@@ -135,12 +150,15 @@ export class CheckpointManager {
       const entry = entries.find(e => e.sessionId === sessionId && e.turnId === turnId);
       if (!entry) return;
       for (const snapshot of entry.snapshots.filter(s => paths.includes(s.path))) {
-        const content = await this.readFile(snapshot.path);
+        // A file whose content was not kept is compared by presence only.
+        const content = snapshot.contentSkipped
+          ? (this.plugin.app.vault.getAbstractFileByPath(snapshot.path) instanceof TFile ? '' : null)
+          : await this.readFile(snapshot.path);
         snapshot.after = {
           fingerprint: content === null ? null : textFingerprint(content),
           change: summarizeFileChange(snapshot.existed ? snapshot.contentBefore ?? '' : null, content),
         };
-        if (!isTextSnapshotPath(snapshot.path) && snapshot.after.change) {
+        if ((!isTextSnapshotPath(snapshot.path) || snapshot.contentSkipped) && snapshot.after.change) {
           snapshot.after.change.adds = null;
           snapshot.after.change.dels = null;
           snapshot.undoBlocked = true;
@@ -150,6 +168,17 @@ export class CheckpointManager {
       }
       await this.write(entries);
     });
+  }
+
+  private async ensureFolder(path: string) {
+    let current = '';
+    for (const part of path.split('/').filter(Boolean)) {
+      current = current ? `${current}/${part}` : part;
+      const existing = this.plugin.app.vault.getAbstractFileByPath(current);
+      if (existing instanceof TFolder) continue;
+      if (existing) throw new Error(`${current} is not a folder`);
+      await this.plugin.app.vault.createFolder(current);
+    }
   }
 
   private async readFile(path: string): Promise<string | null> {
@@ -192,6 +221,8 @@ export class CheckpointManager {
           });
           else {
             if (f || current.get(s.path) !== null) throw new Error('File changed during undo');
+            // A file from a deleted folder needs its folders back first.
+            await this.ensureFolder(s.path.split('/').slice(0, -1).join('/'));
             await this.plugin.app.vault.create(s.path, s.contentBefore ?? '');
           }
         } else {
@@ -208,6 +239,21 @@ export class CheckpointManager {
     return { restored, failed };
     });
   }
+}
+
+/** pathsTouchedByTool with folders opened up: deleting or moving a folder
+ *  touches every file in it, and moved files reappear under the new path.
+ *  Call before the tool runs, while the folder still exists. */
+export function filesTouchedByTool(app: App, name: string, args: AnyValue): string[] {
+  const paths = pathsTouchedByTool(name, args);
+  const clean = (value: unknown) => typeof value === 'string' ? value.replace(/^\.\//, '').trim().replace(/\/+$/, '') : '';
+  const source = clean(name === 'delete_note' ? args?.path : name === 'rename_note' ? args?.from : undefined);
+  const folder = source ? app.vault.getAbstractFileByPath(source) : null;
+  if (!(folder instanceof TFolder)) return paths;
+  const files = filesInFolder(folder).map(file => file.path);
+  if (name === 'delete_note') return files;
+  const to = clean(args?.to);
+  return [...files, ...(to ? files.map(path => to + path.slice(folder.path.length)) : [])];
 }
 
 /** Returns the file paths a dangerous tool would touch — used to know what to snapshot. */

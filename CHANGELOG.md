@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-10-20
+
+### Added
+- Chats keep running while you switch chats, start a new one or close the panel. History marks running chats and chats waiting for approval, the history button counts background chats, and a notice opens a chat that finished, failed or needs approval.
+- Delete files and whole folders, move or rename folders, and create empty folders, after approval. Deleted items go to the trash set in Obsidian; the vault root and the configuration folder are refused. Notes from a deleted folder can be restored from the turn's file changes.
+- Per-endpoint temperature: automatic, a fixed value, or left out.
+- Presets for Gemini, xAI, Z.ai, Kimi (global), MiniMax (global), OpenRouter and LM Studio.
+
+### Changed
+- Each chat is stored in its own file under `chats/`, with `chats.json` as a small index, so a save writes one chat instead of the whole history. The move finishes only after every chat is written; until then `chats.json` keeps the old store and the move is retried. The old single file is kept as `chats.v3-backup.json` for 30 days, chats whose files go missing are restored from it, and deleting a chat removes it there too.
+- History search matches what you typed and the answers, not attached notes or selections.
+- Reasoning effort menus follow each official API's documented levels and defaults; third-party endpoints keep every value and send it unchanged.
+- Translation and inline completion use the lightest reasoning effort the endpoint accepts and keep room for answers when a model always reasons.
+- `<think>`, `<thinking>` and `<reasoning>` blocks at the start of an answer, and the `reasoning` field used by OpenRouter and Ollama, appear in the reasoning card.
+- Updated default models and endpoints for the built-in presets, the Claude model list and long-context windows.
+- Chat view, approval cards, tool cards, notices and the `/` menu follow the interface language.
+- Answers use compact headings and clearer paragraph and list spacing in the sidebar.
+- Code blocks use Obsidian's own copy button; the unused semantic search settings and index command were removed.
+
+### Fixed
+- Saving no longer deletes chats beyond the 100 most recent.
+- Two chats editing the same note take turns instead of overwriting each other's changes, and Stop cancels a change that is still waiting for its turn.
+- A skill's allowed tools apply only to the chat run that loaded it, so another chat running at the same time still asks for approval.
+- Switching chats while a message is still being prepared no longer moves attachments or the selection into the other chat.
+- Reasoning replay leaves out thinking blocks that no longer match pruned results or dropped images, avoiding request errors.
+- Exporting a chat never replaces an existing note with the same name.
+
 ## [1.0.0] — 2026-09-30
 
 ### Added

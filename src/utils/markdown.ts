@@ -9,7 +9,7 @@ import { setTrustedSvg } from './dom';
  * - `renderInto`  : safe async render into a target element. Used for both streaming chunks
  *                   and final messages. Throttled at call site.
  * - `escapeHtml`  : kept for status / error text only.
- * - `decorateCodeBlocks`: post-render augmentation (copy / insert / apply buttons).
+ * - `decorateCodeBlocks`: post-render augmentation (Obsidian's copy button + insert / apply).
  */
 
 export async function renderInto(
@@ -362,7 +362,7 @@ const decoratedPres = new WeakSet<HTMLElement>();
 
 export function decorateCodeBlocks(
   container: HTMLElement,
-  handlers: { copy: (code: string) => void; apply?: (code: string) => void; insert?: (code: string) => void }
+  handlers: { apply?: (code: string) => void; insert?: (code: string) => void; labels?: { copy?: string; insert?: string; apply?: string } }
 ) {
   // Cheap early-out: skip the whole scan when the container has no <pre>.
   // Common case during streaming finalize on text-only messages.
@@ -374,17 +374,18 @@ export function decorateCodeBlocks(
     // Belt + suspenders: also check the action-bar marker so older bubbles
     // re-rendered without the WeakSet entry don't double-decorate.
     if (pre.querySelector('.nc-code-actions')) { decoratedPres.add(pre); continue; }
-    // Obsidian's MarkdownRenderer can inject its own large copy-code button as
-    // a direct child of <pre>. Glossa provides a compact toolbar below, so
-    // remove the host button to avoid duplicate controls that themes may size
-    // as full buttons.
+    // Obsidian's MarkdownRenderer adds its own copy-code button to <pre> and
+    // performs the copy itself. Keep that button (moved into Glossa's compact
+    // toolbar below) and drop any other host controls.
+    let nativeCopy: HTMLElement | null = null;
     for (const child of Array.from(pre.children)) {
-      if (child.localName === 'button') child.remove();
+      if (child.localName !== 'button') continue;
+      if (!nativeCopy && child.classList.contains('copy-code-button')) nativeCopy = child as HTMLElement;
+      else child.remove();
     }
 
     const codeEl = pre.querySelector('code');
     const code = codeEl?.textContent ?? '';
-    pre.classList.add('nc-has-code-actions');
 
     const bar = activeWindow.createDiv();
     bar.className = 'nc-code-actions';
@@ -403,20 +404,23 @@ export function decorateCodeBlocks(
       return button;
     };
 
-    const copyBtn = makeButton(ICON.copy, 'Copy code', (button) => {
-      handlers.copy(code);
-      setTrustedSvg(button, ICON.checkThick);
-      window.setTimeout(() => setTrustedSvg(button, ICON.copy), 1200);
-    });
-    bar.appendChild(copyBtn);
+    if (nativeCopy) {
+      nativeCopy.classList.add('nc-code-action');
+      const label = handlers.labels?.copy ?? 'Copy code';
+      nativeCopy.title = label;
+      nativeCopy.setAttribute('aria-label', label);
+      bar.appendChild(nativeCopy);
+    }
 
     if (handlers.insert) {
-      bar.appendChild(makeButton(ICON.insert, 'Insert at cursor', () => handlers.insert(code)));
+      bar.appendChild(makeButton(ICON.insert, handlers.labels?.insert ?? 'Insert at cursor', () => handlers.insert(code)));
     }
     if (handlers.apply) {
-      bar.appendChild(makeButton(ICON.apply, 'Apply to selection', () => handlers.apply(code)));
+      bar.appendChild(makeButton(ICON.apply, handlers.labels?.apply ?? 'Apply to selection', () => handlers.apply(code)));
     }
-    pre.appendChild(bar);
     decoratedPres.add(pre);
+    if (!bar.childElementCount) continue;
+    pre.classList.add('nc-has-code-actions');
+    pre.appendChild(bar);
   }
 }

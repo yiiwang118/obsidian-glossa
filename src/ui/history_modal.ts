@@ -1,6 +1,6 @@
 import { App, Menu, Modal, Notice } from 'obsidian';
 import type GlossaPlugin from '../main';
-import type { ChatSession } from '../types';
+import type { ChatSummary } from '../chat_store';
 import { debounce, setTrustedSvg } from '../utils/dom';
 import { t, bi } from '../utils/i18n';
 import { sessionFolder } from '../utils/chat_folders';
@@ -10,18 +10,26 @@ import { sessionFolder } from '../utils/chat_folders';
    ============================================================ */
 
 /** Open the legacy modal flavour (still used from the command palette). */
-export function openHistoryModal(plugin: GlossaPlugin, onPick: (s: ChatSession) => void) {
+export function openHistoryModal(plugin: GlossaPlugin, onPick: (s: ChatSummary) => void) {
   new HistoryModal(plugin.app, plugin, onPick).open();
 }
 
 /** Mount the compact popover inside an existing container. Returns a cleanup
  *  function. This is the default surface for the sidebar history button. */
+/** Chats that are running right now, so the list can mark them and stop one. */
+export interface HistoryRuns {
+  state: (id: string) => 'running' | 'approval' | null;
+  stop: (id: string) => void;
+  /** Called whenever a run starts, ends or starts waiting; returns an unsubscribe function. */
+  subscribe: (listener: () => void) => () => void;
+}
+
 export function renderHistoryPopover(
   host: HTMLElement,
   plugin: GlossaPlugin,
-  opts: { onPick: (s: ChatSession) => void; onClose: () => void; onDelete?: (id: string) => void; onClear?: () => void },
+  opts: { onPick: (s: ChatSummary) => void; onClose: () => void; onDelete?: (id: string) => void; onClear?: () => void; runs?: HistoryRuns },
 ): () => void {
-  const view = new HistoryPopover(host, plugin, opts.onPick, opts.onClose, opts.onDelete, opts.onClear);
+  const view = new HistoryPopover(host, plugin, opts.onPick, opts.onClose, opts.onDelete, opts.onClear, opts.runs);
   view.render();
   return () => view.destroy();
 }
@@ -55,16 +63,18 @@ class HistoryPopover {
    *  -1 means "no selection yet". Reset whenever the filter changes. */
   private kbdIdx = -1;
   private kbdRows: HTMLElement[] = [];
-  private kbdSessions: ChatSession[] = [];
+  private kbdSessions: ChatSummary[] = [];
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private unsubscribeRuns: (() => void) | null = null;
 
   constructor(
     private root: HTMLElement,
     private plugin: GlossaPlugin,
-    private onPick: (s: ChatSession) => void,
+    private onPick: (s: ChatSummary) => void,
     private onClose: () => void,
     private onDelete?: (id: string) => void,
     private onClear?: () => void,
+    private runs?: HistoryRuns,
   ) {}
 
   render() {
@@ -79,7 +89,7 @@ class HistoryPopover {
     const search = searchWrap.createEl('input', { type: 'text', cls: 'nc-history-pop-search-input' });
     search.placeholder = t('hist_search');
     search.setAttribute('aria-label', t('hist_search'));
-    const onSearch = debounce(() => { this.filter = search.value.toLowerCase(); this.renderList(); }, 80);
+    const onSearch = debounce(() => { this.filter = search.value.replace(/\s+/g, ' ').trim().toLowerCase(); this.renderList(); }, 80);
     search.addEventListener('input', onSearch);
     this.root.ownerDocument.defaultView?.setTimeout(() => { if (search.isConnected) search.focus(); }, 30);
 
@@ -97,7 +107,7 @@ class HistoryPopover {
     // a11y: announce the list semantics so screen readers can navigate
     // session rows as listbox items.
     this.listEl.setAttribute('role', 'listbox');
-    this.listEl.setAttribute('aria-label', 'Chat sessions');
+    this.listEl.setAttribute('aria-label', bi('Chat sessions', '对话列表'));
     this.listEl.addEventListener('mouseleave', () => this.setKbdIdx(-1));
     this.renderList();
 
@@ -126,6 +136,8 @@ class HistoryPopover {
       }
     };
     this.root.ownerDocument.addEventListener('keydown', this.keyHandler, true);
+    // Running marks follow live state without rebuilding rows, so a rename in progress keeps its focus.
+    this.unsubscribeRuns = this.runs?.subscribe(() => this.updateRunMarks()) ?? null;
   }
 
   destroy() {
@@ -133,7 +145,34 @@ class HistoryPopover {
       this.root.ownerDocument.removeEventListener('keydown', this.keyHandler, true);
       this.keyHandler = null;
     }
+    this.unsubscribeRuns?.();
+    this.unsubscribeRuns = null;
     this.root.empty();
+  }
+
+  private updateRunMarks() {
+    if (!this.listEl?.isConnected) return;
+    const rows = Array.from(this.listEl.querySelectorAll<HTMLElement>('.nc-history-pop-row[data-session-id]'));
+    for (const row of rows) this.renderRunMark(row, row.dataset.sessionId ?? '');
+  }
+
+  /** Spinner for a running chat; a separate mark when it waits for approval. */
+  private renderRunMark(row: HTMLElement, id: string) {
+    const state = this.runs?.state(id) ?? null;
+    let mark = row.querySelector<HTMLElement>(':scope > .nc-history-run-mark');
+    row.classList.toggle('running', !!state);
+    if (!state) { mark?.remove(); return; }
+    if (!mark) {
+      mark = row.createSpan({ cls: 'nc-history-run-mark' });
+      const ago = row.querySelector(':scope > .nc-history-pop-row-ago');
+      if (ago) row.insertBefore(mark, ago);
+    }
+    mark.classList.toggle('approval', state === 'approval');
+    mark.textContent = state === 'approval' ? bi('Approve', '待确认') : '';
+    const label = state === 'approval' ? bi('Waiting for your approval', '等待你确认操作') : bi('Running', '运行中');
+    mark.title = label;
+    mark.setAttribute('aria-label', label);
+    mark.setAttribute('role', 'img');
   }
 
   private setKbdIdx(i: number) {
@@ -159,8 +198,8 @@ class HistoryPopover {
     const sessions = all.filter(s => {
       if (this.folderId !== null && sessionFolder(s, folders) !== this.folderId) return false;
       if (!this.filter) return true;
-      if (s.title.toLowerCase().includes(this.filter)) return true;
-      return s.messages.some(m => (m.content ?? '').toLowerCase().includes(this.filter));
+      // Titles, what the user typed and the answers; never attached notes.
+      return s.title.toLowerCase().includes(this.filter) || s.preview.toLowerCase().includes(this.filter);
     });
 
     if (sessions.length === 0) {
@@ -248,7 +287,7 @@ class HistoryPopover {
     input.focus(); input.select();
   }
 
-  private renderRow(s: ChatSession): HTMLElement | null {
+  private renderRow(s: ChatSummary): HTMLElement | null {
     const row = this.listEl.createDiv({ cls: 'nc-history-pop-row' });
     // a11y: rows are option items within the listbox container. aria-selected
     // updates via the keyboard-nav cursor (this.kbdIdx) elsewhere.
@@ -258,10 +297,12 @@ class HistoryPopover {
     row.setAttribute('aria-label', `${s.title || bi('(untitled)', '（无标题）')} · ${this.relativeTime(s.updatedAt)}`);
     if (s.id === this.renamingId) { this.renderRenameInline(row, s); return null; }
 
+    row.dataset.sessionId = s.id;
     const title = row.createSpan({ cls: 'nc-history-pop-row-title', text: s.title || bi('(untitled)', '（无标题）') });
     title.title = title.textContent ?? '';
     const ago = row.createSpan({ cls: 'nc-history-pop-row-ago', text: this.relativeTime(s.updatedAt) });
     ago.title = new Date(s.updatedAt).toLocaleString();
+    this.renderRunMark(row, s.id);
     const actions = row.createEl('button', { cls: 'nc-history-row-more', text: '···', attr: { 'aria-label': bi('Chat actions', '对话操作') } });
     actions.onclick = e => { e.stopPropagation(); this.openRowMenu(s, e); };
 
@@ -280,11 +321,14 @@ class HistoryPopover {
     return row;
   }
 
-  private openRowMenu(s: ChatSession, e: MouseEvent) {
+  private openRowMenu(s: ChatSummary, e: MouseEvent) {
       const menu = new Menu();
       menu.addItem(it => it.setTitle(t('hist_open')).setIcon('arrow-right').onClick(() => this.onPick(s)));
+      if (this.runs?.state(s.id)) {
+        menu.addItem(it => it.setTitle(bi('Stop this chat', '停止运行')).setIcon('square').onClick(() => this.runs?.stop(s.id)));
+      }
       menu.addItem(it => it.setTitle(t('hist_rename')).setIcon('pencil').onClick(() => { this.renamingId = s.id; this.renderList(); }));
-      menu.addItem(it => it.setTitle(t('hist_duplicate')).setIcon('copy').onClick(async () => { await this.plugin.store.duplicateSession(s.id); this.renderList(); }));
+      menu.addItem(it => it.setTitle(t('hist_duplicate')).setIcon('copy').onClick(async () => { await this.plugin.store.duplicateSession(s.id); this.renderFolders(); this.renderList(); }));
       menu.addItem(it => it.setTitle(bi('Move to folder…', '移动到目录…')).setIcon('folder-input').onClick(() => {
         const picker = new Menu();
         for (const folder of [{ id: '', name: bi('Unfiled', '未分类') }, ...this.plugin.store.listFolders()]) {
@@ -307,7 +351,7 @@ class HistoryPopover {
       menu.showAtMouseEvent(e);
   }
 
-  private renderRenameInline(row: HTMLElement, s: ChatSession) {
+  private renderRenameInline(row: HTMLElement, s: ChatSummary) {
     row.addClass('renaming');
     const input = row.createEl('input', { cls: 'nc-history-pop-rename', type: 'text' });
     input.value = s.title;
@@ -343,10 +387,9 @@ class HistoryPopover {
         body: bi(`Delete ${old.length} session(s) older than 7 days?`, `删除 ${old.length} 条 7 天前的对话？`),
         danger: true,
       })) return;
-      for (const s of old) {
-        await this.plugin.store.deleteSession(s.id);
-        this.onDelete?.(s.id);
-      }
+      await this.plugin.store.deleteSessions(old.map(s => s.id));
+      for (const s of old) this.onDelete?.(s.id);
+      this.renderFolders();
       this.renderList();
       new Notice(bi(`Deleted ${old.length} session(s).`, `已删除 ${old.length} 条对话。`));
     }));
@@ -385,7 +428,7 @@ class HistoryPopover {
 
 class HistoryModal extends Modal {
   private view!: HistoryPopover;
-  constructor(app: App, private plugin: GlossaPlugin, private onPickCb: (s: ChatSession) => void) { super(app); }
+  constructor(app: App, private plugin: GlossaPlugin, private onPickCb: (s: ChatSummary) => void) { super(app); }
   onOpen() {
     const { contentEl, modalEl } = this;
     modalEl.addClass('nc-history-modal');

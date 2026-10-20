@@ -1,4 +1,5 @@
 import type { Endpoint, GlossaSettings } from '../types';
+import { lightestReasoningEffort } from '../providers/reasoning_catalog';
 
 export const INLINE_COMPLETION_CONTEXT_BEFORE = 800;
 export const INLINE_COMPLETION_CONTEXT_AFTER = 200;
@@ -269,7 +270,9 @@ export function resolveInlineCompletionEndpoint(settings: GlossaSettings): Endpo
   return dedicated ?? settings.endpoints.find(endpoint => endpoint.id === settings.activeEndpointId) ?? null;
 }
 
+/** Ghost text needs the fastest answer: the least reasoning the endpoint allows. */
 export function prepareInlineCompletionEndpoint(endpoint: Endpoint, settings: GlossaSettings): Endpoint {
   const model = settings.inlineCompletionModel || endpoint.model;
-  return { ...endpoint, model, reasoningEffort: 'off' };
+  const prepared = { ...endpoint, model, customReasoningEffort: undefined };
+  return { ...prepared, reasoningEffort: lightestReasoningEffort(prepared) };
 }

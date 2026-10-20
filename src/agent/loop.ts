@@ -1,7 +1,8 @@
 import { App } from 'obsidian';
 import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, isReadOnlyTool, normalizeToolResult, validateToolInput, type ToolImpl, type ToolRunResult } from './tools';
+import { acquireFileLocks } from './file_locks';
 import { askApproval, type ApprovalResult } from './approval';
-import { CheckpointManager, pathsTouchedByTool } from './checkpoint';
+import { CheckpointManager, filesTouchedByTool, pathsTouchedByTool } from './checkpoint';
 import type { LLMProvider, MessageInput, ToolContentBlock, ToolSpec } from '../providers/types';
 import type { TokenUsage, ToolEvent, PermissionLevel, PermissionRule } from '../types';
 import { matchPermissionRule, modelContextWindow } from '../types';
@@ -9,7 +10,7 @@ import { uid } from '../utils/dom';
 import { buildSkillSystemBlock } from './skill_listing';
 import { activateForPath } from './skill_activation';
 import { getSkill } from './skills';
-import { clearSkillScopedAllowedTools, isAllowedForSkill, pushSkillFrame } from './skill_scoped_allow';
+import { SkillAllowScope } from './skill_scoped_allow';
 import { persistLargeResult } from './tool_result_store';
 import { ToolFailureGuard, toolResultLooksLikeError } from './tool_failure_guard';
 import { pruneUnderPressure } from '../utils/context_pressure';
@@ -184,6 +185,7 @@ If the user's request can be answered DIRECTLY from the attached context (the <c
 2. \`file_edit\` for one exact replacement; empty \`old_string\` creates a file and never overwrites.
 3. \`apply_patch\` for multiple hunks/files or coordinated add/delete/move operations.
 4. Load \`write_note\` only for an intentional whole-file replacement.
+5. Load \`delete_note\` to move a file or a whole folder to the trash, \`rename_note\` to move or rename a file or folder, and \`create_folder\` for an empty folder. Each asks the user first.
 
 **Batching rule (CRITICAL — saves dozens of round-trips)**: When the same kind of change
 appears 3+ times in one file (e.g. removing every \`[N]\` citation marker, renaming a symbol
@@ -273,13 +275,16 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
   ];
   const prunedToolCallIds = collectRecordedPrunedToolCallIds(messages);
   for (const id of opts.initialPrunedIds ?? []) prunedToolCallIds.add(id);
+  // Results pruned before this turn were already shortened when its thinking
+  // blocks were produced; only results pruned during the turn change history.
+  const prunedBeforeTurn = new Set(prunedToolCallIds);
   const failureGuard = new ToolFailureGuard();
 
-  // Reset skill-scoped allow frames at turn boundary. Skills invoked in
-  // PRIOR turns of the same session don't propagate to fresh user requests —
-  // each turn is treated as a clean slate. If the user wants persistent
-  // skill-scoped allow, they configure it as a regular PermissionRule.
-  clearSkillScopedAllowedTools();
+  // Skill-scoped allows belong to this run alone. Skills invoked in PRIOR
+  // turns don't propagate to fresh user requests, and chats running at the
+  // same time never share them. If the user wants persistent skill-scoped
+  // allow, they configure it as a regular PermissionRule.
+  const skillAllows = new SkillAllowScope();
 
   let totalUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUSD: 0 };
   let compactRetriedThisTurn = false;
@@ -372,6 +377,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
 
     let assistantText = '';
     let assistantReasoning = '';
+    let assistantThinkingBlocks: AnyValue[] | undefined;
     let contextOverflowSeen = false;
     const toolCalls: { id: string; name: string; args: AnyValue }[] = [];
     const passthroughCardsById = new Map<string, ToolEvent>();
@@ -380,7 +386,11 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     try {
       for await (const ch of opts.provider.stream({
         systemPrompt: sysPrompt,
-        messages: filterPrunedToolContext(messages, prunedToolCallIds),
+        messages: withoutStaleThinking(
+          filterPrunedToolContext(messages, prunedToolCallIds),
+          id => prunedToolCallIds.has(id) && !prunedBeforeTurn.has(id),
+          step > 0 && !!opts.attachedImages?.length,
+        ),
         tools,
         model: opts.model,
         signal: opts.signal,
@@ -419,6 +429,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           }
         } else if (ch.type === 'final') {
           if (ch.reasoningContent && !assistantReasoning) assistantReasoning = ch.reasoningContent;
+          if (ch.thinkingBlocks?.length) assistantThinkingBlocks = ch.thinkingBlocks;
           if (ch.usage) {
             totalUsage.input = (totalUsage.input ?? 0) + (ch.usage.input ?? 0);
             totalUsage.output = (totalUsage.output ?? 0) + (ch.usage.output ?? 0);
@@ -495,6 +506,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       content: assistantText,
       toolCalls: toolCalls.map(t => ({ id: t.id, name: t.name, args: t.args })),
       reasoningContent: assistantReasoning || undefined,
+      thinkingBlocks: assistantThinkingBlocks,
     });
 
     // Detect attempt_completion → stop after running it.
@@ -704,7 +716,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       // Skill-scoped allow: if any active skill frame allowlists this tool,
       // skip approval. Audit it as auto-allow so the user can still see it
       // happened.
-      const allowedBySkill = !ruleAllows && isAllowedForSkill(call.name);
+      const allowedBySkill = !ruleAllows && skillAllows.allows(call.name);
       if (allowedBySkill) {
         opts.onPermissionDecision?.({
           at: Date.now(), tool: call.name, args: JSON.stringify(call.args ?? {}).slice(0, 200),
@@ -789,172 +801,187 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         messages.push({ role: 'tool', toolCallId: call.id, toolName: call.name, toolIsError: true, content: ev.result });
         return;
       }
-      // Snapshot files before running + activate any conditional skill whose
-      // `paths` patterns match the touched path. Activation is fire-and-forget;
-      // it changes the in-memory skill listing for the NEXT turn (not this one).
-      if (tool) {
-        const paths = pathsTouchedByTool(call.name, effectiveArgs);
-        if (paths.length) {
-          if (opts.checkpoint && opts.sessionId && opts.turnId) {
-            try { await opts.checkpoint.snapshot(opts.sessionId, opts.turnId, paths); } catch { /* ignore */ }
+      // Files this call changes; a deleted or moved folder counts every file in it.
+      const touchedFiles = tool ? filesTouchedByTool(opts.app, call.name, effectiveArgs) : [];
+      // Chats running at the same time take turns on the same note: the lock
+      // spans the before-snapshot, the write and the after-snapshot.
+      const releaseFileLocks = await acquireFileLocks(touchedFiles);
+      try {
+        // Stop may have been pressed while another chat held the lock.
+        if (opts.signal?.aborted) {
+          ev.status = 'cancelled'; ev.errorCode = 'CANCELLED'; ev.result = 'Cancelled before execution.'; ev.endedAt = Date.now();
+          opts.onToolEnd(ev);
+          messages.push({ role: 'tool', toolCallId: call.id, toolName: call.name, toolIsError: true, content: ev.result });
+          return;
+        }
+        // Snapshot files before running + activate any conditional skill whose
+        // `paths` patterns match the touched path. Activation is fire-and-forget;
+        // it changes the in-memory skill listing for the NEXT turn (not this one).
+        if (tool) {
+          if (touchedFiles.length && opts.checkpoint && opts.sessionId && opts.turnId) {
+            try { await opts.checkpoint.snapshot(opts.sessionId, opts.turnId, touchedFiles); } catch { /* ignore */ }
           }
-          for (const p of paths) {
+          for (const p of pathsTouchedByTool(call.name, effectiveArgs)) {
             activateForPath(opts.app, p).catch(() => {});
           }
         }
-      }
 
-      ev.status = 'running'; opts.onToolEnd({ ...ev });
-      // Give the renderer one macrotask to paint the running state before a
-      // synchronous-heavy tool (large file edit, markdown diff, etc.) starts.
-      // Without this, the sidebar can look frozen until the tool returns.
-      await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+        ev.status = 'running'; opts.onToolEnd({ ...ev });
+        // Give the renderer one macrotask to paint the running state before a
+        // synchronous-heavy tool (large file edit, markdown diff, etc.) starts.
+        // Without this, the sidebar can look frozen until the tool returns.
+        await new Promise<void>(resolve => window.setTimeout(resolve, 0));
 
-      try {
-        // Stale-write guard: if user toggled per-line in approval, we captured a file
-        // snapshot. If the file changed between preview and apply, refuse to overwrite.
-        const expectedBefore: string | undefined = (effectiveArgs).__expectedBefore;
-        const pathField = (effectiveArgs).path ?? (effectiveArgs).file_path;
-        if (expectedBefore != null && pathField) {
-          const { TFile } = await import('obsidian');
-          const f = opts.app.vault.getAbstractFileByPath(pathField);
-          if (f instanceof TFile) {
-            const now = await opts.app.vault.read(f);
-            if (now !== expectedBefore) throw new Error('File changed between preview and apply — please regenerate.');
+        try {
+          // ...or while the snapshot was taken. The after-snapshot below still
+          // records that nothing changed.
+          if (opts.signal?.aborted) {
+            const cancelled = new Error('Cancelled before execution.');
+            cancelled.name = 'AbortError';
+            throw cancelled;
           }
-          delete (effectiveArgs).__expectedBefore;
-        }
+          // Stale-write guard: if user toggled per-line in approval, we captured a file
+          // snapshot. If the file changed between preview and apply, refuse to overwrite.
+          const expectedBefore: string | undefined = (effectiveArgs).__expectedBefore;
+          const pathField = (effectiveArgs).path ?? (effectiveArgs).file_path;
+          if (expectedBefore != null && pathField) {
+            const { TFile } = await import('obsidian');
+            const f = opts.app.vault.getAbstractFileByPath(pathField);
+            if (f instanceof TFile) {
+              const now = await opts.app.vault.read(f);
+              if (now !== expectedBefore) throw new Error('File changed between preview and apply — please regenerate.');
+            }
+            delete (effectiveArgs).__expectedBefore;
+          }
 
-        let raw: string | ToolRunResult;
-        // Pass the agent loop's signal to every tool invocation so net-bound
-        // tools (web_fetch, web_research, plugin bridges) can cooperate
-        // with the user's Stop button
-        // instead of running to completion in the background. Tools that
-        // don't read the signal are unchanged.
-        const toolCtx = { signal: opts.signal, nativePdfInput: opts.nativePdfInput };
-        if (rewriteToWriteNote) {
-          const writeTool = getTool('write_note');
-          if (!writeTool) throw new Error('write_note tool not found');
-          raw = await writeTool.run(opts.app, effectiveArgs, toolCtx);
-        } else if (tool) {
-          // Fork interception: when the `skill` tool is invoked and the
-          // resolved skill has `context: fork`, run it via the sub-agent
-          // harness instead of injecting body inline. The sub-agent's final
-          // text is the tool result the model sees.
-          if (call.name === 'skill') {
-            const skillName = String((effectiveArgs)?.skill ?? '');
-            const skill = skillName ? await getSkill(opts.app, skillName) : null;
-            if (skill?.context === 'fork') {
-              const { forkSkill } = await import('./sub_agent');
-              const argStr = typeof (effectiveArgs)?.args === 'string' ? (effectiveArgs).args : '';
-              const fork = await forkSkill({
-                app: opts.app,
-                provider: opts.provider,
-                systemPrompt: opts.systemPrompt,
-                skill,
-                args: argStr,
-                permissionLevel: opts.permissionLevel,
-                autoApproveTools: opts.autoApproveTools,
-                neverApproveTools: opts.neverApproveTools,
-                permissionRules: opts.permissionRules,
-                endpointKind: opts.endpointKind,
-                endpointFullAgent: opts.endpointFullAgent,
-                checkpoint: opts.checkpoint,
-                mcp: opts.mcp,
-                signal: opts.signal,
-              });
-              raw = fork.ok
-                ? `[forked skill "${skillName}" completed]\n\n${fork.result || '(no text result)'}`
-                : `[forked skill "${skillName}" failed]\n\n${fork.error ?? 'unknown error'}\n\n--- partial ---\n${fork.result}`;
+          let raw: string | ToolRunResult;
+          // Pass the agent loop's signal to every tool invocation so net-bound
+          // tools (web_fetch, web_research, plugin bridges) can cooperate
+          // with the user's Stop button
+          // instead of running to completion in the background. Tools that
+          // don't read the signal are unchanged.
+          const toolCtx = { signal: opts.signal, nativePdfInput: opts.nativePdfInput };
+          if (rewriteToWriteNote) {
+            const writeTool = getTool('write_note');
+            if (!writeTool) throw new Error('write_note tool not found');
+            raw = await writeTool.run(opts.app, effectiveArgs, toolCtx);
+          } else if (tool) {
+            // Fork interception: when the `skill` tool is invoked and the
+            // resolved skill has `context: fork`, run it via the sub-agent
+            // harness instead of injecting body inline. The sub-agent's final
+            // text is the tool result the model sees.
+            if (call.name === 'skill') {
+              const skillName = String((effectiveArgs)?.skill ?? '');
+              const skill = skillName ? await getSkill(opts.app, skillName) : null;
+              if (skill?.context === 'fork') {
+                const { forkSkill } = await import('./sub_agent');
+                const argStr = typeof (effectiveArgs)?.args === 'string' ? (effectiveArgs).args : '';
+                const fork = await forkSkill({
+                  app: opts.app,
+                  provider: opts.provider,
+                  systemPrompt: opts.systemPrompt,
+                  skill,
+                  args: argStr,
+                  permissionLevel: opts.permissionLevel,
+                  autoApproveTools: opts.autoApproveTools,
+                  neverApproveTools: opts.neverApproveTools,
+                  permissionRules: opts.permissionRules,
+                  endpointKind: opts.endpointKind,
+                  endpointFullAgent: opts.endpointFullAgent,
+                  checkpoint: opts.checkpoint,
+                  mcp: opts.mcp,
+                  signal: opts.signal,
+                });
+                raw = fork.ok
+                  ? `[forked skill "${skillName}" completed]\n\n${fork.result || '(no text result)'}`
+                  : `[forked skill "${skillName}" failed]\n\n${fork.error ?? 'unknown error'}\n\n--- partial ---\n${fork.result}`;
+              } else {
+                raw = await tool.run(opts.app, effectiveArgs, toolCtx);
+              }
             } else {
               raw = await tool.run(opts.app, effectiveArgs, toolCtx);
             }
           } else {
-            raw = await tool.run(opts.app, effectiveArgs, toolCtx);
+            raw = await mcpEntry.client.callTool(mcpEntry.originalName, effectiveArgs);
           }
-        } else {
-          raw = await mcpEntry.client.callTool(mcpEntry.originalName, effectiveArgs);
-        }
-        const norm = normalizeToolResult(raw);
-        ev.skillVersion = norm.skillVersion;
-        if (norm.contextPruneRequest) {
-          const visibleMessages = filterPrunedToolContext(messages, prunedToolCallIds);
-          const outcome = resolveContextPruneRequest(visibleMessages, norm.contextPruneRequest, call.id);
-          for (const id of outcome.acceptedToolCallIds) prunedToolCallIds.add(id);
-          norm.text = formatContextPruneOutcome(norm.contextPruneRequest, outcome);
-        }
-        // Legacy string tools retain compatibility; explicit outcomes always win.
-        const outcome = norm.status ?? (toolResultLooksLikeError(norm.text) ? 'error' : 'success');
-        const returnedError = outcome !== 'success';
-        ev.errorCode = norm.errorCode ?? (returnedError ? 'TOOL_FAILED' : undefined);
-        if (!returnedError && norm.loadedToolNames?.length) {
-          const loaded = loadRequestedTools(norm.loadedToolNames);
-          if (loaded.blocked.length > 0) {
-            norm.text = loaded.ready.length === 0
-              ? `No requested specialized tools were loaded in the current permission/provider mode: ${loaded.blocked.join(', ')}.`
-              : `${norm.text}\nNot loaded in the current permission/provider mode: ${loaded.blocked.join(', ')}.`;
+          const norm = normalizeToolResult(raw);
+          ev.skillVersion = norm.skillVersion;
+          if (norm.contextPruneRequest) {
+            const visibleMessages = filterPrunedToolContext(messages, prunedToolCallIds);
+            const outcome = resolveContextPruneRequest(visibleMessages, norm.contextPruneRequest, call.id);
+            for (const id of outcome.acceptedToolCallIds) prunedToolCallIds.add(id);
+            norm.text = formatContextPruneOutcome(norm.contextPruneRequest, outcome);
           }
-        }
-        // Skill-scoped allow: when the `skill` tool runs successfully, push a
-        // frame so the skill's `allowed-tools` auto-approve in subsequent
-        // tool calls this turn. The frame stays on the stack until session
-        // reset (cleared between fully-new conversations via
-        // clearSkillScopedAllowedTools elsewhere).
-        // At this point we're inside the try-block past tool.run(), so the
-        // tool succeeded — no need to check ev.status.
-        if (!returnedError && call.name === 'skill') {
-          try {
-            const skillName = String((effectiveArgs)?.skill ?? '');
-            if (skillName) {
-              const skill = await getSkill(opts.app, skillName);
-              if (skill?.allowedTools?.length) {
-                pushSkillFrame(skillName, skill.allowedTools);
-              }
+          // Legacy string tools retain compatibility; explicit outcomes always win.
+          const outcome = norm.status ?? (toolResultLooksLikeError(norm.text) ? 'error' : 'success');
+          const returnedError = outcome !== 'success';
+          ev.errorCode = norm.errorCode ?? (returnedError ? 'TOOL_FAILED' : undefined);
+          if (!returnedError && norm.loadedToolNames?.length) {
+            const loaded = loadRequestedTools(norm.loadedToolNames);
+            if (loaded.blocked.length > 0) {
+              norm.text = loaded.ready.length === 0
+                ? `No requested specialized tools were loaded in the current permission/provider mode: ${loaded.blocked.join(', ')}.`
+                : `${norm.text}\nNot loaded in the current permission/provider mode: ${loaded.blocked.join(', ')}.`;
             }
-          } catch (e) { console.warn('[loop] failed to push skill frame', e); }
-        }
-        // Large-result persistence: when the model-bound text exceeds the
-        // tool's declared `maxResultSizeChars`, save the full text to
-        // `.glossa/tool_outputs/...` and replace the inline payload with a
-        // head+tail preview pointing at that path. The UI card still receives
-        // the FULL `ev.result` so the user sees the unredacted output —
-        // only the model-facing string gets shortened (set below in the
-        // messages.push for role='tool'). We stash the redacted form in
-        // `ev._modelBoundResult` for the loop to pick up.
-        const cap = tool?.maxResultSizeChars ?? Infinity;
-        let modelBoundText = norm.modelText ?? norm.text;
-        if (Number.isFinite(cap) && modelBoundText.length > cap) {
-          const persisted = await persistLargeResult(opts.app, call.name, call.id, modelBoundText);
-          if (persisted) {
-            modelBoundText = persisted.preview;
-          } else {
-            // Persistence failed — fall back to head-only truncation.
-            modelBoundText = modelBoundText.slice(0, cap) + `\n\n[truncated at ${cap} chars; persistence failed]`;
           }
+          // Skill-scoped allow: when the `skill` tool runs successfully, push a
+          // frame so the skill's `allowed-tools` auto-approve in subsequent
+          // tool calls of this run only.
+          // At this point we're inside the try-block past tool.run(), so the
+          // tool succeeded — no need to check ev.status.
+          if (!returnedError && call.name === 'skill') {
+            try {
+              const skillName = String((effectiveArgs)?.skill ?? '');
+              if (skillName) {
+                const skill = await getSkill(opts.app, skillName);
+                if (skill?.allowedTools?.length) {
+                  skillAllows.push(skillName, skill.allowedTools);
+                }
+              }
+            } catch (e) { console.warn('[loop] failed to push skill frame', e); }
+          }
+          // Large-result persistence: when the model-bound text exceeds the
+          // tool's declared `maxResultSizeChars`, save the full text to
+          // `.glossa/tool_outputs/...` and replace the inline payload with a
+          // head+tail preview pointing at that path. The UI card still receives
+          // the FULL `ev.result` so the user sees the unredacted output —
+          // only the model-facing string gets shortened (set below in the
+          // messages.push for role='tool'). We stash the redacted form in
+          // `ev._modelBoundResult` for the loop to pick up.
+          const cap = tool?.maxResultSizeChars ?? Infinity;
+          let modelBoundText = norm.modelText ?? norm.text;
+          if (Number.isFinite(cap) && modelBoundText.length > cap) {
+            const persisted = await persistLargeResult(opts.app, call.name, call.id, modelBoundText);
+            if (persisted) {
+              modelBoundText = persisted.preview;
+            } else {
+              // Persistence failed — fall back to head-only truncation.
+              modelBoundText = modelBoundText.slice(0, cap) + `\n\n[truncated at ${cap} chars; persistence failed]`;
+            }
+          }
+          ev.status = outcome;
+          ev.result = norm.text;                        // UI gets the full text
+          (ev as AnyValue)._modelBoundResult = modelBoundText; // model gets preview
+          modelContentBlocks = norm.contentBlocks;
+          // PDF payloads can be many megabytes. Keep them in this live run so the
+          // next model step can inspect them, but do not persist them in chats.json.
+          // A later turn can call read_pdf again from the compact path/page result.
+          const persistentBlocks = norm.contentBlocks?.filter(block => block.type !== 'document');
+          ev.contentBlocks = persistentBlocks?.length ? persistentBlocks : undefined;
+        } catch (e) {
+          ev.status = opts.signal?.aborted || e.name === 'AbortError' ? 'cancelled' : 'error';
+          ev.errorCode = ev.status === 'cancelled' ? 'CANCELLED' : 'TOOL_EXCEPTION';
+          ev.result = e.message ?? String(e);
         }
-        ev.status = outcome;
-        ev.result = norm.text;                        // UI gets the full text
-        (ev as AnyValue)._modelBoundResult = modelBoundText; // model gets preview
-        modelContentBlocks = norm.contentBlocks;
-        // PDF payloads can be many megabytes. Keep them in this live run so the
-        // next model step can inspect them, but do not persist them in chats.json.
-        // A later turn can call read_pdf again from the compact path/page result.
-        const persistentBlocks = norm.contentBlocks?.filter(block => block.type !== 'document');
-        ev.contentBlocks = persistentBlocks?.length ? persistentBlocks : undefined;
-      } catch (e) {
-        ev.status = opts.signal?.aborted || e.name === 'AbortError' ? 'cancelled' : 'error';
-        ev.errorCode = ev.status === 'cancelled' ? 'CANCELLED' : 'TOOL_EXCEPTION';
-        ev.result = e.message ?? String(e);
-      }
-      if (tool && opts.checkpoint && opts.sessionId && opts.turnId) {
-        const paths = pathsTouchedByTool(call.name, effectiveArgs);
-        if (paths.length) {
+        if (tool && opts.checkpoint && opts.sessionId && opts.turnId && touchedFiles.length) {
           try {
             const movesFiles = call.name === 'rename_note'
               || (call.name === 'apply_patch' && typeof effectiveArgs.patch === 'string' && /^\*\*\* Move to:/m.test(effectiveArgs.patch));
-            await opts.checkpoint.recordAfter(opts.sessionId, opts.turnId, paths, movesFiles);
+            await opts.checkpoint.recordAfter(opts.sessionId, opts.turnId, touchedFiles, movesFiles);
           } catch (error) { console.warn('[Glossa] could not record edit summary', error); }
         }
+      } finally {
+        releaseFileLocks();
       }
       ev.endedAt = Date.now();
       opts.onToolEnd(ev);
@@ -991,4 +1018,29 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
 
   opts.onError(`Max steps (${opts.maxSteps}) reached without final answer.`);
   opts.onFinal(totalUsage);
+}
+
+/** Thinking blocks are bound to the exact history they were produced with.
+ *  When an earlier message changes during the turn — a tool result pruned
+ *  under context pressure, or the first step's images no longer attached —
+ *  the blocks after it would be rejected, so they are left out instead. */
+export function withoutStaleThinking(
+  messages: MessageInput[],
+  prunedInTurn: (toolCallId: string) => boolean,
+  imagesDropped: boolean,
+): MessageInput[] {
+  const firstBlock = messages.findIndex(message => message.thinkingBlocks?.length);
+  if (firstBlock < 0) return messages;
+  let changedAt = Number.POSITIVE_INFINITY;
+  if (imagesDropped) {
+    for (let i = firstBlock - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') { changedAt = i; break; }
+    }
+  }
+  const pruned = messages.findIndex(message => message.role === 'tool' && !!message.toolCallId && prunedInTurn(message.toolCallId));
+  if (pruned >= 0) changedAt = Math.min(changedAt, pruned);
+  if (!Number.isFinite(changedAt)) return messages;
+  return messages.map((message, index) => index > changedAt && message.thinkingBlocks
+    ? { ...message, thinkingBlocks: undefined }
+    : message);
 }

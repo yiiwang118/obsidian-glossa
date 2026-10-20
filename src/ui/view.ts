@@ -1,5 +1,5 @@
 import {
-  ItemView, WorkspaceLeaf, MarkdownView, TFile, Notice, Menu, FileSystemAdapter,
+  ItemView, WorkspaceLeaf, MarkdownView, TFile, TFolder, Notice, Menu, FileSystemAdapter,
 } from 'obsidian';
 import type GlossaPlugin from '../main';
 import { ContextManager } from '../context/manager';
@@ -14,7 +14,7 @@ import {
   listFilesForPicker,
   type SelectionInfo,
 } from '../context/sources';
-import { BUILTIN_SLASH_COMMANDS, applySlashTemplate } from '../commands/slash';
+import { BUILTIN_SLASH_COMMANDS, applySlashTemplate, slashCommandTitle } from '../commands/slash';
 import { Popup, type PopupItem, type PopupOptions } from './popup';
 import { modelPickerItems, modelPickerOptions } from './model_picker';
 import { cliModelItems } from './cli_picker';
@@ -30,10 +30,13 @@ import { el, clear, uid, debounce, setStyle, setVars, setTrustedSvg } from '../u
 import { estimateTokens, formatTokenCount } from '../utils/tokens';
 import { buildProvider, supportsNativePdfInput } from '../providers/registry';
 import type { ChatMessage, ContextItem, ContextItemRef, ChatSession, Endpoint, ToolEvent, PlanItem } from '../types';
-import { effectiveProxy, modelContextWindow, reasoningOptionsForEndpoint, customEffortValue } from '../types';
+import { effectiveProxy, modelContextWindow, customEffortValue } from '../types';
+import { reasoningProfile, requiresReasoningReplay, selectedReasoningEntry, type ReasoningProfile } from '../providers/reasoning_catalog';
 import { CustomApiProvider } from '../providers/custom_api';
 import type { MessageInput } from '../providers/types';
 import { runAgentLoop } from '../agent/loop';
+import { isMeaningfulChat } from '../chat_store';
+import { filesInFolder } from '../agent/tools/_shared';
 import { compactSession, applyCompact, estimateSessionTokens, undoCompact as undoCompactInSession } from '../agent/compact';
 import {
   metaFor,
@@ -150,6 +153,172 @@ interface ContextTokenBreakdown {
   providerInput?: number;
 }
 
+type RunActivityStatus = 'thinking' | 'tool' | 'idle';
+
+interface PendingApproval {
+  tool: ToolImpl;
+  args: AnyValue;
+  settle: (result: ApprovalResult) => void;
+  el?: HTMLElement;
+  cleanup?: () => void;
+  /** Background reminder, hidden once the approval is answered or released. */
+  notice?: Notice | null;
+}
+
+/** One running turn. It belongs to its chat, not to the screen: switching
+ *  chats only detaches `ui`, and the turn keeps writing into `session`. */
+interface ChatRun {
+  session: ChatSession;
+  /** Snapshot taken at send time, so edits made while viewing another chat
+   *  never change a turn that is already running. */
+  endpoint: Endpoint;
+  controller: AbortController;
+  turnId: string;
+  asst: ChatMessage | null;
+  buf: string;
+  lastChunkWasTool: boolean;
+  segmentStartedAt: number;
+  activity: { label: string; status: RunActivityStatus; startedAt: number };
+  ui: MsgUI | null;
+  approval: PendingApproval | null;
+}
+
+export type ChatRunState = 'running' | 'approval';
+
+/** Running chats belong to the plugin, not to a panel: closing the Glossa
+ *  panel leaves them running, and a panel opened later shows them again.
+ *  The hub also owns the debounced chat saves, so a background chat keeps
+ *  saving with no panel open. */
+class ChatRunHub {
+  readonly runs = new Map<string, ChatRun>();
+  /** Chats whose send is being prepared (attachments, unlock, compaction). */
+  readonly submitting = new Set<string>();
+  readonly goalArmed = new Set<string>();
+  readonly queueArmed = new Set<string>();
+  readonly breakdowns = new WeakMap<ChatSession, ContextTokenBreakdown>();
+  readonly visualContexts = new WeakMap<ChatSession, { images: { dataUri: string; name?: string }[] }>();
+  readonly views = new Set<GlossaView>();
+  /** Set while the plugin unloads: nothing new starts or continues. */
+  stopped = false;
+  private readonly listeners = new Set<() => void>();
+  private readonly pending = new Set<ChatSession>();
+  private timer: number | null = null;
+
+  constructor(private readonly plugin: GlossaPlugin) {}
+
+  /** The open panel showing `session`, if any. */
+  screenFor(session: ChatSession): GlossaView | null {
+    for (const view of this.views) if (view.showsSession(session)) return view;
+    return null;
+  }
+
+  state(id: string): ChatRunState | null {
+    const run = this.runs.get(id);
+    if (!run) return null;
+    return run.approval ? 'approval' : 'running';
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  notify() {
+    for (const view of this.views) view.updateHistoryBadge();
+    for (const listener of [...this.listeners]) {
+      try { listener(); } catch (error) { console.warn('[Glossa] history refresh failed', error); }
+    }
+  }
+
+  /** Stop one chat's turn and its queued or task continuation; what arrived is kept. */
+  cancel(session: ChatSession) {
+    this.queueArmed.delete(session.id);
+    this.goalArmed.delete(session.id);
+    disarmGoal(session);
+    this.runs.get(session.id)?.controller.abort();
+    this.persist(session);
+  }
+
+
+  /** Debounced save. Long runs touch chats many times per turn; one write per second is enough. */
+  persist(session: ChatSession) {
+    if (!isMeaningfulChat(session)) return;
+    this.pending.add(session);
+    if (this.timer !== null) return;
+    this.timer = window.setTimeout(() => {
+      this.timer = null;
+      void this.savePending();
+    }, 1000);
+  }
+
+  /** Save now (with every other chat that was waiting for the debounce). */
+  async flush(session?: ChatSession) {
+    if (this.timer !== null) { window.clearTimeout(this.timer); this.timer = null; }
+    await this.savePending(session);
+  }
+
+  /** A deleted chat must not be written back by a save that was already queued. */
+  forget(session: ChatSession) {
+    this.pending.delete(session);
+    if (this.pending.size || this.timer === null) return;
+    window.clearTimeout(this.timer);
+    this.timer = null;
+  }
+
+  private async savePending(extra?: ChatSession) {
+    const sessions = [...this.pending];
+    this.pending.clear();
+    if (extra && !sessions.includes(extra)) sessions.push(extra);
+    const meaningful = sessions.filter(isMeaningfulChat);
+    if (meaningful.length) await this.plugin.store.saveSessions(meaningful);
+  }
+
+  /** Tell the user about a chat that no open panel shows; clicking opens it. */
+  notice(session: ChatSession, kind: 'approval' | 'done' | 'error'): Notice | null {
+    if (this.stopped || this.screenFor(session)) return null;
+    const raw = String(session.title || bi('Untitled chat', '未命名对话')).replace(/\s+/g, ' ').trim();
+    const title = raw.length > 40 ? `${raw.slice(0, 39).trim()}…` : raw;
+    const text = kind === 'approval'
+      ? bi(`“${title}” is waiting for your approval. Click to open.`, `「${title}」等待你确认一个操作，点击查看。`)
+      : kind === 'error'
+        ? bi(`“${title}” stopped with an error. Click to open.`, `「${title}」运行出错，点击查看。`)
+        : bi(`“${title}” finished in the background. Click to open.`, `「${title}」已在后台完成，点击查看。`);
+    const notice = new Notice(text, kind === 'approval' ? 0 : 6000);
+    notice.messageEl?.addEventListener('click', () => { void this.open(session.id); });
+    return notice;
+  }
+
+  /** Show a chat in a Glossa panel, opening the panel when none is open. */
+  async open(id: string) {
+    if (this.stopped || !(this.runs.has(id) || this.plugin.store.hasSession(id))) return;
+    let view = [...this.views][0];
+    if (!view) {
+      await this.plugin.activateView();
+      view = [...this.views][0];
+    }
+    await view?.openChat(id);
+  }
+
+  /** Plugin unload: stop every chat and write what arrived. */
+  async stopAll() {
+    this.stopped = true;
+    for (const run of [...this.runs.values()]) this.cancel(run.session);
+    await this.flush();
+  }
+}
+
+const runHubs = new WeakMap<GlossaPlugin, ChatRunHub>();
+function chatRunHub(plugin: GlossaPlugin): ChatRunHub {
+  let hub = runHubs.get(plugin);
+  if (!hub) { hub = new ChatRunHub(plugin); runHubs.set(plugin, hub); }
+  return hub;
+}
+
+/** Called when the plugin unloads. */
+export async function stopChatRuns(plugin: GlossaPlugin): Promise<void> {
+  await runHubs.get(plugin)?.stopAll();
+}
+
 export class GlossaView extends ItemView {
   private readonly toolCardEvents = new WeakMap<HTMLElement, ToolEvent>();
   private editSummaryRevision = 0;
@@ -195,45 +364,45 @@ export class GlossaView extends ItemView {
   private cliCatalogAttempts = new Map<string, number>();
   private cliCatalogErrors = new Map<string, string>();
   private viewClosed = false;
-  private goalArmed = false;
-  private queueArmed = false;
-  private autoContinue = false;
-  private streaming = false;
+  /** Running chats live in the plugin-wide hub; this panel shows one of them at a time. */
+  private readonly hub: ChatRunHub;
+  private get runs() { return this.hub.runs; }
+  private get submitting() { return this.hub.submitting; }
+  private get goalArmedIds() { return this.hub.goalArmed; }
+  private get queueArmedIds() { return this.hub.queueArmed; }
+  private get breakdowns() { return this.hub.breakdowns; }
+  private get visualContexts() { return this.hub.visualContexts; }
+  /** Whether the rendered history window ends at the newest turn, so live output may be appended. */
+  private renderedLatest = true;
+  private historyBadgeEl: HTMLElement | null = null;
+
+  /** The chat on screen is running. Other chats may be running in the background. */
+  private get streaming(): boolean { return this.runs.has(this.session.id); }
+  private get submitInFlight(): boolean { return this.submitting.has(this.session.id); }
+  private get goalArmed(): boolean { return this.goalArmedIds.has(this.session.id); }
+  private set goalArmed(armed: boolean) { this.setArmed(this.goalArmedIds, this.session, armed); }
+  private get queueArmed(): boolean { return this.queueArmedIds.has(this.session.id); }
+  private set queueArmed(armed: boolean) { this.setArmed(this.queueArmedIds, this.session, armed); }
+  private get contextTokenBreakdown(): ContextTokenBreakdown | null { return this.breakdowns.get(this.session) ?? null; }
+  private setArmed(ids: Set<string>, session: ChatSession, armed: boolean) {
+    if (armed) ids.add(session.id); else ids.delete(session.id);
+  }
   /** Cursor into session.messages user-msgs for ↑/↓ history recall. -1 = not in
    *  history-nav mode (user is drafting fresh text). */
   private historyCursor = -1;
   /** Snapshot of textarea contents when history nav started, so ↓-all-the-way-down
    *  restores what the user was actually typing. */
   private historyDraft = '';
-  private pendingRegeneratePrompt: string | null = null;
-  private recentVisualContext: { images: { dataUri: string; name?: string }[] } | null = null;
-  private abortCtl: AbortController | null = null;
   private popup = new Popup();
   private inputTriggerSig = '';
   private msgUIs = new Map<string, MsgUI>();
   private historyWindow: ChatHistoryWindow = { startTurn: 0, endTurn: -1 };
-  private streamingMsgUI: MsgUI | null = null;
-  private currentAsstMsg: ChatMessage | null = null;
-  /** Bumped on every session boundary (newSession / loadSession). Submit()
-   *  captures the value at start; every async callback (onText, onTool*,
-   *  finalizeAsstRender) checks it before mutating UI / messages. A
-   *  mismatch means "the user switched sessions while a chunk was in
-   *  flight" — we drop the chunk silently. Without this guard, chunks
-   *  arriving after a switch would write into the new session's messages
-   *  array and corrupt history. */
+  /** Bumped on every switch of the chat on screen. Work tied to the composer
+   *  (pasted images, attachments still preparing) checks it so a draft never
+   *  lands in a chat the user has left. Running turns carry their own chat. */
   private sessionToken = 0;
-  /** Shared turnId for every assistant message produced from the same user turn
-   *  — set fresh at submit(), reused by onStepBoundary + flushAndStartNewAsstSegment. */
-  private currentTurnId: string | null = null;
-  private streamingBuf = '';
-  /** True when the most recently consumed stream chunk in the current message
-   *  was a tool_event. If text then resumes, we treat it as a NEW assistant
-   *  segment and create a fresh message bubble so the rendering matches the
-   *  actual turn shape: text → tools → text → tools → final text. */
-  private lastChunkWasTool = false;
-  /** Wall-clock when the current streaming message started (for the
-   *  .nc-msg-elapsed counter on the assistant role label). Reset per segment. */
-  private streamingStartedAt = 0;
+  /** Bumped by each chat opened from the history; a slower earlier read loses. */
+  private loadRequest = 0;
   private currentSelection: SelectionInfo | null = null;
   /** Path of an auto-attached "current file" pill the user has explicitly
    *  dismissed via its × button. While this matches the active file's path,
@@ -243,19 +412,24 @@ export class GlossaView extends ItemView {
    *  changes to a different path. */
   private dismissedCurrentPath: string | null = null;
   private autoContextRefreshSeq = 0;
-  private sessionCostUSD = 0;
-  private sessionInputTokens = 0;
-  private sessionOutputTokens = 0;
-  private currentActivityStartedAt = 0;
   private readonly pendingComposerAttachments = new PendingComposerAttachments();
-  private submitInFlight = false;
-  private contextTokenBreakdown: ContextTokenBreakdown | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: GlossaPlugin) {
     super(leaf);
     this.plugin = plugin;
+    this.hub = chatRunHub(plugin);
     this.ctx = new ContextManager();
     this.session = this.newSession();
+  }
+
+  /** Used by the run hub to find the panel that shows a chat. */
+  showsSession(session: ChatSession): boolean {
+    return !this.viewClosed && this.session === session;
+  }
+
+  /** Open a chat from outside the panel (background notices). */
+  async openChat(id: string) {
+    await this.loadSession(id);
   }
 
   getViewType() { return VIEW_TYPE_GLOSSA; }
@@ -264,6 +438,7 @@ export class GlossaView extends ItemView {
 
   async onOpen() {
     this.viewClosed = false;
+    this.hub.views.add(this);
     this.rootEl = this.containerEl.children[1] as HTMLElement;
     this.rootEl.empty();
     this.rootEl.addClass('glossa-view');
@@ -281,7 +456,7 @@ export class GlossaView extends ItemView {
     this.threadRailEl = el('div', {
       className: 'nc-thread-rail',
       parent: this.rootEl,
-      attrs: { 'aria-label': 'Conversation timeline' },
+      attrs: { 'aria-label': bi('Conversation timeline', '对话时间线') },
     });
     this.messagesEl = el('div', { className: 'nc-messages', parent: this.rootEl });
     this.messagesEl.addEventListener('scroll', this.onMessagesScroll, { passive: true });
@@ -370,9 +545,14 @@ export class GlossaView extends ItemView {
   }
 
   async onClose() {
+    // Running chats keep running in the plugin; this panel only lets go of
+    // their on-screen parts. A panel opened later shows them again.
+    this.detachRun();
     this.viewClosed = true;
+    this.hub.views.delete(this);
+    this.stopElapsedTicker();
     for (const request of this.cliCatalogRequests.values()) request.controller.abort();
-    this.cancelStream();
+    this.closeHistoryPopover({ immediate: true });
     activeDocument.removeEventListener('selectionchange', this.onDomSelectionChange);
     this.popup.destroy();
     this.langUnsub?.();
@@ -390,13 +570,13 @@ export class GlossaView extends ItemView {
 
     this.modeToggle = el('div', { className: 'nc-mode-seg', parent: header });
     this.modeToggle.setAttribute('role', 'group');
-    this.modeToggle.setAttribute('aria-label', 'Run mode');
+    this.modeToggle.setAttribute('aria-label', bi('Run mode', '运行模式'));
     const planSeg = el('button', { className: 'nc-mode-seg-opt', parent: this.modeToggle, text: 'Plan', type: 'button' });
     planSeg.setAttribute('data-opt', 'plan');
-    planSeg.setAttribute('aria-label', 'Plan mode');
+    planSeg.setAttribute('aria-label', bi('Plan mode', 'Plan 模式'));
     const actSeg = el('button', { className: 'nc-mode-seg-opt', parent: this.modeToggle, text: 'Act', type: 'button' });
     actSeg.setAttribute('data-opt', 'act');
-    actSeg.setAttribute('aria-label', 'Act mode');
+    actSeg.setAttribute('aria-label', bi('Act mode', 'Act 模式'));
     this.updateModeToggle();
     const pickMode = async (target: 'plan' | 'act') => {
       if (this.streaming) return;
@@ -423,9 +603,11 @@ export class GlossaView extends ItemView {
     setTrustedSvg(newBtn, ICON.plus);
     newBtn.onclick = () => this.startNewSession();
 
-    const histBtn = el('button', { className: 'nc-icon-btn', parent: header, title: t('chat_history'), type: 'button', attrs: { 'aria-label': t('chat_history') } });
+    const histBtn = el('button', { className: 'nc-icon-btn nc-history-btn', parent: header, title: t('chat_history'), type: 'button', attrs: { 'aria-label': t('chat_history') } });
     setTrustedSvg(histBtn, ICON.history);
     histBtn.onclick = () => this.toggleHistoryPopover(histBtn);
+    this.historyBadgeEl = el('span', { className: 'nc-history-run-count', parent: histBtn, attrs: { 'aria-hidden': 'true' } });
+    this.updateHistoryBadge();
 
     const taskBtn = el('button', { className: 'nc-icon-btn', parent: header, text: '◎', type: 'button', attrs: { 'aria-label': bi('Create task', '创建持续任务'), title: bi('Create task', '创建持续任务') } });
     taskBtn.onclick = () => {
@@ -470,7 +652,7 @@ export class GlossaView extends ItemView {
     this.updatePillEl.empty();
     const icon = el('span', { className: 'nc-update-pill-icon', parent: this.updatePillEl });
     setTrustedSvg(icon, ICON.sparkles);
-    el('span', { className: 'nc-update-pill-text', text: `Update ${info.latestVersion}`, parent: this.updatePillEl });
+    el('span', { className: 'nc-update-pill-text', text: bi(`Update ${info.latestVersion}`, `更新 ${info.latestVersion}`), parent: this.updatePillEl });
   }
 
   private toggleUpdatePopover() {
@@ -598,6 +780,11 @@ export class GlossaView extends ItemView {
       onClose: () => this.closeHistoryPopover(),
       onDelete: (id) => this.handleHistorySessionDeleted(id),
       onClear: () => this.handleHistoryCleared(),
+      runs: {
+        state: id => this.hub.state(id),
+        stop: id => { const run = this.runs.get(id); if (run) this.cancelRun(run.session); },
+        subscribe: listener => this.hub.subscribe(listener),
+      },
     });
 
     const onDocClick = (ev: MouseEvent) => {
@@ -675,7 +862,7 @@ export class GlossaView extends ItemView {
     const selN = this.currentSelection ? Math.max(1, Math.ceil(this.currentSelection.text.length / 4)) : 0;
     const total = ctxN + selN;
     this.tokenBadge.textContent = formatTokenCount(total);
-    this.tokenBadge.title = `Context: ${ctxN} tok${selN ? ` + Selection: ${selN} tok` : ''} = ${total}`;
+    this.tokenBadge.title = bi(`Context: ${ctxN} tok${selN ? ` + Selection: ${selN} tok` : ''} = ${total}`, `上下文：${ctxN} tok${selN ? ` + 选中：${selN} tok` : ''} = ${total}`);
     this.tokenBadge.toggleClass('warn', total > this.plugin.settings.warnTokenThreshold);
   }
 
@@ -778,7 +965,7 @@ export class GlossaView extends ItemView {
         pinned: false,
         isCurrent: true,
       };
-      quickNotice(`Could not read current file: ${message}`);
+      quickNotice(bi(`Could not read current file: ${message}`, `无法读取当前文件：${message}`));
     }
     if (this.currentContextFile()?.path !== expectedPath || expectedPath === this.dismissedCurrentPath) return;
     this.ctx.updateCurrent({
@@ -862,9 +1049,9 @@ export class GlossaView extends ItemView {
     if (sel.file) {
       el('span', { className: 'nc-selection-preview-file', text: sel.file.basename, title: sel.file.path, parent: meta });
     }
-    el('span', { className: 'nc-selection-preview-chars', text: `${text.length.toLocaleString()} chars${lineCount > 1 ? ` · ${lineCount.toLocaleString()} lines` : ''}`, parent: meta });
+    el('span', { className: 'nc-selection-preview-chars', text: bi(`${text.length.toLocaleString()} chars${lineCount > 1 ? ` · ${lineCount.toLocaleString()} lines` : ''}`, `${text.length.toLocaleString()} 字符${lineCount > 1 ? ` · ${lineCount.toLocaleString()} 行` : ''}`), parent: meta });
     el('div', { className: 'nc-selection-preview-text', text: preview, title: text.length > preview.length ? text.slice(0, 1200) : undefined, parent: body });
-    const close = el('button', { className: 'nc-selection-preview-close', parent: this.selectionPreviewEl, title: 'Detach selection', type: 'button', attrs: { 'aria-label': 'Detach selection' } });
+    const close = el('button', { className: 'nc-selection-preview-close', parent: this.selectionPreviewEl, title: bi('Detach selection', '移除选中内容'), type: 'button', attrs: { 'aria-label': bi('Detach selection', '移除选中内容') } });
     setTrustedSvg(close, ICON.x);
     close.onclick = () => { this.currentSelection = null; this.renderSelectionPreview(); };
   }
@@ -951,11 +1138,11 @@ export class GlossaView extends ItemView {
       if (it.isCurrent) {
         // The filename alone identifies the automatically attached file.
       } else if (it.kind === 'image') {
-        el('span', { className: 'nc-pill-meta', text: 'IMG', parent: pill });
+        el('span', { className: 'nc-pill-meta', text: bi('IMG', '图片'), parent: pill });
       } else {
         el('span', { className: 'nc-pill-meta', text: formatTokenCount(it.tokens), parent: pill });
       }
-      const close = el('span', { className: 'nc-pill-close', parent: pill, title: 'Remove' });
+      const close = el('span', { className: 'nc-pill-close', parent: pill, title: bi('Remove', '移除') });
       setTrustedSvg(close, ICON.x);
       // Single removal routine shared by both close-button and context-menu paths.
       // The "current file" pill has TWO subtleties the regular ctx.remove
@@ -988,9 +1175,9 @@ export class GlossaView extends ItemView {
         const m = new Menu();
         m.addItem(i => i.setTitle(it.pinned ? 'Unpin' : 'Pin').onClick(() => this.ctx.togglePin(it.id)));
         if (it.kind === 'file' && it.detail) {
-          m.addItem(i => i.setTitle('Open file').onClick(() => this.openContextItem(it)));
+          m.addItem(i => i.setTitle(bi('Open file', '打开文件')).onClick(() => this.openContextItem(it)));
         }
-        m.addItem(i => i.setTitle('Remove').onClick(removeThis));
+        m.addItem(i => i.setTitle(bi('Remove', '移除')).onClick(removeThis));
         m.showAtMouseEvent(e);
       };
     }
@@ -1011,6 +1198,7 @@ export class GlossaView extends ItemView {
     clear(this.messagesEl);
     this.rootEl.classList.remove('has-messages');
     this.resetThreadRail();
+    this.renderedLatest = true;
     this.emptyEl = el('div', { className: 'nc-empty', parent: this.messagesEl });
     // Aurora orb — replaces the prior bot glyph as the hero artwork.
     // Breathing scale animation lives entirely in CSS (.g-orb-halo, .g-orb-core)
@@ -1061,19 +1249,26 @@ export class GlossaView extends ItemView {
   private renderSessionHistory(options: { anchorMessageId?: string; scrollToBottom?: boolean } = {}) {
     const selected = selectChatHistory(this.session.messages, this.historyWindow);
     this.historyWindow = selected.window;
+    const run = this.runs.get(this.session.id);
+    if (run?.approval) this.unmountApproval(run.approval);
+    if (run) run.ui = null;
     this.msgUIs.clear();
     clear(this.messagesEl);
     this.resetThreadRail();
+    this.renderedLatest = !selected.hasNewer;
     if (!selected.messages.length) {
       this.renderEmpty();
+      if (run) this.attachRun(run);
       return;
     }
 
     this.messagesEl.classList.add('no-anim');
     if (selected.hasEarlier) this.renderHistoryNavigation('earlier', selected.window, selected.totalTurns);
-    for (const message of selected.messages) this.renderMessage(message);
+    const liveId = run?.asst?.id;
+    for (const message of selected.messages) this.renderMessage(message, { live: message.id === liveId });
     if (selected.hasNewer) this.renderHistoryNavigation('newer', selected.window, selected.totalTurns);
-    this.compactAllProcessGroups();
+    this.compactAllProcessGroups(run?.turnId);
+    if (run) this.attachRun(run);
     void this.refreshEditSummaries();
 
     window.requestAnimationFrame(() => {
@@ -1092,15 +1287,15 @@ export class GlossaView extends ItemView {
       className: `nc-history-window-nav ${kind}`,
       parent: this.messagesEl,
       type: 'button',
-      attrs: { 'aria-label': kind === 'earlier' ? 'Load earlier conversation turns' : 'Load newer conversation turns' },
+      attrs: { 'aria-label': kind === 'earlier' ? bi('Load earlier conversation turns', '加载更早的对话') : bi('Load newer conversation turns', '加载更新的对话') },
     });
     const icon = el('span', { className: 'nc-history-window-nav-icon', parent: button });
     setTrustedSvg(icon, ICON.arrowDown);
     el('span', {
       parent: button,
       text: kind === 'earlier'
-        ? `Earlier turns · showing ${window.startTurn + 1}-${window.endTurn + 1} of ${totalTurns}`
-        : `Newer turns · showing ${window.startTurn + 1}-${window.endTurn + 1} of ${totalTurns}`,
+        ? bi(`Earlier turns · showing ${window.startTurn + 1}-${window.endTurn + 1} of ${totalTurns}`, `更早的对话 · 正在显示第 ${window.startTurn + 1}-${window.endTurn + 1} 轮，共 ${totalTurns} 轮`)
+        : bi(`Newer turns · showing ${window.startTurn + 1}-${window.endTurn + 1} of ${totalTurns}`, `更新的对话 · 正在显示第 ${window.startTurn + 1}-${window.endTurn + 1} 轮，共 ${totalTurns} 轮`),
     });
     button.onclick = () => {
       const firstVisibleId = selectChatHistory(this.session.messages, this.historyWindow).messages[0]?.id;
@@ -1115,7 +1310,9 @@ export class GlossaView extends ItemView {
     };
   }
 
-  private renderMessage(m: ChatMessage): MsgUI {
+  /** `live`: the segment a running turn is still writing. Its body is filled by
+   *  the incremental stream renderer instead of a one-shot render. */
+  private renderMessage(m: ChatMessage, options: { live?: boolean } = {}): MsgUI {
     if (this.emptyEl?.isConnected) { this.emptyEl.remove(); this.emptyEl = null; }
     this.rootEl.classList.add('has-messages');
     // "Continuation" = this assistant msg shares a turnId with the immediately
@@ -1155,8 +1352,8 @@ export class GlossaView extends ItemView {
       // Expand / collapse toggle
       const toggleBtn = el('button', { className: 'nc-compact-toggle', parent: acts });
       setTrustedSvg(toggleBtn, ICON.chevronDown);
-      toggleBtn.title = 'Toggle summary';
-      toggleBtn.setAttribute('aria-label', 'Toggle compact summary');
+      toggleBtn.title = bi('Toggle summary', '展开或收起摘要');
+      toggleBtn.setAttribute('aria-label', bi('Toggle compact summary', '展开或收起压缩摘要'));
       toggleBtn.setAttribute('aria-expanded', String(!wrap.classList.contains('collapsed')));
       toggleBtn.onclick = (e) => {
         e.stopPropagation();
@@ -1166,9 +1363,9 @@ export class GlossaView extends ItemView {
       // Undo button — only present if a snapshot exists for this summary
       const hasSnapshot = (this.session.compactHistory ?? []).some(s => s.summaryId === m.id);
       if (hasSnapshot) {
-        const undoBtn = el('button', { className: 'nc-compact-undo', parent: acts, attrs: { title: 'Restore the pre-compact messages' } });
+        const undoBtn = el('button', { className: 'nc-compact-undo', parent: acts, attrs: { title: bi('Restore the pre-compact messages', '恢复压缩前的消息') } });
         setTrustedSvg(undoBtn, ICON.undo);
-        undoBtn.createSpan({ text: 'Undo' });
+        undoBtn.createSpan({ text: bi('Undo', '撤销') });
         undoBtn.onclick = (e) => { e.stopPropagation(); void this.undoCompact(m.id); };
       }
       // Whole header row toggles collapse too (but ignore clicks on action buttons)
@@ -1203,7 +1400,7 @@ export class GlossaView extends ItemView {
       reasoningCard = el('details', { className: 'nc-thinking-card nc-reasoning', parent: wrap });
       const sum = el('summary', { className: 'nc-thinking-summary', parent: reasoningCard });
       const lbl = el('span', { parent: sum });
-      lbl.textContent = `🧠 Reasoning ${m.reasoningContent ? `(${m.reasoningContent.length.toLocaleString()} chars)` : '(streaming…)'}`;
+      lbl.textContent = m.reasoningContent ? reasoningLabel(m.reasoningContent.length) : reasoningLabel(null);
       reasoningBody = el('div', { className: 'nc-thinking-body', parent: reasoningCard });
       const lazyRender = () => {
         if (!reasoningCard?.hasAttribute('open') || !m.reasoningContent || !reasoningBody) return;
@@ -1223,7 +1420,7 @@ export class GlossaView extends ItemView {
      // to `content` for legacy messages and all assistant messages.
     const bodySrc = m.displayContent ?? m.content ?? '';
     const { visible, thinking } = extractThinking(bodySrc);
-    if (thinking && reasoningCard && m.role === 'assistant' && !(m as AnyValue)._mergedInlineThinking) {
+    if (thinking && reasoningCard && m.role === 'assistant' && !options.live && !(m as AnyValue)._mergedInlineThinking) {
       // Append the extracted block to the existing reasoningContent so the
       // single unified card displays everything. Persist on the message so
       // export / replay see the merged form.
@@ -1239,7 +1436,7 @@ export class GlossaView extends ItemView {
       (m as AnyValue)._mergedInlineThinking = true;
       // Update the unified card label
       const lbl = reasoningCard.querySelector('.nc-thinking-summary');
-      if (lbl) lbl.textContent = `🧠 Reasoning (${merged.length.toLocaleString()} chars)`;
+      if (lbl) lbl.textContent = reasoningLabel(merged.length);
       setStyle(reasoningCard, { display: '' });
     }
 
@@ -1247,11 +1444,13 @@ export class GlossaView extends ItemView {
     // HTML-string cache reinserted rendered markup; the community review flags
     // that pattern, so replay now keeps the safer renderer path.
     const body = el('div', { className: 'nc-msg-body', parent: wrap });
-    renderInto(this.app, visible, body, this)
-      .then(() => {
-        if (m.role === 'assistant') decorateCodeBlocks(body, this.codeBlockHandlers());
-      })
-      .catch(() => {});
+    if (!options.live) {
+      renderInto(this.app, visible, body, this)
+        .then(() => {
+          if (m.role === 'assistant') decorateCodeBlocks(body, this.codeBlockHandlers());
+        })
+        .catch(() => {});
+    }
 
     if (m.role === 'user') this.renderContextSnapshot(wrap, m);
 
@@ -1263,7 +1462,7 @@ export class GlossaView extends ItemView {
       const title = this.selectionTitle(m.selectionEcho.text, src);
       el('summary', {
         className: 'nc-selection-echo-summary',
-        text: `📎 ${title} · ${src}${m.selectionEcho.file ? ' · ' + m.selectionEcho.file : ''} (${m.selectionEcho.text.length.toLocaleString()} chars${lines > 1 ? ` · ${lines.toLocaleString()} lines` : ''})`,
+        text: `📎 ${title} · ${src}${m.selectionEcho.file ? ' · ' + m.selectionEcho.file : ''} ${bi(`(${m.selectionEcho.text.length.toLocaleString()} chars${lines > 1 ? ` · ${lines.toLocaleString()} lines` : ''})`, `（${m.selectionEcho.text.length.toLocaleString()} 字符${lines > 1 ? ` · ${lines.toLocaleString()} 行` : ''}）`)}`,
         parent: echo,
       });
       const pre = el('pre', { className: 'nc-selection-echo-body', parent: echo });
@@ -1293,7 +1492,7 @@ export class GlossaView extends ItemView {
     if (m.role === 'assistant') {
       activityEl = el('div', { className: 'nc-turn-activity', parent: wrap });
       el('span', { className: 'nc-turn-activity-dot', parent: activityEl });
-      el('span', { className: 'nc-turn-activity-text', text: 'Thinking...', parent: activityEl });
+      el('span', { className: 'nc-turn-activity-text', text: thinkingLabel(), parent: activityEl });
       activityTimeEl = el('span', { className: 'nc-turn-activity-time', parent: activityEl });
     }
 
@@ -1516,31 +1715,31 @@ export class GlossaView extends ItemView {
   }
 
   /* ---------- Plan board (todo_write sticky) ---------- */
-  private updatePlanBoard(items: AnyValue[]) {
-    this.session.plan = items
+  private updatePlanBoard(session: ChatSession, items: AnyValue[]) {
+    session.plan = items
       .filter(it => it && typeof it.content === 'string')
       .map(it => ({
         content: String(it.content),
         activeForm: typeof it.activeForm === 'string' ? it.activeForm : undefined,
         status: (['pending','in_progress','completed'].includes(it.status) ? it.status : 'pending') as PlanItem['status'],
       }));
-    this.renderPlanBoard();
+    this.hub.screenFor(session)?.renderPlanBoard();
     // Persist so the plan survives a reload / session switch
-    this.persistSession();
+    this.persistSession(session);
   }
 
-  private closeOpenPlanItems(status: 'completed' | 'stopped') {
+  private closeOpenPlanItems(session: ChatSession, status: 'completed' | 'stopped') {
     const shouldClose = (p: PlanItem) => status === 'completed'
       ? p.status !== 'completed'
       : p.status !== 'completed';
-    if (!this.session.plan?.some(shouldClose)) return;
-    this.session.plan = this.session.plan.map(p => {
+    if (!session.plan?.some(shouldClose)) return;
+    session.plan = session.plan.map(p => {
       if (!shouldClose(p)) return p;
       if (status === 'completed') return { ...p, status: 'completed' as const };
       const stopped = /\s\(stopped\)$/.test(p.content) ? p.content : `${p.content} (stopped)`;
       return { ...p, content: stopped, status: 'pending' as const };
     });
-    this.renderPlanBoard();
+    this.hub.screenFor(session)?.renderPlanBoard();
   }
 
   private renderPlanBoard() {
@@ -1568,7 +1767,7 @@ export class GlossaView extends ItemView {
     const titleWrap = el('div', { className: 'nc-plan-title-wrap', parent: header });
     const titleIcon = el('span', { className: 'nc-plan-title-icon', parent: titleWrap });
     setTrustedSvg(titleIcon, ICON.check);
-    el('span', { className: 'nc-plan-title', text: 'Plan', parent: titleWrap });
+    el('span', { className: 'nc-plan-title', text: bi('Plan', '计划'), parent: titleWrap });
     el('span', { className: 'nc-plan-progress', text: `${done} / ${total}`, parent: header });
     const toggle = el('span', { className: 'nc-plan-toggle', text: '▾', parent: header });
 
@@ -1681,7 +1880,7 @@ export class GlossaView extends ItemView {
 
     const body = el('div', { className: 'nc-tool-event-body', parent: box });
     const argsDetails = el('details', { parent: body });
-    el('summary', { text: 'args', parent: argsDetails });
+    el('summary', { text: bi('args', '参数'), parent: argsDetails });
     el('pre', { text: JSON.stringify(ev.args ?? {}, null, 2), parent: argsDetails });
 
     // Result / error / denied — each branch consults the tool's own renderer
@@ -1700,21 +1899,21 @@ export class GlossaView extends ItemView {
 
     if (ev.status === 'denied') {
       const denDetails = el('details', { parent: body, attrs: { open: 'true' } });
-      el('summary', { text: 'denied', parent: denDetails });
+      el('summary', { text: bi('denied', '已拒绝'), parent: denDetails });
       const customDen = toolRejectedMessage(ev.name, ev.args);
       if (!attachCustom(denDetails, customDen)) {
         el('pre', { text: String(ev.result ?? 'User denied this action.'), parent: denDetails });
       }
     } else if (ev.status === 'error') {
       const errDetails = el('details', { parent: body, attrs: { open: 'true' } });
-      el('summary', { text: 'error', parent: errDetails });
+      el('summary', { text: bi('error', '错误'), parent: errDetails });
       const customErr = toolErrorMessage(ev.name, String(ev.result ?? ''), ev.args);
       if (!attachCustom(errDetails, customErr)) {
         el('pre', { text: String(ev.result ?? '(no error message)').slice(0, 4000), parent: errDetails });
       }
     } else if (ev.result != null) {
       const resDetails = el('details', { parent: body, attrs: { open: 'true' } });
-      el('summary', { text: 'result', parent: resDetails });
+      el('summary', { text: bi('result', '结果'), parent: resDetails });
       const customRes = toolResultMessage(ev.name, String(ev.result), ev.args);
       if (!attachCustom(resDetails, customRes)) {
         el('pre', { text: String(ev.result).slice(0, 4000), parent: resDetails });
@@ -1780,7 +1979,7 @@ export class GlossaView extends ItemView {
         // Currently expanded — offer a collapse pill back to the summary.
         const collapse = el('button', { className: 'nc-tool-stack-more nc-tool-stack-collapse', parent: stack });
         collapse.type = 'button';
-        el('span', { className: 'nc-tool-stack-more-label', text: `Collapse · ${cards.length} tools`, parent: collapse });
+        el('span', { className: 'nc-tool-stack-more-label', text: bi(`Collapse · ${cards.length} tools`, `收起 · ${cards.length} 个工具`), parent: collapse });
         collapse.onclick = () => { stack.classList.remove('expanded'); this.updateToolStackCollapse(stack); };
       }
       return;
@@ -1811,7 +2010,7 @@ export class GlossaView extends ItemView {
     summary.onclick = () => { summary.setAttribute('aria-expanded', 'true'); stack.classList.add('expanded'); this.updateToolStackCollapse(stack); };
     if (hasFailure) {
       const okLabel = summary.querySelector('.nc-tool-stack-summary-ok');
-      if (okLabel) okLabel.textContent = 'Some failed';
+      if (okLabel) okLabel.textContent = bi('Some failed', '部分失败');
     }
   }
 
@@ -1867,8 +2066,10 @@ export class GlossaView extends ItemView {
     setExpanded(false);
   }
 
-  private compactAllProcessGroups() {
+  /** `liveTurnId`: a turn that is still running stays expanded until it ends. */
+  private compactAllProcessGroups(liveTurnId?: string) {
     const seen = new Set<string>();
+    if (liveTurnId) seen.add(liveTurnId);
     for (const m of this.session.messages) {
       if (m.role === 'assistant' && m.turnId && !seen.has(m.turnId)) {
         seen.add(m.turnId);
@@ -1959,7 +2160,7 @@ export class GlossaView extends ItemView {
     const kept = this.session.messages.slice(0, idx + 1);
     const forked: ChatSession = {
       id: uid(),
-      title: `Fork of ${this.session.title || 'chat'}`,
+      title: bi(`Fork of ${this.session.title || 'chat'}`, `${this.session.title || '对话'} 的分支`),
       createdAt: Date.now(), updatedAt: Date.now(),
       mode: this.session.mode,
       endpointId: this.session.endpointId,
@@ -1968,15 +2169,15 @@ export class GlossaView extends ItemView {
     this.persistSession();
     void this.plugin.store.saveSession(forked);
     void this.loadSession(forked.id);
-    quickNotice(`Forked: ${forked.title}`);
+    quickNotice(bi(`Forked: ${forked.title}`, `已创建分支：${forked.title}`));
   }
 
 
   private codeBlockHandlers() {
     return {
-      copy: (_s: string) => { void _s; quickNotice('Copy is disabled in the community review build.'); },
       insert: (s: string) => this.insertAtCursor(s),
       apply: (s: string) => this.applyEdit(s),
+      labels: { copy: bi('Copy code', '复制代码'), insert: bi('Insert at cursor', '插入到光标处'), apply: bi('Apply to selection', '替换选中内容') },
     };
   }
 
@@ -2003,8 +2204,13 @@ export class GlossaView extends ItemView {
      ============================================================ */
   private streamRenderTimer: AnyValue;
   private streamRenderInFlight = false;
+  /** The running turn whose output is on screen, if any. */
+  private liveRun(): ChatRun | null {
+    const run = this.runs.get(this.session.id);
+    return run?.ui && !this.viewClosed ? run : null;
+  }
   private scheduleStreamingRender() {
-    if (this.streamRenderTimer || this.streamRenderInFlight || !this.streamingMsgUI) return;
+    if (this.streamRenderTimer || this.streamRenderInFlight || !this.liveRun()) return;
     this.streamRenderTimer = window.setTimeout(() => {
       this.streamRenderTimer = null;
       void this.doStreamingRender();
@@ -2015,16 +2221,17 @@ export class GlossaView extends ItemView {
    *  trailing incomplete paragraph each tick. This avoids reparsing the whole
    *  message (and re-typesetting all math) on every 150ms streaming tick.
    *
-   *  Tracking state lives on streamingMsgUI: `committedParas` counts paragraphs
-   *  already appended (immutable); `tailEl` holds the in-progress last
-   *  paragraph that gets re-rendered. */
+   *  Tracking state lives on the live segment's UI: `committedParas` counts
+   *  paragraphs already appended (immutable); `tailEl` holds the in-progress
+   *  last paragraph that gets re-rendered. */
   private async doStreamingRender() {
-    if (this.streamRenderInFlight || !this.streamingMsgUI) return;
+    const run = this.liveRun();
+    if (this.streamRenderInFlight || !run?.ui) return;
     this.streamRenderInFlight = true;
-    const snapshot = this.streamingBuf;
+    const snapshot = run.buf;
+    const ui = run.ui as MsgUI & { _committedParas?: number; _tailEl?: HTMLElement; _tailRaw?: string; _tailPlain?: string };
     try {
       const safe = trimIncompleteMath(snapshot);
-      const ui = this.streamingMsgUI as MsgUI & { _committedParas?: number; _tailEl?: HTMLElement; _tailRaw?: string; _tailPlain?: string };
       const paras = safe.split('\n\n');
       const committed = ui._committedParas ?? 0;
       // Stable paragraphs: everything except the last one (which is still
@@ -2073,56 +2280,184 @@ export class GlossaView extends ItemView {
     } catch { /* ignore */ }
     this.streamRenderInFlight = false;
     this.scrollToBottom();
-    if (this.streamingMsgUI && this.streamingBuf !== snapshot) this.scheduleStreamingRender();
+    const next = this.liveRun();
+    if (next && (next.ui !== ui || next.buf !== snapshot)) this.scheduleStreamingRender();
   }
 
   /** Finalize the current streaming assistant message and immediately start
    *  a fresh one. Called from `onText` when a tool ran in this same step and
    *  text resumes — codex emits multiple agent_messages per turn interspersed
    *  with tool calls, and we render each as its own bubble for readability. */
-  private flushAndStartNewAsstSegment() {
-    if (this.currentAsstMsg && this.streamingMsgUI) {
-      this.currentAsstMsg.content = this.streamingBuf;
-      this.streamingMsgUI.wrap.classList.remove('streaming');
-      this.setTurnActivity(this.streamingMsgUI, '', 'idle');
-      this.finalizeReasoningLabel(this.streamingMsgUI, this.currentAsstMsg);
-      // Synchronously apply preamble/has-tools styling — fire-and-forget the
-      // markdown re-render so we don't block the new text from showing.
-      this.finalizeAsstRender(this.streamingMsgUI, this.currentAsstMsg).catch(() => {});
+  private flushAndStartNewAsstSegment(run: ChatRun) {
+    const previous = run.asst, previousUi = run.ui;
+    if (previous) {
+      previous.content = run.buf;
+      if (previousUi) {
+        previousUi.wrap.classList.remove('streaming');
+        this.setTurnActivity(previousUi, '', 'idle');
+        this.finalizeReasoningLabel(previousUi, previous);
+        // Synchronously apply preamble/has-tools styling — fire-and-forget the
+        // markdown re-render so we don't block the new text from showing.
+        (this.hub.screenFor(run.session) ?? this).finalizeAsstRender(previousUi, previous).catch(() => {});
+      }
     }
-    this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId ?? undefined, modelSnapshot: this.currentAsstMsg?.modelSnapshot };
-    this.session.messages.push(this.currentAsstMsg);
-    this.streamingBuf = '';
-    this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
-    this.streamingMsgUI.wrap.classList.add('streaming');
-    this.currentActivityStartedAt = Date.now();
-    this.setTurnActivity(this.streamingMsgUI, 'Thinking...', 'thinking');
-    this.streamingStartedAt = Date.now();    // per-segment timer
+    this.beginSegment(run);
   }
+
+  /** Append a new assistant segment to the running turn and show it if its chat is on screen. */
+  private beginSegment(run: ChatRun) {
+    const previous = run.asst;
+    if (run.ui && run.ui.msg !== previous) {
+      run.ui.wrap.classList.remove('streaming');
+      this.setTurnActivity(run.ui, '', 'idle');
+    }
+    run.asst = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: run.turnId, modelSnapshot: previous?.modelSnapshot };
+    run.session.messages.push(run.asst);
+    run.buf = '';
+    run.lastChunkWasTool = false;
+    run.segmentStartedAt = Date.now();
+    run.ui = null;
+    const screen = this.hub.screenFor(run.session);
+    if (screen?.renderedLatest) {
+      run.ui = screen.renderMessage(run.asst, { live: true });
+      run.ui.wrap.classList.add('streaming');
+    }
+    this.setRunActivity(run, thinkingLabel(), 'thinking', true);
+  }
+
+  private isShowing(session: ChatSession): boolean {
+    return !this.viewClosed && this.session === session;
+  }
+
+  /** Record what a running turn is doing; paint it when its segment is on screen. */
+  private setRunActivity(run: ChatRun, label: string, status: RunActivityStatus, restart = false) {
+    if (restart) run.activity.startedAt = Date.now();
+    run.activity.label = label;
+    run.activity.status = status;
+    if (run.ui) {
+      if (restart) run.ui.activityEl?.removeAttribute('data-started-at');
+      this.setTurnActivity(run.ui, label, status);
+    }
+  }
+
+  /** Re-connect a running turn to the chat on screen after the history was
+   *  (re)rendered: live segment, activity, pending approval and timers. */
+  private attachRun(run: ChatRun) {
+    if (!this.isShowing(run.session)) { run.ui = null; return; }
+    const ui = run.asst ? this.msgUIs.get(run.asst.id) ?? null : null;
+    run.ui = ui;
+    if (ui && run.asst) {
+      ui.wrap.classList.add('streaming');
+      if ((run.asst.toolEvents ?? []).some(shouldRenderToolEvent)) ui.wrap.classList.add('has-tools');
+      if (ui.activityEl && run.activity.status !== 'idle') ui.activityEl.setAttribute('data-started-at', String(run.activity.startedAt));
+      this.setTurnActivity(ui, run.activity.label, run.activity.status);
+      if (run.asst.reasoningContent && ui.reasoningCard) {
+        setStyle(ui.reasoningCard, { display: '' });
+        const label = ui.reasoningCard.querySelector('.nc-thinking-summary span');
+        if (label) label.textContent = reasoningLabel(run.asst.reasoningContent.length, true);
+      }
+      this.scheduleStreamingRender();
+    }
+    if (run.approval) void this.mountApproval(run, run.approval);
+    this.startElapsedTicker();
+    this.syncRunChrome();
+  }
+
+  /** Leave the running turn of the chat on screen alone, only remove its UI hooks. */
+  private detachRun() {
+    const run = this.runs.get(this.session.id);
+    if (!run) return;
+    if (run.approval) this.unmountApproval(run.approval);
+    run.ui = null;
+  }
+
+  /** Header, composer and controls follow whether the chat on screen is running. */
+  private syncRunChrome() {
+    this.rootEl?.classList.toggle('glossa-streaming', this.streaming);
+    if (!this.streaming) this.stopElapsedTicker();
+    this.updateSubmitBtn();
+    this.updateReasoningPill();
+    this.renderSessionControls();
+    this.renderPlanBoard();
+  }
+
+  runState(id: string): ChatRunState | null {
+    return this.hub.state(id);
+  }
+
+  private notifyRuns() {
+    this.hub.notify();
+  }
+
+  /** Count of chats running outside this panel; called by the run hub. */
+  updateHistoryBadge() {
+    const badge = this.historyBadgeEl;
+    if (!badge) return;
+    const background = [...this.runs.values()].filter(run => run.session !== this.session);
+    const waiting = background.some(run => run.approval);
+    badge.textContent = background.length ? String(background.length) : '';
+    badge.classList.toggle('visible', background.length > 0);
+    badge.classList.toggle('approval', waiting);
+    const button = badge.parentElement;
+    if (!button) return;
+    const label = !background.length ? t('chat_history')
+      : waiting ? bi(`Chat history · ${background.length} running, approval needed`, `历史对话 · ${background.length} 个在后台运行，有操作待确认`)
+      : bi(`Chat history · ${background.length} running in the background`, `历史对话 · ${background.length} 个在后台运行`);
+    button.setAttribute('aria-label', label);
+    button.title = label;
+  }
+
+
 
   /* ============================================================
      Inline approval — replaces the modal popup
      ============================================================ */
-  private askInlineApproval(tool: ToolImpl, args: AnyValue): Promise<ApprovalResult> {
+  /** A tool call waiting for approval belongs to its turn. The card is shown
+   *  while the chat is on screen; a chat in the background keeps waiting and
+   *  is marked in the history until the user opens it. */
+  private askInlineApproval(run: ChatRun, tool: ToolImpl, args: AnyValue): Promise<ApprovalResult> {
     return new Promise(resolve => {
-      const signal = this.abortCtl?.signal;
+      const signal = run.controller.signal;
       let settled = false;
-      let approvalEl: HTMLElement | undefined;
-      let cleanupKeys = () => {};
-      const settle = (result: ApprovalResult) => {
-        if (settled) return;
-        settled = true;
-        signal?.removeEventListener('abort', abort);
-        cleanupKeys();
-        resolve(result);
+      const pending: PendingApproval = {
+        tool, args,
+        settle: result => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener('abort', abort);
+          this.unmountApproval(pending);
+          pending.notice?.hide();
+          if (run.approval === pending) run.approval = null;
+          this.notifyRuns();
+          resolve(result);
+        },
       };
-      const abort = () => { approvalEl?.remove(); settle({ ok: false }); };
-      if (signal?.aborted) { abort(); return; }
-      signal?.addEventListener('abort', abort, { once: true });
-      void (async () => {
-      const host = this.streamingMsgUI?.wrap ?? this.messagesEl;
-      const wrap = el('div', { className: 'nc-inline-approval', parent: host });
-      approvalEl = wrap;
+      const abort = () => pending.settle({ ok: false });
+      if (signal.aborted) { abort(); return; }
+      signal.addEventListener('abort', abort, { once: true });
+      run.approval = pending;
+      this.notifyRuns();
+      const screen = this.hub.screenFor(run.session);
+      if (screen) void screen.mountApproval(run, pending);
+      else pending.notice = this.hub.notice(run.session, 'approval');
+    });
+  }
+
+  private unmountApproval(pending: PendingApproval) {
+    pending.cleanup?.();
+    pending.cleanup = undefined;
+    pending.el?.remove();
+    pending.el = undefined;
+  }
+
+  private async mountApproval(run: ChatRun, pending: PendingApproval) {
+    if (pending.el?.isConnected || run.approval !== pending || !this.isShowing(run.session)) return;
+    const { tool, args } = pending;
+    const host = run.ui?.wrap ?? this.messagesEl;
+    const wrap = el('div', { className: 'nc-inline-approval', parent: host });
+    pending.el = wrap;
+    const stale = () => pending.el !== wrap || run.approval !== pending || !wrap.isConnected;
+    try {
       const ownerDocument = wrap.ownerDocument;
       const hdr = el('div', { className: 'nc-inline-approval-hdr', parent: wrap });
       const ic = el('span', { className: 'nc-inline-approval-icon', parent: hdr });
@@ -2152,10 +2487,10 @@ export class GlossaView extends ItemView {
             return f && 'extension' in (f as AnyValue) ? await this.app.vault.read(f as AnyValue) : null;
           });
           if (parseError) {
-            el('div', { className: 'nc-inline-approval-warning', text: `Parse error: ${parseError}`, parent: wrap });
+            el('div', { className: 'nc-inline-approval-warning', text: bi(`Parse error: ${parseError}`, `补丁解析失败：${parseError}`), parent: wrap });
           } else {
             const det = el('details', { parent: wrap });
-            el('summary', { className: 'nc-inline-approval-diff-summary', text: `Show diff (${files.length} file${files.length === 1 ? '' : 's'})`, parent: det });
+            el('summary', { className: 'nc-inline-approval-diff-summary', text: bi(`Show diff (${files.length} file${files.length === 1 ? '' : 's'})`, `查看改动（${files.length} 个文件）`), parent: det });
             for (const fp of files) {
               const sec = el('div', { className: 'nc-inline-file-section', parent: det });
               const head = el('div', { className: 'nc-inline-approval-file', parent: sec });
@@ -2164,19 +2499,28 @@ export class GlossaView extends ItemView {
               el('span', { text: label, parent: head });
               if (fp.warning) el('div', { className: 'nc-inline-approval-warning', text: '⚠ ' + fp.warning, parent: sec });
               if (fp.kind === 'delete') {
-                el('div', { className: 'nc-diff-line del', text: `(file will be deleted)`, parent: sec });
+                el('div', { className: 'nc-diff-line del', text: bi('(file will be deleted)', '（文件将被删除）'), parent: sec });
               } else if (fp.oldText !== (fp.newText ?? '')) {
                 const box = el('div', { className: 'nc-diff-box nc-inline-diff-box', parent: sec });
                 renderDiffInto(box, fp.oldText, fp.newText ?? '');
               } else {
-                el('div', { className: 'nc-diff-line eq', text: '(no changes)', parent: sec });
+                el('div', { className: 'nc-diff-line eq', text: bi('(no changes)', '（无改动）'), parent: sec });
               }
             }
           }
         } else {
           // Legacy / single-file path
-          let oldText = '', newText = '', label = '';
-          if (name === 'file_edit') {
+          let oldText = '', newText = '', label = '', note = '';
+          if (name === 'delete_note' || name === 'rename_note') {
+            const source = this.app.vault.getAbstractFileByPath(String((name === 'delete_note' ? args.path : args.from) ?? ''));
+            label = name === 'delete_note' ? String(args.path ?? '') : `${args.from ?? ''} → ${args.to ?? ''}`;
+            if (source instanceof TFolder) {
+              const count = filesInFolder(source).length;
+              note = name === 'delete_note'
+                ? bi(`⚠ This is a folder: it and all ${count} files in it go to the trash.`, `⚠ 这是一个文件夹：它和里面的 ${count} 个文件都会移到废纸篓。`)
+                : bi(`Folder with ${count} files; links to them are updated.`, `文件夹，内含 ${count} 个文件；指向它们的链接会自动更新。`);
+            }
+          } else if (name === 'file_edit') {
             label = args.file_path ?? '';
             if (args.old_string === '') {
               oldText = ''; newText = args.new_string ?? '';
@@ -2209,16 +2553,17 @@ export class GlossaView extends ItemView {
             }
           }
           if (label) el('div', { className: 'nc-inline-approval-file', text: label, parent: wrap });
+          if (note) el('div', { className: 'nc-inline-approval-warning', text: note, parent: wrap });
           if (oldText !== newText) {
             const det = el('details', { parent: wrap });
-            el('summary', { className: 'nc-inline-approval-diff-summary', text: 'Show diff', parent: det });
+            el('summary', { className: 'nc-inline-approval-diff-summary', text: bi('Show diff', '查看改动'), parent: det });
             const box = el('div', { className: 'nc-diff-box nc-inline-diff-box', parent: det });
             renderDiffInto(box, oldText, newText);
           }
         }
       } catch { /* ignore */ }
 
-      if (settled) return;
+      if (stale()) { wrap.remove(); return; }
       /* --- "Always allow" rule selector --- */
       // Show only when the tool has a path-ish arg (so folder/path scopes make sense)
       const path = (args?.path ?? args?.file_path ?? args?.target_path ?? args?.to ?? args?.from ?? args?.base_path ?? args?.template_path) as string | undefined;
@@ -2226,17 +2571,17 @@ export class GlossaView extends ItemView {
       type RuleChoice = 'once' | 'session-tool' | 'always-tool' | 'always-folder' | 'always-path' | 'always-mcp-server';
       let ruleChoice: RuleChoice = 'once';
       const ruleRow = el('div', { className: 'nc-inline-rule-row', parent: wrap });
-      el('span', { text: 'Persist:', className: 'nc-inline-rule-label', parent: ruleRow });
+      el('span', { text: bi('Remember:', '记住选择：'), className: 'nc-inline-rule-label', parent: ruleRow });
       const opts: { value: RuleChoice; label: string }[] = [
-        { value: 'once', label: 'Just this once' },
-        { value: 'session-tool', label: `Allow ${tool.spec.name} this session` },
-        { value: 'always-tool', label: `Always allow ${tool.spec.name}` },
+        { value: 'once', label: bi('Just this once', '仅这一次') },
+        { value: 'session-tool', label: bi(`Allow ${tool.spec.name} this session`, `本次会话允许 ${tool.spec.name}`) },
+        { value: 'always-tool', label: bi(`Always allow ${tool.spec.name}`, `始终允许 ${tool.spec.name}`) },
       ];
-      if (folder) opts.push({ value: 'always-folder', label: `…in /${folder}` });
-      if (path)   opts.push({ value: 'always-path',   label: `…for ${path.split('/').slice(-1)[0]}` });
+      if (folder) opts.push({ value: 'always-folder', label: bi(`…in /${folder}`, `…仅限 /${folder}`) });
+      if (path)   opts.push({ value: 'always-path',   label: bi(`…for ${path.split('/').slice(-1)[0]}`, `…仅限 ${path.split('/').slice(-1)[0]}`) });
       // MCP namespaced tool: "<server>__<tool>" → offer server-level allow
       const mcpServer = tool.spec.name.includes('__') ? tool.spec.name.split('__')[0] : null;
-      if (mcpServer) opts.push({ value: 'always-mcp-server', label: `Always allow MCP server "${mcpServer}"` });
+      if (mcpServer) opts.push({ value: 'always-mcp-server', label: bi(`Always allow MCP server "${mcpServer}"`, `始终允许 MCP 服务器「${mcpServer}」`) });
       const sel = el('select', { className: 'nc-inline-rule-select', parent: ruleRow });
       for (const o of opts) {
         const optEl = activeWindow.createEl('option');
@@ -2255,15 +2600,15 @@ export class GlossaView extends ItemView {
       hints.appendText(' deny · ');
       hints.createEl('kbd', { text: 'A' });
       hints.appendText(' always');
-      const deny = el('button', { className: 'nc-inline-deny', parent: acts, title: 'Deny (Esc)' });
-      deny.textContent = 'Deny';
-      const approve = el('button', { className: 'nc-inline-approve', parent: acts, title: 'Approve (Enter)' });
-      approve.textContent = 'Approve';
+      const deny = el('button', { className: 'nc-inline-deny', parent: acts, title: bi('Deny (Esc)', '拒绝 (Esc)') });
+      deny.textContent = bi('Deny', '拒绝');
+      const approve = el('button', { className: 'nc-inline-approve', parent: acts, title: bi('Approve (Enter)', '批准 (Enter)') });
+      approve.textContent = bi('Approve', '批准');
 
       const buildRule = (): import('../types').PermissionRule | undefined => {
         if (ruleChoice === 'once') return undefined;
         const base = { addedAt: Date.now(), behavior: 'allow' as const };
-        if (ruleChoice === 'session-tool')      return { ...base, tool: tool.spec.name, scope: 'global', scopedToSessionId: this.session.id };
+        if (ruleChoice === 'session-tool')      return { ...base, tool: tool.spec.name, scope: 'global', scopedToSessionId: run.session.id };
         if (ruleChoice === 'always-tool')       return { ...base, tool: tool.spec.name, scope: 'global' };
         if (ruleChoice === 'always-folder' && folder !== undefined)
                                                  return { ...base, tool: tool.spec.name, scope: 'folder', value: folder };
@@ -2273,9 +2618,8 @@ export class GlossaView extends ItemView {
         return undefined;
       };
       const finish = (ok: boolean) => {
-        wrap.remove();
-        if (!ok) return settle({ ok });
-        settle({ ok, persistRule: buildRule() });
+        if (!ok) return pending.settle({ ok });
+        pending.settle({ ok, persistRule: buildRule() });
       };
       deny.onclick = () => finish(false);
       approve.onclick = () => finish(true);
@@ -2295,28 +2639,28 @@ export class GlossaView extends ItemView {
           finish(true);
         }
       };
-      cleanupKeys = () => ownerDocument.removeEventListener('keydown', keyH, true);
+      pending.cleanup = () => ownerDocument.removeEventListener('keydown', keyH, true);
       ownerDocument.addEventListener('keydown', keyH, true);
-      })().catch((err: unknown) => {
-        console.warn('[Glossa] inline approval failed', err);
-        settle({ ok: false });
-      });
-    });
+    } catch (err: unknown) {
+      console.warn('[Glossa] inline approval failed', err);
+      pending.settle({ ok: false });
+    }
   }
 
   private reasoningRenderTimer: AnyValue;
   private scheduleReasoningRender() {
-    if (this.reasoningRenderTimer || !this.streamingMsgUI?.reasoningCard) return;
+    if (this.reasoningRenderTimer || !this.liveRun()?.ui?.reasoningCard) return;
     this.reasoningRenderTimer = window.setTimeout(() => {
       void (async () => {
       this.reasoningRenderTimer = null;
-      const ui = this.streamingMsgUI;
-      const content = this.currentAsstMsg?.reasoningContent ?? '';
+      const run = this.liveRun();
+      const ui = run?.ui;
+      const content = run?.asst?.reasoningContent ?? '';
       if (!ui?.reasoningCard || !ui.reasoningBody) return;
       setStyle(ui.reasoningCard, { display: '' });
       // Stay COLLAPSED — user clicks to peek. Only update the summary label.
       const sum = ui.reasoningCard.querySelector('.nc-thinking-summary span');
-      if (sum) sum.textContent = `🧠 Reasoning (${content.length.toLocaleString()} chars${this.streaming ? ' · streaming' : ''})`;
+      if (sum) sum.textContent = reasoningLabel(content.length, true);
       // Only render the body content if the user has actually opened it.
       if (ui.reasoningCard.hasAttribute('open')) {
         try { await renderInto(this.app, content, ui.reasoningBody, this); } catch { /* ignore */ }
@@ -2334,25 +2678,28 @@ export class GlossaView extends ItemView {
     if (this.elapsedTimer) { window.clearInterval(this.elapsedTimer); this.elapsedTimer = null; }
   }
   private tickElapsed() {
+    const run = this.liveRun();
+    const ui = run?.ui;
+    if (!run || !ui) return;
     // Update the per-message elapsed counter on the role label.
-    if (this.streamingMsgUI && this.streamingStartedAt > 0) {
-      const elapsed = (Date.now() - this.streamingStartedAt) / 1000;
-      const elEl = this.streamingMsgUI.elapsedEl;
+    if (run.segmentStartedAt > 0) {
+      const elapsed = (Date.now() - run.segmentStartedAt) / 1000;
+      const elEl = ui.elapsedEl;
       if (elEl) {
         if (elapsed < 1.0) elEl.textContent = '';
         else if (elapsed < 60) elEl.textContent = `${elapsed.toFixed(1)}s`;
         else elEl.textContent = `${Math.floor(elapsed / 60)}m${(elapsed % 60).toFixed(0).padStart(2, '0')}s`;
       }
     }
-    const activity = this.streamingMsgUI?.activityEl;
+    const activity = ui.activityEl;
     if (activity?.classList.contains('active')) {
-      const time = this.streamingMsgUI?.activityTimeEl;
-      const started = parseInt(activity.getAttribute('data-started-at') || String(this.currentActivityStartedAt || Date.now()));
+      const time = ui.activityTimeEl;
+      const started = parseInt(activity.getAttribute('data-started-at') || String(run.activity.startedAt || Date.now()));
       if (time && started) time.textContent = formatElapsed(Date.now() - started);
     }
-    if (!this.streamingMsgUI?.toolStack) return;
+    if (!ui.toolStack) return;
     const now = Date.now();
-    for (const card of Array.from(this.streamingMsgUI.toolStack.children) as HTMLElement[]) {
+    for (const card of Array.from(ui.toolStack.children) as HTMLElement[]) {
       if (!card.classList.contains('nc-tool-event')) continue;
       const statusEl = (card as AnyValue)._statusEl as HTMLElement | undefined;
       if (!statusEl) continue;
@@ -2411,7 +2758,7 @@ export class GlossaView extends ItemView {
     this.cliProviderButton = el('button', { className: 'nc-cli-provider-button', parent: providerSlot, type: 'button' });
     this.cliProviderButton.onclick = () => this.openCliProviderMenu();
     this.runtimeModelSlot = el('div', { className: 'nc-runtime-choice nc-model-choice', parent: runtime });
-    this.modelBtn = el('button', { className: 'nc-model-chip', parent: this.runtimeModelSlot, title: 'Pick model', type: 'button' });
+    this.modelBtn = el('button', { className: 'nc-model-chip', parent: this.runtimeModelSlot, title: bi('Pick model', '选择模型'), type: 'button' });
     this.updateModelBtn();
     this.modelBtn.onclick = () => this.openEndpointMenu();
     this.cliCatalogStatus = el('span', { className: 'nc-cli-catalog-status', parent: wrap, attrs: { role: 'status', 'aria-live': 'polite' } });
@@ -2465,10 +2812,10 @@ export class GlossaView extends ItemView {
             if (pasteSessionToken !== this.sessionToken) return;
             this.ctx.add(item);
             if (prepared.compressed) {
-              quickNotice(`Screenshot compressed from ${(prepared.originalBytes / 1024 / 1024).toFixed(1)} MB to ${(prepared.file.size / 1024 / 1024).toFixed(1)} MB.`);
+              quickNotice(bi(`Screenshot compressed from ${(prepared.originalBytes / 1024 / 1024).toFixed(1)} MB to ${(prepared.file.size / 1024 / 1024).toFixed(1)} MB.`, `截图已从 ${(prepared.originalBytes / 1024 / 1024).toFixed(1)} MB 压缩到 ${(prepared.file.size / 1024 / 1024).toFixed(1)} MB。`));
             }
           } catch (err) {
-            quickNotice(`Failed to paste screenshot: ${err.message ?? err}`);
+            quickNotice(bi(`Failed to paste screenshot: ${err.message ?? err}`, `粘贴截图失败：${err.message ?? err}`));
           }
         }
       })();
@@ -2533,7 +2880,7 @@ export class GlossaView extends ItemView {
     el('span', { className: 'nc-input-footer-spacer', parent: footer });
 
     // (3) Reasoning effort pill — brain + level
-    this.reasoningPillEl = el('button', { className: 'nc-composer-pill nc-reasoning-pill', parent: footer, type: 'button', attrs: { 'aria-label': 'Reasoning effort' } });
+    this.reasoningPillEl = el('button', { className: 'nc-composer-pill nc-reasoning-pill', parent: footer, type: 'button', attrs: { 'aria-label': bi('Reasoning effort', '推理强度') } });
     this.updateReasoningPill();
     this.reasoningPillEl.onclick = () => { void this.openReasoningMenu(); };
 
@@ -2623,59 +2970,73 @@ export class GlossaView extends ItemView {
     this.togglePopup(this.permPillEl, items);
   }
 
-  /** Reasoning effort levels supported by the active endpoint/model. */
-  private reasoningOptionsForActive(): { v: import('../types').ReasoningEffort; label: string }[] {
-    const ep = this.activeEndpoint();
-    if (!ep) return [];
-    return reasoningOptionsForEndpoint(ep).map(v => ({ v, label: v === 'off' && ep.kind !== 'custom-api' ? bi('Auto (CLI default)', '自动（CLI 默认）') : t(`effort_${v}`) }));
+  /** Custom effort text; an invalid stored value is shown as absent rather than throwing in the UI. */
+  private customEffort(ep: Endpoint | undefined): string | undefined {
+    try { return customEffortValue(ep?.customReasoningEffort); } catch { return undefined; }
   }
+
   private updateReasoningPill() {
     if (!this.reasoningPillEl) return;
     clear(this.reasoningPillEl);
     const ep = this.activeEndpoint();
-    const configured = ep?.reasoningEffort ?? 'off';
-    const effort = customEffortValue(ep?.customReasoningEffort) || (ep?.kind !== 'custom-api' && !reasoningOptionsForEndpoint(ep).includes(configured) ? 'off' : configured);
+    const profile = reasoningProfile(ep);
+    const custom = this.customEffort(ep);
+    const entry = selectedReasoningEntry(profile, ep?.reasoningEffort);
     const ic = el('span', { className: 'nc-pill-glyph', parent: this.reasoningPillEl });
     // Lucide `sparkles` — same icon ChatGPT and Cursor use for reasoning /
     // thinking. Universally readable, brand-neutral.
     setTrustedSvg(ic, `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>`);
     // Subtle subscript so users see the current level at a glance.
-    const map: Record<string, string> = {
-      off: '·', none: '0', minimal: 'MIN', low: 'L', medium: 'M', high: 'H', xhigh: 'X', max: 'MAX', ultra: 'U',
-    };
-    el('span', { className: 'nc-pill-sub', text: ep?.kind !== 'custom-api' && effort === 'off' ? bi('Auto', '自动') : map[effort] ?? effort, parent: this.reasoningPillEl });
+    const unavailable = !!profile && !profile.entries.length && !custom;
+    el('span', { className: 'nc-pill-sub', text: custom ?? (unavailable ? '—' : entry?.short ?? '·'), parent: this.reasoningPillEl });
     el('span', { className: 'nc-pill-caret', text: '▾', parent: this.reasoningPillEl });
-    this.reasoningPillEl.title = bi(`Reasoning effort: ${effort}`, `思考强度：${effort}`);
+    const label = custom ?? (unavailable ? profile?.note ?? '' : entry?.label ?? '');
+    this.reasoningPillEl.title = unavailable ? label : bi(`Reasoning effort: ${label}`, `思考强度：${label}`);
     this.reasoningPillEl.setAttribute('aria-label', this.reasoningPillEl.title);
-    this.reasoningPillEl.setAttribute('aria-disabled', String(!ep));
-    this.reasoningPillEl.classList.toggle('disabled', !ep);
-    this.reasoningPillEl.disabled = !ep || this.streaming;
+    this.reasoningPillEl.setAttribute('aria-disabled', String(!ep || unavailable));
+    this.reasoningPillEl.classList.toggle('disabled', !ep || unavailable);
+    this.reasoningPillEl.disabled = !ep || this.streaming || unavailable;
   }
-  private async openReasoningMenu() {
-    const ep = this.activeEndpoint();
-    if (!ep || this.streaming) return;
-    const cur = ep.reasoningEffort ?? 'off';
-    const items: PopupItem[] = this.reasoningOptionsForActive().map(o => ({
-      label: o.label,
-      checked: !ep.customReasoningEffort && cur === o.v,
+
+  private reasoningMenuItems(ep: Endpoint, profile: ReasoningProfile): PopupItem[] {
+    const custom = this.customEffort(ep);
+    const current = custom ? null : selectedReasoningEntry(profile, ep.reasoningEffort);
+    const items: PopupItem[] = profile.entries.map(entry => ({
+      label: entry.label,
+      checked: entry === current,
       onSelect: async () => {
         if (this.streaming || this.activeEndpoint() !== ep) return;
-        ep.reasoningEffort = o.v;
+        ep.reasoningEffort = entry.value;
         delete ep.customReasoningEffort;
         await this.plugin.saveSettings();
         this.updateReasoningPill();
       },
     }));
-    items.push({ label: bi('Custom effort…', '自定义 effort…'), hint: ep.customReasoningEffort, checked: !!ep.customReasoningEffort, onSelect: () => {
-      openEffortModal(this.app, ep, async value => {
-        if (this.streaming || this.activeEndpoint() !== ep) return;
-        ep.customReasoningEffort = value;
-        if (!value) ep.reasoningEffort = 'off';
-        await this.plugin.saveSettings();
-        this.updateReasoningPill();
-      });
-    } });
-    this.togglePopup(this.reasoningPillEl, items);
+    if (profile.needsModel) {
+      // Efforts belong to a model; the popup closes after this, so open the model menu next.
+      items.push({ label: bi('Choose a model to set its effort…', '选择模型后可调整强度…'), onSelect: () => {
+        window.setTimeout(() => { if (!this.viewClosed && this.activeEndpoint() === ep) this.openCliModelMenu(ep); }, 0);
+      } });
+    }
+    if (profile.allowCustom || custom) {
+      items.push({ label: bi('Custom effort…', '自定义 effort…'), hint: custom, checked: !!custom, onSelect: () => {
+        openEffortModal(this.app, ep, async value => {
+          if (this.streaming || this.activeEndpoint() !== ep) return;
+          ep.customReasoningEffort = value;
+          if (!value) ep.reasoningEffort = 'off';
+          await this.plugin.saveSettings();
+          this.updateReasoningPill();
+        });
+      } });
+    }
+    return items;
+  }
+
+  private async openReasoningMenu() {
+    const ep = this.activeEndpoint();
+    const profile = reasoningProfile(ep);
+    if (!ep || !profile || this.streaming) return;
+    this.togglePopup(this.reasoningPillEl, this.reasoningMenuItems(ep, profile));
   }
 
   /** Public — refreshes the composer pills after settings change. */
@@ -2688,7 +3049,7 @@ export class GlossaView extends ItemView {
     let overlay: HTMLElement | null = null;
     const showOverlay = () => {
       if (overlay) return;
-      overlay = el('div', { className: 'nc-drop-overlay', parent: wrap, text: 'Drop files to attach' });
+      overlay = el('div', { className: 'nc-drop-overlay', parent: wrap, text: bi('Drop files to attach', '松开即可附加文件') });
     };
     const hideOverlay = () => { overlay?.remove(); overlay = null; };
 
@@ -2717,7 +3078,7 @@ export class GlossaView extends ItemView {
       void (async () => {
         for (const f of files) {
           try { this.ctx.add(await resolveDroppedFile(f)); }
-          catch (err) { quickNotice(`Failed to attach ${f.name}: ${err.message}`); }
+          catch (err) { quickNotice(bi(`Failed to attach ${f.name}: ${err.message}`, `无法附加 ${f.name}：${err.message}`)); }
         }
       })();
     }, true);
@@ -2764,7 +3125,7 @@ export class GlossaView extends ItemView {
     const ic = el('span', { className: 'nc-btn-icon', parent: this.submitBtn });
     if (this.streaming) {
       this.submitBtn.classList.add('stop');
-      this.submitBtn.title = 'Stop';
+      this.submitBtn.title = t('stop');
       setTrustedSvg(ic, ICON.stop);
       // Aurora ring on the composer also activates during streaming so
       // the "alive" signal is multi-locus (button morph + ring rotates).
@@ -2777,7 +3138,7 @@ export class GlossaView extends ItemView {
       // the visual "done" cue tied to result-to-claim cycle completion.
       const wasStreaming = this.inputWrap?.classList.contains('streaming') ?? false;
       this.submitBtn.classList.remove('stop');
-      this.submitBtn.title = `Send (⌘/${'Ctrl'}+↵)`;
+      this.submitBtn.title = t('send');
       setTrustedSvg(ic, ICON.send);
       this.inputWrap?.classList.remove('streaming');
       if (wasStreaming) {
@@ -2809,7 +3170,7 @@ export class GlossaView extends ItemView {
     const a = el('span', { className: 'nc-arrow', parent: this.modelBtn });
     setTrustedSvg(a, ICON.arrowDown);
     const model = active.model ?? bi('(default)', '（默认）');
-    this.modelBtn.title = `${active.label}\nmodel: ${model}\n${bi('click to switch', '点击切换')}`;
+    this.modelBtn.title = `${active.label}\n${bi('model', '模型')}: ${model}\n${bi('click to switch', '点击切换')}`;
     this.modelBtn.setAttribute('aria-label', `${active.label}, ${model}`);
   }
 
@@ -2916,8 +3277,8 @@ export class GlossaView extends ItemView {
   private showMentionPopup(query: string, tokenStart: number) {
     const items: PopupItem[] = [];
     items.push({
-      label: query.match(/^https?:\/\//) ? query : 'web URL…', hint: 'fetch page',
-      iconSvg: ICON.globe, section: 'GENERIC',
+      label: query.match(/^https?:\/\//) ? query : bi('web URL…', '网页链接…'), hint: bi('fetch page', '抓取网页'),
+      iconSvg: ICON.globe, section: bi('GENERIC', '通用'),
       onSelect: async () => {
         const { promptModal } = await import('./confirm_modal');
         const url = query.match(/^https?:\/\//)
@@ -2935,7 +3296,7 @@ export class GlossaView extends ItemView {
         label: f.file.basename + labelExt,
         hint: f.file.path,
         iconSvg: isImg ? ICON.image : ICON.file,
-        section: 'FILES',
+        section: bi('FILES', '文件'),
         onSelect: async () => { this.ctx.add(await resolveFile(this.app, f.file)); this.removeToken(tokenStart); }
       });
     }
@@ -2949,32 +3310,38 @@ export class GlossaView extends ItemView {
     // Action commands — don't insert a template, run plugin behaviour directly
     const actions: { trigger: string; title: string; run: () => Promise<void> }[] = [
       {
-        trigger: '/compact', title: 'Compact conversation',
+        trigger: '/compact', title: bi('Compact conversation', '压缩对话'),
         run: async () => {
           this.removeToken(tokenStart);
           this.inputEl.value = '';
           this.recomputeInputHeight();
+          const session = this.session;
+          if (this.runs.has(session.id) || this.submitting.has(session.id)) {
+            quickNotice(bi('Wait for this chat to finish before compacting it.', '请等这个对话本轮结束后再压缩。'));
+            return;
+          }
           const ep = this.activeEndpoint();
-          if (!ep) { quickNotice('No endpoint configured.'); return; }
+          if (!ep) { quickNotice(bi('No endpoint configured.', '尚未配置接口。')); return; }
           const epReady = await this.plugin.getDecryptedEndpoint(ep);
-          if (!epReady) { quickNotice('Endpoint locked or invalid.'); return; }
-          await this.runAutoCompact(epReady, 'manual');
+          if (!epReady) { quickNotice(bi('Endpoint locked or invalid.', '接口已锁定或无效。')); return; }
+          if (this.runs.has(session.id)) return;
+          await this.runAutoCompact(session, epReady, 'manual');
         },
       },
     ];
     const actionItems: PopupItem[] = actions
       .filter(a => a.trigger.slice(1).toLowerCase().includes(q) || a.title.toLowerCase().includes(q))
       .map(a => ({
-        label: a.trigger, hint: a.title, iconSvg: ICON.wrench, section: 'ACTION',
+        label: a.trigger, hint: a.title, iconSvg: ICON.wrench, section: bi('ACTION', '操作'),
         onSelect: a.run,
       }));
 
     const all = [...BUILTIN_SLASH_COMMANDS, ...this.plugin.settings.customSlashCommands];
     const templateItems: PopupItem[] = all
-      .filter(c => c.trigger.slice(1).toLowerCase().includes(q) || c.title.toLowerCase().includes(q))
+      .filter(c => c.trigger.slice(1).toLowerCase().includes(q) || c.title.toLowerCase().includes(q) || slashCommandTitle(c).toLowerCase().includes(q))
       .map(c => ({
-        label: c.trigger, hint: c.title, iconSvg: ICON.wrench,
-        section: c.custom ? 'CUSTOM' : 'BUILT-IN',
+        label: c.trigger, hint: slashCommandTitle(c), iconSvg: ICON.wrench,
+        section: c.custom ? bi('CUSTOM', '自定义') : bi('BUILT-IN', '内置'),
         // applySlash rewrites the entire textarea value (replacing any partial
         // trigger like "/transl" the user typed). Do NOT also call removeToken
         // — that would re-slice the freshly rewritten string with the stale
@@ -3148,23 +3515,20 @@ export class GlossaView extends ItemView {
   /** Some reasoner models (DeepSeek R1 family) REQUIRE prior assistant turns
    *  to include reasoning_content or they 4xx. Others (gpt-4o, Claude) ignore
    *  it and just pay extra tokens. Detect by model name + apiStyle. */
-  private modelRequiresReasoningPassthrough(): boolean {
-    const ep = this.activeEndpoint();
-    if (!ep) return false;
-    const model = (ep.model ?? '').toLowerCase();
-    // DeepSeek-reasoner / Qwen QwQ / R1-distill style models — match common substrings
-    if (/reasoner|deepseek-r1|deepseek-v3.*think|qwq|r1-distill/.test(model)) return true;
-    return false;
+  private modelRequiresReasoningPassthrough(ep: Endpoint | undefined): boolean {
+    // DeepSeek (V4 thinking with tools), MiMo and Kimi need earlier reasoning
+    // sent back; R1 / QwQ style models are matched by name on any host.
+    return requiresReasoningReplay(ep);
   }
 
-  private buildModelHistory(currentUserId: string, currentAsstId: string | undefined): MessageInput[] {
-    const passReasoning = this.modelRequiresReasoningPassthrough();
+  private buildModelHistory(session: ChatSession, ep: Endpoint | undefined, currentUserId: string, currentAsstId: string | undefined): MessageInput[] {
+    const passReasoning = this.modelRequiresReasoningPassthrough(ep);
     const out: MessageInput[] = [];
-    const recentToolMessageIds = new Set(this.session.messages
+    const recentToolMessageIds = new Set(session.messages
       .filter(m => m.role === 'assistant' && (m.toolEvents?.length ?? 0) > 0)
       .slice(-2)
       .map(m => m.id));
-    for (const m of this.session.messages) {
+    for (const m of session.messages) {
       if (m.id === currentUserId) continue;
       if (currentAsstId && m.id === currentAsstId) continue;
       // Bare role:'tool' messages on a ChatMessage are legacy / accidental — the loop
@@ -3220,98 +3584,151 @@ export class GlossaView extends ItemView {
         });
       }
     }
-    return filterPrunedToolContext(out, new Set(this.session.prunedToolCallIds ?? []));
+    return filterPrunedToolContext(out, new Set(session.prunedToolCallIds ?? []));
   }
 
   /** Run a one-shot summarisation request, replace the older messages in this session
    *  with the resulting summary, and rerender. Called both pre-submit (auto trigger)
    *  and from the `/compact` slash command (manual trigger). */
-  private async runAutoCompact(ep: Endpoint, reason: 'auto' | 'manual') {
-    if (this.session.messages.length < 4) { if (reason === 'manual') quickNotice('Not enough history to compact.'); return; }
+  private async runAutoCompact(session: ChatSession, ep: Endpoint, reason: 'auto' | 'manual', signal?: AbortSignal) {
+    if (session.messages.length < 4) { if (reason === 'manual') quickNotice(bi('Not enough history to compact.', '对话太短，无需压缩。')); return; }
     const vaultRoot = this.app.vault.adapter instanceof FileSystemAdapter ? this.app.vault.adapter.getBasePath() : undefined;
     const provider = buildProvider(ep, this.plugin.settings.globalProxy, vaultRoot);
     const keepRecent = 2;
 
     // Insert a transient loading card at the END of the messages list
-    const loading = el('div', { className: 'nc-compact-loading', parent: this.messagesEl });
-    const spinner = el('div', { className: 'nc-compact-loading-spinner', parent: loading });
-    setTrustedSvg(spinner, ICON.spinnerRing);
-    el('span', { className: 'nc-compact-loading-text',
-      text: `Summarising ${this.session.messages.length - keepRecent} older messages…`, parent: loading });
-    this.scrollToBottom();
+    let loading: HTMLElement | null = null;
+    const shown = this.hub.screenFor(session);
+    if (shown) {
+      loading = el('div', { className: 'nc-compact-loading', parent: shown.messagesEl });
+      const spinner = el('div', { className: 'nc-compact-loading-spinner', parent: loading });
+      setTrustedSvg(spinner, ICON.spinnerRing);
+      el('span', { className: 'nc-compact-loading-text',
+        text: bi(`Summarising ${session.messages.length - keepRecent} older messages…`, `正在总结 ${session.messages.length - keepRecent} 条较早的消息…`), parent: loading });
+      shown.scrollToBottom();
+    }
 
     try {
-      const result = await compactSession(this.session, {
+      const result = await compactSession(session, {
         provider,
         model: ep.model,
         keepRecent,
-        signal: this.abortCtl?.signal,
+        signal,
       });
-      loading.remove();
-      if (!result) { if (reason === 'manual') quickNotice('Nothing to compact.'); return; }
-      applyCompact(this.session, result, keepRecent);
-      this.historyWindow = latestHistoryWindow(this.session.messages);
-      this.renderSessionHistory({ scrollToBottom: true });
-      await this.flushPersistNow();
-      quickNotice(`Compacted ${result.summarisedCount} msgs → 1 summary (~${formatTokenCount(result.tokensSaved)} tok saved)`);
+      loading?.remove();
+      if (!result) { if (reason === 'manual') quickNotice(bi('Nothing to compact.', '没有可以压缩的内容。')); return; }
+      applyCompact(session, result, keepRecent);
+      const view = this.hub.screenFor(session);
+      if (view) {
+        view.historyWindow = latestHistoryWindow(session.messages);
+        view.renderSessionHistory({ scrollToBottom: true });
+      }
+      await this.flushPersistNow(session);
+      quickNotice(bi(`Compacted ${result.summarisedCount} msgs → 1 summary (~${formatTokenCount(result.tokensSaved)} tok saved)`, `已把 ${result.summarisedCount} 条消息压缩成 1 条摘要（约省 ${formatTokenCount(result.tokensSaved)} tok）`));
     } catch (e) {
-      loading.remove();
-      quickNotice(`Compact failed: ${e.message ?? e}`);
+      loading?.remove();
+      quickNotice(bi(`Compact failed: ${e.message ?? e}`, `压缩失败：${e.message ?? e}`));
     }
   }
 
   /** Restore the messages that a given summary replaced. */
   private async undoCompact(summaryId: string) {
+    if (this.runs.has(this.session.id) || this.submitting.has(this.session.id)) {
+      quickNotice(bi('Wait for this chat to finish before restoring messages.', '请等这个对话本轮结束后再恢复消息。'));
+      return;
+    }
     const ok = undoCompactInSession(this.session, summaryId);
-    if (!ok) { quickNotice('No snapshot for this summary.'); return; }
+    if (!ok) { quickNotice(bi('No snapshot for this summary.', '这条摘要没有可恢复的原始消息。')); return; }
     this.historyWindow = latestHistoryWindow(this.session.messages);
     this.renderSessionHistory({ scrollToBottom: true });
     await this.flushPersistNow();
-    quickNotice('Restored pre-compact history.');
+    quickNotice(bi('Restored pre-compact history.', '已恢复压缩前的消息。'));
   }
 
   /* ============================================================
      Submit — runs the agent loop (with tools if endpoint supports it)
      ============================================================ */
-  private async submit(queuedText?: string, pendingId?: string) {
-    if (this.streaming) { if (!queuedText) this.queueComposer(); return; }
-    if (this.submitInFlight) return;
-    const token = this.sessionToken;
-    this.submitInFlight = true;
-    this.autoContinue = false;
+  /** Send in `target` (the chat on screen unless a queued or task turn
+   *  continues a chat in the background). The turn stays bound to that chat:
+   *  switching chats while it runs never stops it. */
+  private async submit(queuedText?: string, pendingId?: string, options: { target?: ChatSession; regeneratePrompt?: string } = {}) {
+    const target = options.target ?? this.session;
+    if (this.runs.has(target.id)) { if (!queuedText && target === this.session) this.queueComposer(); return; }
+    if (this.submitting.has(target.id)) return;
+    this.submitting.add(target.id);
+    let autoContinue = false;
     try {
-      await this.submitPrepared(queuedText, pendingId);
+      autoContinue = await this.submitPrepared(target, queuedText, pendingId, options.regeneratePrompt);
     } finally {
-      this.submitInFlight = false;
-      if (token === this.sessionToken && !this.autoContinue && this.goalArmed) {
-        this.goalArmed = false; disarmGoal(this.session); this.persistSession();
+      this.submitting.delete(target.id);
+      if (!autoContinue && this.goalArmedIds.has(target.id)) {
+        this.goalArmedIds.delete(target.id); disarmGoal(target); this.persistSession(target);
       }
-      this.updateSubmitBtn();
-      this.renderSessionControls();
-      if (token === this.sessionToken && this.autoContinue) {
-        const next = this.queueArmed ? this.session.inbox?.[0] : undefined;
-        if (next) void this.submit(next.text, next.id);
-        else if (canContinueGoal(this.session.goal, this.goalArmed)) void this.submit(goalPrompt(this.session.goal));
+      const view = this.hub.screenFor(target);
+      if (view) { view.updateSubmitBtn(); view.renderSessionControls(); }
+      // A deleted chat or an unloading plugin ends queued and task continuation;
+      // a closed panel does not.
+      if (autoContinue && !this.hub.stopped && this.plugin.store.loadedSession(target.id) === target) {
+        const next = this.queueArmedIds.has(target.id) ? target.inbox?.[0] : undefined;
+        if (next) void this.submit(next.text, next.id, { target });
+        else if (canContinueGoal(target.goal, this.goalArmedIds.has(target.id))) void this.submit(goalPrompt(target.goal), undefined, { target });
       }
     }
   }
 
-  private async submitPrepared(queuedText?: string, pendingId?: string) {
-    if (this.streaming) return;
-    const submitSessionToken = this.sessionToken;
-    await this.pendingComposerAttachments.wait();
-    if (this.streaming || submitSessionToken !== this.sessionToken) return;
+  /** The endpoint a background continuation uses: the one the chat last ran with. */
+  private endpointFor(session: ChatSession): Endpoint | undefined {
+    return this.plugin.settings.endpoints.find(ep => ep.id === session.endpointId) ?? this.activeEndpoint();
+  }
+
+  /** Returns whether the turn finished normally, which lets queued messages and tasks continue. */
+  private async submitPrepared(target: ChatSession, queuedText?: string, pendingId?: string, regeneratePrompt?: string): Promise<boolean> {
+    if (this.runs.has(target.id)) return false;
+    // Composer sends read the draft, attachments and selection on screen.
+    // Queued and task turns carry their own text and no attachments.
+    const fromComposer = queuedText === undefined;
+    const composerToken = this.sessionToken;
+    if (fromComposer) {
+      await this.pendingComposerAttachments.wait();
+      // The draft stays untouched if the user switched chats while attachments were still preparing.
+      if (this.runs.has(target.id) || composerToken !== this.sessionToken) return false;
+    }
     const raw = queuedText ?? this.inputEl.value.trim();
-    const hasExplicitImage = !queuedText && this.ctx.list().some(item => item.kind === 'image' && !item.isCurrent);
-    if (!raw && !hasExplicitImage) return;
+    const hasExplicitImage = fromComposer && this.ctx.list().some(item => item.kind === 'image' && !item.isCurrent);
+    if (!raw && !hasExplicitImage) return false;
+    // The composer as it was when Send was pressed. Preparing the send can take
+    // a while (unlocking keys, compaction); a chat opened meanwhile keeps its
+    // own attachments, selection and draft.
+    const sentItemIds = new Set(fromComposer ? this.ctx.list().map(item => item.id) : []);
+    const composerStillShown = () => fromComposer && composerToken === this.sessionToken && !this.viewClosed;
+    // Re-validate selection at send time: if the source DOM no longer has any selection
+    // AND focus isn't currently in the sidebar (i.e., user has clicked away from both), drop it.
+    if (fromComposer) {
+      const winSel = window.getSelection()?.toString().trim() ?? '';
+      const focusInSidebar = this.containerEl.contains(activeDocument.activeElement);
+      if (!winSel && !focusInSidebar) {
+        this.currentSelection = null;
+        this.renderSelectionPreview();
+      }
+    }
+    const selection = fromComposer ? this.currentSelection : null;
 
     // Clear the input IMMEDIATELY so Enter feels snappy. If a downstream
     // pre-flight check fails (no endpoint, locked keys), we restore the
-    // original text so the user can fix the issue and retry.
+    // original text so the user can fix the issue and retry — unless they
+    // already started a new draft.
     const inputBackup = this.inputEl.value;
     const restoreInput = () => {
-      if (queuedText !== undefined) return;
-      if (submitSessionToken !== this.sessionToken) return;
+      if (!fromComposer) return;
+      if (!composerStillShown()) {
+        // Another chat is on screen: keep the text in this chat's queue, not in that chat's box.
+        if (enqueueMessage(target, inputBackup, 'followup')) {
+          this.persistSession(target);
+          quickNotice(bi('The message was not sent and is kept in its chat\'s queue.', '消息没有发出，已放回原对话的待发送队列。'), 4000);
+        }
+        return;
+      }
+      if (this.inputEl.value) return;
       this.inputEl.value = inputBackup;
       this.recomputeInputHeight();
       this.inputEl.focus();
@@ -3320,26 +3737,25 @@ export class GlossaView extends ItemView {
     // content drifts upward and fades as the message bubble takes its place.
     // No-op for reduced-motion users; skipped for long inputs to avoid a
     // huge translucent block flashing across the screen.
-    if (queuedText === undefined) { this.playSendFlyout(inputBackup); this.inputEl.value = ''; }
+    if (fromComposer) { this.playSendFlyout(inputBackup); this.inputEl.value = ''; }
     this.recomputeInputHeight();
     this.historyCursor = -1; this.historyDraft = '';
 
     // 1) If the line starts with a known `/<trigger> [arg]`, expand to its full template
     // 2) Then resolve any legacy {{...}} markers
     // Both happen at submit time so the textarea itself never grew.
-    const slashExpansion = queuedText !== undefined ? { text: raw, expanded: false, embeddedSelection: false, embeddedCurrentFile: false } : await this.expandSlashTrigger(raw);
-    if (submitSessionToken !== this.sessionToken) return;
-    const markerExpansion = queuedText !== undefined ? slashExpansion : await this.resolveSlashMarkers(slashExpansion.text);
-    if (submitSessionToken !== this.sessionToken) return;
+    const slashExpansion = !fromComposer ? { text: raw, expanded: false, embeddedSelection: false, embeddedCurrentFile: false } : await this.expandSlashTrigger(raw);
+    const markerExpansion = !fromComposer ? slashExpansion : await this.resolveSlashMarkers(slashExpansion.text);
     const text = markerExpansion.text || (hasExplicitImage ? 'Analyze the attached image(s).' : '');
-    const ep = this.activeEndpoint();
-    if (!ep) { restoreInput(); quickNotice('No endpoint configured. Open settings.'); return; }
+    const ep = this.isShowing(target) ? this.activeEndpoint() : this.endpointFor(target);
+    if (!ep) { restoreInput(); quickNotice(bi('No endpoint configured. Open settings.', '尚未配置接口，请先在设置中添加。')); return false; }
 
     // Decrypt endpoint FIRST — fail before touching UI / message state so we don't leave
     // an empty assistant bubble + cursor on the screen.
     const epReady = await this.plugin.getDecryptedEndpoint(ep);
-    if (submitSessionToken !== this.sessionToken) return;
-    if (!epReady) { restoreInput(); quickNotice('Endpoint key locked or invalid. Unlock encryption or re-enter the API key.'); return; }
+    if (!epReady) { restoreInput(); quickNotice(bi('Endpoint key locked or invalid. Unlock encryption or re-enter the API key.', '接口密钥已锁定或无效。请先解锁加密，或重新填写 API key。')); return false; }
+    const unavailable = () => this.runs.has(target.id) || this.hub.stopped || (fromComposer && this.viewClosed);
+    if (unavailable()) { restoreInput(); return false; }
 
     // Auto-compact: if the existing session is approaching the context budget, summarise
     // the older messages into a single recap before adding the new user turn.
@@ -3351,30 +3767,20 @@ export class GlossaView extends ItemView {
     if (this.plugin.settings.autoCompactEnabled) {
       const budget = effectiveWindow.maxCtx;
       const threshold = budget * (this.plugin.settings.autoCompactThresholdPct / 100);
-      const pressure = pruneUnderPressure(this.buildModelHistory('', undefined), threshold);
-      if (pressure.ids.length) this.recordPruning(pressure.ids);
+      const pressure = pruneUnderPressure(this.buildModelHistory(target, epReady, '', undefined), threshold);
+      if (pressure.ids.length) this.recordPruning(target, pressure.ids);
       const used = pressure.after;
       if (used > threshold) {
-        await this.runAutoCompact(epReady, 'auto');
-        if (submitSessionToken !== this.sessionToken) return;
+        await this.runAutoCompact(target, epReady, 'auto');
         preSubmitCompacted = true;
       }
     }
+    if (unavailable()) { restoreInput(); return false; }
 
-    // Re-validate selection at submit time: if the source DOM no longer has any selection
-    // AND focus isn't currently in the sidebar (i.e., user has clicked away from both), drop it.
-    {
-      const winSel = window.getSelection()?.toString().trim() ?? '';
-      const focusInSidebar = this.containerEl.contains(activeDocument.activeElement);
-      if (!winSel && !focusInSidebar) {
-        this.currentSelection = null;
-        this.renderSelectionPreview();
-      }
-    }
-    const selectionContextBlock = !queuedText && this.currentSelection
-      ? `### Selection (from ${this.currentSelection.source}${this.currentSelection.file ? `, ${this.currentSelection.file.path}` : ''}):\n\n${this.currentSelection.text}`
+    const selectionContextBlock = selection
+      ? `### Selection (from ${selection.source}${selection.file ? `, ${selection.file.path}` : ''}):\n\n${selection.text}`
       : '';
-    const recentUserTexts = this.session.messages
+    const recentUserTexts = target.messages
       .filter(message => message.role === 'user')
       .slice(-6)
       .reverse()
@@ -3382,7 +3788,7 @@ export class GlossaView extends ItemView {
     const responseLanguage = inferResponseLanguage({
       currentText: raw,
       recentUserTexts,
-      selectionText: this.currentSelection?.text,
+      selectionText: selection?.text,
       uiLanguage: currentLanguage(),
     });
     const responseLanguageHint = buildResponseLanguageHint(responseLanguage);
@@ -3392,9 +3798,12 @@ export class GlossaView extends ItemView {
     // Refresh the open source at send time. This picks up current Markdown
     // edits and lazily resolves non-Markdown files using the requested task
     // (for example front + ending pages for /summarize).
-    if (queuedText === undefined) await this.hydrateCurrentContextForPrompt(raw, embeddedSelection || embeddedCurrentFile);
-    if (submitSessionToken !== this.sessionToken) return;
-    const turnContextItems = queuedText === undefined ? this.ctx.list() : [];
+    if (composerStillShown()) await this.hydrateCurrentContextForPrompt(raw, embeddedSelection || embeddedCurrentFile);
+    if (unavailable()) { restoreInput(); return false; }
+    // Only what was attached when Send was pressed (with the current file refreshed).
+    const turnContextItems = fromComposer
+      ? this.ctx.list().filter(item => sentItemIds.has(item.id) || (item.isCurrent && composerStillShown()))
+      : [];
     const hasExplicitAttachments = turnContextItems.some(it => !it.isCurrent);
 
     // Save only lightweight metadata refs — never the resolved file/image contents.
@@ -3411,61 +3820,84 @@ export class GlossaView extends ItemView {
       // what lets later turns retain attached PDF/file text without persisting
       // image data URIs in chat storage.
       displayContent: raw,
-      selectionEcho: !queuedText && this.currentSelection ? {
-        text: this.currentSelection.text,
-        source: this.currentSelection.source,
-        file: this.currentSelection.file?.path,
+      selectionEcho: selection ? {
+        text: selection.text,
+        source: selection.source,
+        file: selection.file?.path,
       } : undefined,
     };
-    this.session.messages.push(userMsg);
-    if (pendingId) this.session.inbox = this.session.inbox?.filter(m => m.id !== pendingId);
-    if (this.goalArmed && this.session.goal?.phase === 'active') this.session.goal.rounds++;
-    recordDiagnostic(this.session, { at: Date.now(), kind: 'start', runtime: epReady.kind, model: epReady.model });
-    this.historyWindow = latestHistoryWindow(this.session.messages);
-    this.renderSessionHistory({ scrollToBottom: true });
-    if (queuedText === undefined) this.ctx.resetUnpinned();
+    target.messages.push(userMsg);
+    // Title the chat as it starts, so a chat running in the background is
+    // recognisable in the history. Auto-title only while the title is still a
+    // placeholder: match both language defaults — the new-session factory
+    // hardcodes 'New chat' (EN), but a zh user who blanks the title in
+    // history_modal lands on '（无标题）'.
+    const placeholderTitles = new Set(['New chat', '新对话', '(untitled)', '（无标题）']);
+    if ((!target.title || placeholderTitles.has(target.title)) && text.trim()) target.title = text.slice(0, 60);
+    if (pendingId) target.inbox = target.inbox?.filter(m => m.id !== pendingId);
+    if (this.goalArmedIds.has(target.id) && target.goal?.phase === 'active') target.goal.rounds++;
+    recordDiagnostic(target, { at: Date.now(), kind: 'start', runtime: epReady.kind, model: epReady.model });
+    const shownAtStart = this.hub.screenFor(target);
+    if (shownAtStart) {
+      shownAtStart.historyWindow = latestHistoryWindow(target.messages);
+      shownAtStart.renderSessionHistory({ scrollToBottom: true });
+    }
+    if (fromComposer) this.ctx.resetUnpinned(sentItemIds);
 
     // Input + history cursor were already cleared at the top of submit() so the
-    // box feels instant. We just reset the selection echo here.
-    if (queuedText === undefined) this.currentSelection = null;
-    this.renderSelectionPreview();
+    // box feels instant. We just reset the selection echo here — unless the
+    // composer now shows something else.
+    if (fromComposer && this.currentSelection === selection) { this.currentSelection = null; this.renderSelectionPreview(); }
 
     // Start a new assistant message — fresh turnId for this user turn.
-    this.currentTurnId = uid();
-    const turnIdForThisRun = this.currentTurnId;
-    this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId,
+    const turnIdForThisRun = uid();
+    const asst: ChatMessage = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: turnIdForThisRun,
       modelSnapshot: { endpointId: epReady.id, model: epReady.model ?? '' } };
-    this.session.messages.push(this.currentAsstMsg);
-    this.streamingBuf = '';
-    this.streaming = true;
-    this.abortCtl = new AbortController();
-    this.renderSessionControls();
-    // Mirror streaming state to the view root so CSS animations (act pulse,
-    // future skeleton effects) can scope themselves to active streams and
-    // stay calm when idle. See styles.css .glossa-streaming.
-    this.rootEl?.classList.add('glossa-streaming');
-    this.updateSubmitBtn();
-    this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
-    this.streamingMsgUI.wrap.classList.add('streaming');
-    this.currentActivityStartedAt = Date.now();
-    this.setTurnActivity(this.streamingMsgUI, 'Thinking...', 'thinking');
-    this.streamingStartedAt = Date.now();
+    target.messages.push(asst);
+    target.updatedAt = Date.now();
+    const run: ChatRun = {
+      session: target,
+      endpoint: JSON.parse(JSON.stringify(epReady)) as Endpoint,
+      controller: new AbortController(),
+      turnId: turnIdForThisRun,
+      asst,
+      buf: '',
+      lastChunkWasTool: false,
+      segmentStartedAt: Date.now(),
+      activity: { label: thinkingLabel(), status: 'thinking', startedAt: Date.now() },
+      ui: null,
+      approval: null,
+    };
+    this.runs.set(target.id, run);
+    // Listed (and marked running) in the history at once; written with the next save.
+    this.plugin.store.track(target);
+    this.persistSession(target);
+    this.notifyRuns();
+    const screen = () => this.hub.screenFor(target);
+    const startScreen = screen();
+    if (startScreen) {
+      if (startScreen.renderedLatest) run.ui = startScreen.renderMessage(asst, { live: true });
+      startScreen.attachRun(run);
+    }
+    const signal = run.controller.signal;
+    const runEp = run.endpoint;
 
     // Wrap everything that follows in try/finally — any thrown error (provider
-    // crash, runAgentLoop edge case, finalize bug) MUST still reset the
-    // streaming flag. Without this guard the flag stays stuck on `true` and
-    // every subsequent submit() returns early at the top check, giving the
-    // "model stopped answering after one bad turn" symptom the user reported.
+    // crash, runAgentLoop edge case, finalize bug) MUST still release the run.
+    // Without this guard the chat stays "running" and every subsequent submit()
+    // returns early, giving the "model stopped answering after one bad turn"
+    // symptom the user reported.
     let loopHadError = false;
+    let finishedNormally = false;
     try {
 
     const vaultRoot = this.app.vault.adapter instanceof FileSystemAdapter ? this.app.vault.adapter.getBasePath() : undefined;
-    const provider = buildProvider(epReady, this.plugin.settings.globalProxy, vaultRoot);
+    const provider = buildProvider(runEp, this.plugin.settings.globalProxy, vaultRoot);
     // Hard cap = a hair below the effective model window so we leave room for
     // the system prompt + assistant response. The previous code displayed the
     // model window in the footer but still budgeted attachments against the
     // settings cap, which let a 128k model receive a 1M-sized prompt.
-    const historyBudgetTokens = estimateSessionTokens(this.session);
+    const historyBudgetTokens = estimateSessionTokens(target);
     const responseReserve = Math.min(16_000, Math.max(4_000, Math.floor(effectiveWindow.maxCtx * 0.06)));
     const softCap = Math.max(1, Math.floor(effectiveWindow.maxCtx * 0.92) - historyBudgetTokens - responseReserve);
     const hardCap = Math.max(1, Math.floor(effectiveWindow.maxCtx * 0.98) - historyBudgetTokens - responseReserve);
@@ -3478,31 +3910,32 @@ export class GlossaView extends ItemView {
       items: turnContextItems,
     });
     if (dropped.length > 0) {
-      quickNotice(`Context budget: dropped ${dropped.length} unpinned item(s) (${dropped.map(d => d.label).join(', ').slice(0, 80)}) to fit ${formatTokenCount(softCap)} tokens. Pin to keep.`);
+      quickNotice(bi(`Context budget: dropped ${dropped.length} unpinned item(s) (${dropped.map(d => d.label).join(', ').slice(0, 80)}) to fit ${formatTokenCount(softCap)} tokens. Pin to keep.`, `上下文预算：为控制在 ${formatTokenCount(softCap)} tok 内，移除了 ${dropped.length} 个未固定的附件（${dropped.map(d => d.label).join('、').slice(0, 80)}）。固定后可保留。`));
     }
     if (forcedDrops.length > 0) {
       // Hard cap kicked in — even pinned/current items had to be dropped. Surface
       // this loudly because it changes what the model sees vs what the user sees pinned.
-      new Notice(`⚠ HARD context cap exceeded: had to drop ${forcedDrops.length} pinned/current item(s): ${forcedDrops.map(d => d.label).join(', ')}. Compress or remove items to keep them.`, 10000);
+      new Notice(bi(`⚠ HARD context cap exceeded: had to drop ${forcedDrops.length} pinned/current item(s): ${forcedDrops.map(d => d.label).join(', ')}. Compress or remove items to keep them.`, `⚠ 超出上下文上限：不得不移除 ${forcedDrops.length} 个已固定或当前的附件：${forcedDrops.map(d => d.label).join('、')}。请压缩或删减附件后再保留它们。`), 10000);
     }
     const sysPrompt = await this.buildSystemPrompt();
-    if (submitSessionToken !== this.sessionToken || this.abortCtl.signal.aborted) return;
+    if (signal.aborted) { this.dropEmptySegment(run); return false; }
     // Slash commands are self-contained task instructions, so they do not need
     // a prior-turn continuity hint. Their attached/open source context still
     // participates unless it was embedded verbatim above.
-    const taskContinuityHint = wasExpanded ? '' : buildTaskContinuityHint(text, userMsg.id, this.session.messages, ctxSnap, { hasExplicitSelection: !!selectionContextBlock });
+    const taskContinuityHint = wasExpanded ? '' : buildTaskContinuityHint(text, userMsg.id, target.messages, ctxSnap, { hasExplicitSelection: !!selectionContextBlock });
     const currentContextHint = buildCurrentContextPolicyHint(raw, ctxSnap, hasExplicitAttachments);
     const explicitTurnImages = this.ctx.imagesForAPI({ suppressAutoCurrent: suppressEmbeddedCurrent, items: turnContextItems });
+    const recentVisual = this.visualContexts.get(target);
     const reuseRecentVisual = explicitTurnImages.length === 0
-      && !!this.recentVisualContext
+      && !!recentVisual
       && shouldReuseRecentVisualContext(raw, !!taskContinuityHint);
     const requestImages = explicitTurnImages.length
       ? explicitTurnImages
-      : reuseRecentVisual ? this.recentVisualContext?.images ?? [] : [];
+      : reuseRecentVisual ? recentVisual?.images ?? [] : [];
     const inheritedVisualHint = reuseRecentVisual
       ? visualContinuityHint(requestImages.map(image => image.name ?? 'image'))
       : '';
-    const finalUserContent = this.pendingRegeneratePrompt ?? [
+    const finalUserContent = regeneratePrompt ?? [
       responseLanguageHint,
       taskContinuityHint,
       inheritedVisualHint,
@@ -3511,46 +3944,36 @@ export class GlossaView extends ItemView {
       embeddedSelection ? '' : selectionContextBlock,
       text,
     ].filter(Boolean).join('\n\n');
-    this.pendingRegeneratePrompt = null;
     captureUserPromptSnapshot(userMsg, raw, finalUserContent);
     if (explicitTurnImages.length) {
-      this.recentVisualContext = { images: explicitTurnImages.slice(0, 3) };
+      this.visualContexts.set(target, { images: explicitTurnImages.slice(0, 3) });
     } else if (!reuseRecentVisual) {
-      this.recentVisualContext = null;
+      this.visualContexts.delete(target);
     }
 
     // Build a FULL model-facing history that PRESERVES tool calls + tool results from
     // prior turns. Without this, the model loses everything it ever read/wrote and can
     // only guess from its own final replies (#2). Each assistant turn that ran tools
     // re-emits the tool_use blocks; each toolEvent becomes a role:'tool' message.
-    const history = this.buildModelHistory(userMsg.id, this.currentAsstMsg.id);
-    const enableTools = ep.kind === 'custom-api' && !ep.useObsidianFetch;
+    const history = this.buildModelHistory(target, runEp, userMsg.id, asst.id);
+    const enableTools = runEp.kind === 'custom-api' && !runEp.useObsidianFetch;
 
-    this.contextTokenBreakdown = {
+    this.breakdowns.set(target, {
       system: estimateTokens(sysPrompt),
       tools: enableTools ? estimateTokens(JSON.stringify(listToolSpecs())) : 0,
       history: estimateTokens(history.map(message => `${message.role}:${message.content}`).join('\n')) + estimateTokens(text),
       attachments: attachmentTextTokens + explicitTurnImages.reduce((sum, image) => sum + Math.ceil(image.dataUri.length / 1365), 0),
-    };
-    this.updateTokenBadge();
-    this.renderCostBar();
+    });
+    const shownWithBudget = screen();
+    if (shownWithBudget) { shownWithBudget.updateTokenBadge(); shownWithBudget.renderCostBar(); }
 
     // Custom API → we control the tool-use protocol → enable our tool dispatch.
     // CLI providers → either single-shot (no tools) or fullAgent (their own tool dispatch).
     // For read-only permission we still expose read-side tools.
     // requestUrl path is non-streaming + non-tool-aware → must disable.
-    if (ep.kind === 'custom-api' && ep.useObsidianFetch && this.plugin.settings.runMode === 'act') {
-      quickNotice('Tools disabled in "Use Obsidian requestUrl" mode — switch off requestUrl for full agent.');
+    if (runEp.kind === 'custom-api' && runEp.useObsidianFetch && this.plugin.settings.runMode === 'act') {
+      quickNotice(bi('Tools disabled in "Use Obsidian requestUrl" mode — switch off requestUrl for full agent.', '“使用 Obsidian requestUrl”模式下无法使用工具；关闭该选项即可使用完整 Agent。'));
     }
-    this.startElapsedTicker();
-
-    // Session-token race guard: capture the token at the moment this submit
-    // begins. Every callback below checks `live()` and silently drops the
-    // event if the user switched / cleared the session mid-stream. Without
-    // this guard, chunks queued before a switch would write into the new
-    // session's messages array and corrupt history.
-    const myToken = submitSessionToken;
-    const live = () => myToken === this.sessionToken;
 
     await runAgentLoop({
       app: this.app,
@@ -3559,8 +3982,8 @@ export class GlossaView extends ItemView {
       userContent: finalUserContent,
       history,
       enableTools,
-      endpointKind: ep.kind,
-      endpointFullAgent: !!(epReady as AnyValue).cliFullAgent,
+      endpointKind: runEp.kind,
+      endpointFullAgent: !!(runEp as AnyValue).cliFullAgent,
       permissionLevel: this.plugin.settings.permissionLevel,
       runMode: this.plugin.settings.runMode,
       maxSteps: this.plugin.settings.agentMaxSteps,
@@ -3579,7 +4002,7 @@ export class GlossaView extends ItemView {
         const scopeStr = rule.scopedToSessionId
           ? 'this session'
           : (rule.value ? rule.scope + ' ' + rule.value : 'globally');
-        quickNotice(`Saved: ${rule.behavior} ${rule.tool} ${scopeStr}`);
+        quickNotice(bi(`Saved: ${rule.behavior} ${rule.tool} ${scopeStr}`, `已保存规则：${rule.behavior} ${rule.tool} ${scopeStr}`));
       },
       onPermissionDecision: (entry) => {
         const log = this.plugin.settings.permissionLog ?? [];
@@ -3590,246 +4013,245 @@ export class GlossaView extends ItemView {
         // Fire-and-forget persistence — don't block the loop on disk write
         this.plugin.saveSettings().catch(() => {});
       },
-      model: ep.model,
-      signal: this.abortCtl.signal,
+      model: runEp.model,
+      signal,
       attachedImages: requestImages,
-      nativePdfInput: supportsNativePdfInput(epReady),
+      nativePdfInput: supportsNativePdfInput(runEp),
       checkpoint: this.plugin.checkpoint,
-      sessionId: this.session.id,
+      sessionId: target.id,
       turnId: turnIdForThisRun,
       mcp: this.plugin.mcp,
-      approver: (tool, args) => this.askInlineApproval(tool, args),
+      approver: (tool, args) => this.askInlineApproval(run, tool, args),
       contextBudget: this.plugin.settings.autoCompactEnabled ? Math.max(1, effectiveWindow.maxCtx * (this.plugin.settings.autoCompactThresholdPct / 100) - estimateTokens(sysPrompt) - responseReserve) : undefined,
-      initialPrunedIds: this.session.prunedToolCallIds,
-      onPruned: ids => { if (live()) this.recordPruning(ids); },
+      initialPrunedIds: target.prunedToolCallIds,
+      onPruned: ids => this.recordPruning(target, ids),
       takeSteering: async () => {
-        if (!live() || !this.queueArmed) return [];
-        const items = takeSteering(this.session);
+        if (!this.queueArmedIds.has(target.id)) return [];
+        const items = takeSteering(target);
         for (const item of items) {
           const msg: ChatMessage = { id: item.id, role: 'user', content: item.text, timestamp: Date.now() };
-          this.session.messages.push(msg);
-          this.renderMessage(msg);
+          target.messages.push(msg);
+          const view = screen();
+          if (view?.renderedLatest) view.renderMessage(msg);
         }
-        if (items.length) { this.renderSessionControls(); await this.flushPersistNow(); }
+        if (items.length) {
+          screen()?.renderSessionControls();
+          await this.flushPersistNow(target);
+        }
         return items.map(item => item.text);
       },
-      runtimeTools: this.session.goal?.phase === 'active' && this.goalArmed ? [goalStatusTool(this.session.goal, async () => { if (live()) { this.renderSessionControls(); await this.flushPersistNow(); } })] : [],
+      runtimeTools: target.goal?.phase === 'active' && this.goalArmedIds.has(target.id) ? [goalStatusTool(target.goal, async () => {
+        screen()?.renderSessionControls();
+        await this.flushPersistNow(target);
+      })] : [],
 
       // Reactive compaction: when the server says the prompt is too long, summarise
       // the session and return a fresh message array for the loop to retry with.
       // Skip if we already compacted pre-submit in this turn (loop.ts also has
       // its own once-per-turn guard, but defence-in-depth here saves the LLM call).
       onContextOverflow: async () => {
-        if (!live()) return null;
+        if (signal.aborted) return null;
         if (preSubmitCompacted) {
-          quickNotice('Pre-submit compaction already happened — refusing second pass to avoid burning a duplicate LLM call. Increase context window or open a fresh chat.', 6000);
+          quickNotice(bi('Pre-submit compaction already happened — refusing second pass to avoid burning a duplicate LLM call. Increase context window or open a fresh chat.', '发送前已经压缩过一次，为避免重复调用模型不再压缩。请调大上下文窗口，或新开一个对话。'), 6000);
           return null;
         }
         // Drop the empty assistant bubble that the failed turn created
-        if (this.currentAsstMsg) {
-          this.session.messages = this.session.messages.filter(m => m.id !== this.currentAsstMsg.id);
-          if (this.streamingMsgUI) this.streamingMsgUI.wrap.remove();
+        const failed = run.asst;
+        if (failed) {
+          target.messages = target.messages.filter(m => m.id !== failed.id);
+          run.ui?.wrap.remove();
+          run.ui = null;
         }
-        quickNotice('Context window exceeded — compacting and retrying…', 3000);
-        await this.runAutoCompact(epReady, 'auto');
-        if (!live()) return null;
-        recordDiagnostic(this.session, { at: Date.now(), kind: 'compact' });
+        quickNotice(bi('Context window exceeded — compacting and retrying…', '超出上下文窗口，正在压缩后重试…'), 3000);
+        await this.runAutoCompact(target, runEp, 'auto', signal);
+        if (signal.aborted) return null;
+        recordDiagnostic(target, { at: Date.now(), kind: 'compact' });
         preSubmitCompacted = true;     // suppress further reactive compactions this turn
         // Reinstate the assistant bubble at the tail (loop will continue streaming into it)
-        if (this.currentAsstMsg) {
-          this.session.messages.push(this.currentAsstMsg);
-          this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
-          this.streamingMsgUI.wrap.classList.add('streaming');
-          this.currentActivityStartedAt = Date.now();
-          this.setTurnActivity(this.streamingMsgUI, 'Compacted, retrying...', 'thinking');
+        if (failed) {
+          target.messages.push(failed);
+          const view = screen();
+          if (view?.renderedLatest) {
+            run.ui = view.renderMessage(failed, { live: true });
+            run.ui.wrap.classList.add('streaming');
+          }
+          this.setRunActivity(run, bi('Compacted, retrying...', '已压缩，正在重试…'), 'thinking', true);
         }
         // Rebuild the message array for the loop from the compacted session, excluding
         // the assistant placeholder + the user turn itself (the loop appends both).
-        return this.buildModelHistory('', this.currentAsstMsg?.id);
+        return this.buildModelHistory(target, runEp, '', run.asst?.id);
       },
       onText: (delta) => {
-        if (!live()) return;
-        if (this.lastChunkWasTool) {
-          this.flushAndStartNewAsstSegment();
-        }
-        this.lastChunkWasTool = false;
-        this.streamingBuf += delta;
-        if (this.currentAsstMsg) this.currentAsstMsg.content = this.streamingBuf;
-        this.scheduleStreamingRender();
+        if (run.lastChunkWasTool) this.flushAndStartNewAsstSegment(run);
+        run.lastChunkWasTool = false;
+        run.buf += delta;
+        if (run.asst) run.asst.content = run.buf;
+        if (run.ui) screen()?.scheduleStreamingRender();
       },
       onReasoning: (delta) => {
-        if (!live()) return;
-        if (!this.currentAsstMsg) return;
-        this.currentAsstMsg.reasoningContent = (this.currentAsstMsg.reasoningContent ?? '') + delta;
-        this.setTurnActivity(this.streamingMsgUI, 'Thinking...', 'thinking');
-        this.scheduleReasoningRender();
+        if (!run.asst) return;
+        run.asst.reasoningContent = (run.asst.reasoningContent ?? '') + delta;
+        this.setRunActivity(run, thinkingLabel(), 'thinking');
+        if (run.ui) screen()?.scheduleReasoningRender();
       },
       onToolStart: (ev) => {
-        if (!live()) return;
-        if (!this.currentAsstMsg || !this.streamingMsgUI) return;
-        this.currentAsstMsg.toolEvents = this.currentAsstMsg.toolEvents ?? [];
-        if (!this.currentAsstMsg.toolEvents.find(t => t.id === ev.id)) this.currentAsstMsg.toolEvents.push(ev);
-        this.upsertToolEvent(this.streamingMsgUI, ev);
-        this.currentActivityStartedAt = ev.startedAt || Date.now();
-        this.setTurnActivity(this.streamingMsgUI, activityDescriptionFor(ev.name, ev.args), 'tool');
-        this.streamingMsgUI.wrap.classList.add('has-tools');
-        this.lastChunkWasTool = true;
+        if (!run.asst) return;
+        run.asst.toolEvents = run.asst.toolEvents ?? [];
+        if (!run.asst.toolEvents.find(t => t.id === ev.id)) run.asst.toolEvents.push(ev);
+        if (run.ui) {
+          screen()?.upsertToolEvent(run.ui, ev);
+          run.ui.wrap.classList.add('has-tools');
+        }
+        this.setRunActivity(run, activityDescriptionFor(ev.name, ev.args), 'tool');
+        run.lastChunkWasTool = true;
       },
       onToolEnd: (ev) => {
-        if (!live()) return;
-        if (ev.status !== 'pending' && ev.status !== 'running') recordDiagnostic(this.session, { at: Date.now(), kind: 'tool', tool: ev.name, status: ev.status, code: ev.errorCode, durationMs: Math.max(0, (ev.endedAt ?? Date.now()) - ev.startedAt), skillVersion: ev.skillVersion });
-        if (!this.currentAsstMsg || !this.streamingMsgUI) return;
-        const list = this.currentAsstMsg.toolEvents ?? [];
+        if (ev.status !== 'pending' && ev.status !== 'running') recordDiagnostic(target, { at: Date.now(), kind: 'tool', tool: ev.name, status: ev.status, code: ev.errorCode, durationMs: Math.max(0, (ev.endedAt ?? Date.now()) - ev.startedAt), skillVersion: ev.skillVersion });
+        if (!run.asst) return;
+        const list = run.asst.toolEvents ?? [];
         const idx = list.findIndex(t => t.id === ev.id);
         if (idx >= 0) list[idx] = ev; else list.push(ev);
-        this.currentAsstMsg.toolEvents = list;
-        this.upsertToolEvent(this.streamingMsgUI, ev);
+        run.asst.toolEvents = list;
+        if (run.ui) screen()?.upsertToolEvent(run.ui, ev);
         if (ev.status === 'running' || ev.status === 'pending') {
-          this.currentActivityStartedAt = ev.startedAt || Date.now();
-          this.setTurnActivity(this.streamingMsgUI, activityDescriptionFor(ev.name, ev.args), 'tool');
+          this.setRunActivity(run, activityDescriptionFor(ev.name, ev.args), 'tool');
         } else {
-          this.currentActivityStartedAt = Date.now();
-          this.setTurnActivity(this.streamingMsgUI, ev.status === 'success' ? 'Processing result...' : 'Handling tool result...', 'thinking');
+          this.setRunActivity(run, ev.status === 'success' ? bi('Processing result...', '正在处理结果…') : bi('Handling tool result...', '正在处理工具结果…'), 'thinking');
         }
         if (ev.name === 'todo_write' && Array.isArray(ev.args?.items)) {
-          this.updatePlanBoard(ev.args.items);
+          this.updatePlanBoard(target, ev.args.items);
         }
-        this.lastChunkWasTool = true;
+        run.lastChunkWasTool = true;
       },
       onStepBoundary: async () => {
-        if (!live()) return;
-        recordDiagnostic(this.session, { at: Date.now(), kind: 'step' });
-        if (this.currentAsstMsg && this.streamingMsgUI) {
-          this.currentAsstMsg.content = this.streamingBuf;
-          this.streamingMsgUI.wrap.classList.remove('streaming');
-          this.setTurnActivity(this.streamingMsgUI, '', 'idle');
-          this.finalizeReasoningLabel(this.streamingMsgUI, this.currentAsstMsg);
-          await this.finalizeAsstRender(this.streamingMsgUI, this.currentAsstMsg);
+        recordDiagnostic(target, { at: Date.now(), kind: 'step' });
+        const previous = run.asst, previousUi = run.ui;
+        if (previous) {
+          previous.content = run.buf;
+          if (previousUi) {
+            previousUi.wrap.classList.remove('streaming');
+            this.setTurnActivity(previousUi, '', 'idle');
+            this.finalizeReasoningLabel(previousUi, previous);
+            // markdown/MathJax can be slow; the turn keeps its data either way.
+            await (screen() ?? this).finalizeAsstRender(previousUi, previous);
+          }
         }
-        // Re-check after the await — session may have switched while
-        // finalizeAsstRender was awaiting (markdown/MathJax can be slow).
-        if (!live()) return;
-        this.currentAsstMsg = { id: uid(), role: 'assistant', content: '', timestamp: Date.now(), toolEvents: [], turnId: this.currentTurnId ?? undefined, modelSnapshot: this.currentAsstMsg?.modelSnapshot };
-        this.session.messages.push(this.currentAsstMsg);
-        this.streamingBuf = '';
-        this.lastChunkWasTool = false;
-        this.streamingMsgUI = this.renderMessage(this.currentAsstMsg);
-        this.streamingMsgUI.wrap.classList.add('streaming');
-        this.currentActivityStartedAt = Date.now();
-        this.setTurnActivity(this.streamingMsgUI, 'Thinking...', 'thinking');
-        this.streamingStartedAt = Date.now();
+        if (signal.aborted) return;
+        this.beginSegment(run);
       },
       onError: (err) => {
-        if (!live()) return;
         loopHadError = true;
-        recordDiagnostic(this.session, { at: Date.now(), kind: 'error', code: 'RUN_FAILED' });
-        this.streamingBuf += `\n\n**[error]** ${err}`;
-        if (this.currentAsstMsg) this.currentAsstMsg.content = this.streamingBuf;
-        this.scheduleStreamingRender();
+        recordDiagnostic(target, { at: Date.now(), kind: 'error', code: 'RUN_FAILED' });
+        run.buf += `\n\n**[error]** ${err}`;
+        if (run.asst) run.asst.content = run.buf;
+        if (run.ui) screen()?.scheduleStreamingRender();
       },
       onFinal: (usage) => {
-        if (!live()) return;
-        if (usage && this.currentAsstMsg) {
-          this.currentAsstMsg.usage = usage;
-          if (usage.input) this.sessionInputTokens += usage.input;
-          if (usage.output) this.sessionOutputTokens += usage.output;
-          if (usage.costUSD) this.sessionCostUSD += usage.costUSD;
-          if (typeof usage.lastInput === 'number' && this.contextTokenBreakdown) {
-            this.contextTokenBreakdown.providerInput = usage.lastInput;
-            this.updateTokenBadge();
+        if (usage && run.asst) {
+          run.asst.usage = usage;
+          const breakdown = this.breakdowns.get(target);
+          if (typeof usage.lastInput === 'number' && breakdown) {
+            breakdown.providerInput = usage.lastInput;
+            screen()?.updateTokenBadge();
           }
         }
       },
     });
 
-    if (!live()) return;
-
     // Flush + finalize — runs for ALL termination paths (success / error / abort / max-steps).
     // Strip streaming class + reasoning "streaming…" label from EVERY assistant message
-    // in the current session, not just the latest, so leftover state from earlier steps
+    // of this turn, not just the latest, so leftover state from earlier steps
     // can't survive a max-steps termination.
-    if (this.currentAsstMsg && this.streamingMsgUI) {
-      this.currentAsstMsg.content = this.streamingBuf;
-      this.streamingMsgUI.wrap.classList.remove('streaming');
-      this.setTurnActivity(this.streamingMsgUI, '', 'idle');
-      this.finalizeReasoningLabel(this.streamingMsgUI, this.currentAsstMsg);
-      await this.finalizeAsstRender(this.streamingMsgUI, this.currentAsstMsg);
+    const lastSegment = run.asst;
+    if (lastSegment) {
+      lastSegment.content = run.buf;
+      const view = screen();
+      const ui = view ? run.ui : null;
+      if (view && ui) {
+        ui.wrap.classList.remove('streaming');
+        this.setTurnActivity(ui, '', 'idle');
+        this.finalizeReasoningLabel(ui, lastSegment);
+        await view.finalizeAsstRender(ui, lastSegment);
+      }
     }
-    for (const ui of this.msgUIs.values()) {
-      ui.wrap.classList.remove('streaming');
-      this.setTurnActivity(ui, '', 'idle');
-      this.finalizeReasoningLabel(ui, ui.msg);
-      // Belt-and-suspenders: any tool card left in 'running' / 'pending' state
-      // (because the provider was SIGTERM'd mid-flight) gets marked 'denied'
-      // so the pulse animation stops. Without this the purple status pill
-      // keeps animating forever on the dead card.
-      for (const ev of (ui.msg.toolEvents ?? [])) {
+    // Belt-and-suspenders: any tool card left in 'running' / 'pending' state
+    // (because the provider was SIGTERM'd mid-flight) gets marked cancelled
+    // so the pulse animation stops. Without this the purple status pill
+    // keeps animating forever on the dead card.
+    for (const m of target.messages) {
+      if (m.role !== 'assistant' || m.turnId !== turnIdForThisRun) continue;
+      for (const ev of (m.toolEvents ?? [])) {
         if (ev.status === 'running' || ev.status === 'pending') {
           ev.status = 'cancelled';
           ev.errorCode = 'CANCELLED';
           ev.endedAt = Date.now();
-          this.upsertToolEvent(ui, ev);
         }
       }
     }
-    const cancelled = !!this.abortCtl?.signal.aborted;
-    this.autoContinue = !loopHadError && !cancelled;
-    if (this.session.goal?.phase === 'active' && (!this.autoContinue || this.session.goal.rounds >= this.session.goal.maxRounds)) {
-      disarmGoal(this.session); this.goalArmed = false;
+    const shownAtEnd = screen();
+    if (shownAtEnd) {
+      for (const ui of shownAtEnd.msgUIs.values()) {
+        ui.wrap.classList.remove('streaming');
+        this.setTurnActivity(ui, '', 'idle');
+        this.finalizeReasoningLabel(ui, ui.msg);
+        if (ui.msg.turnId === turnIdForThisRun) for (const ev of (ui.msg.toolEvents ?? [])) {
+          if (ev.status === 'cancelled') shownAtEnd.upsertToolEvent(ui, ev);
+        }
+      }
     }
-    recordDiagnostic(this.session, { at: Date.now(), kind: 'end', status: cancelled ? 'cancelled' : loopHadError ? 'error' : 'success', durationMs: Date.now() - userMsg.timestamp });
-    this.closeOpenPlanItems(loopHadError || cancelled ? 'stopped' : 'completed');
-    this.compactProcessForTurn(turnIdForThisRun);
+    const cancelled = signal.aborted;
+    finishedNormally = !loopHadError && !cancelled;
+    if (target.goal?.phase === 'active' && (!finishedNormally || target.goal.rounds >= target.goal.maxRounds)) {
+      disarmGoal(target); this.goalArmedIds.delete(target.id);
+    }
+    recordDiagnostic(target, { at: Date.now(), kind: 'end', status: cancelled ? 'cancelled' : loopHadError ? 'error' : 'success', durationMs: Date.now() - userMsg.timestamp });
+    this.closeOpenPlanItems(target, loopHadError || cancelled ? 'stopped' : 'completed');
+    screen()?.compactProcessForTurn(turnIdForThisRun);
 
-    this.renderCostBar();
-    this.session.updatedAt = Date.now();
-    // Title heuristic: first assistant reply after a user turn, OR the session
-    // still has the default 'New chat' title. The old condition `length === 2`
-    // broke when the first assistant message was deleted/regenerated — the
-    // session would keep 'New chat' forever.
-    // Auto-title trigger: the title is still the placeholder. Match both
-    // language defaults — the new-session factory hardcodes 'New chat' (EN),
-    // but a zh user who blanks the title in history_modal lands on '（无标题）'
-    // (per history_modal.ts:217). Without matching all forms, zh users'
-    // sessions silently keep their stale default forever.
-    const placeholderTitles = new Set(['New chat', '新对话', '(untitled)', '（无标题）']);
-    const needsTitle = !this.session.title || placeholderTitles.has(this.session.title);
-    if (needsTitle && text.trim()) this.session.title = text.slice(0, 60);
-    await this.flushPersistNow();
+    target.updatedAt = Date.now();
+    await this.flushPersistNow(target);
+    if (!cancelled) this.hub.notice(target, loopHadError ? 'error' : 'done');
     } catch (err) {
-      if (submitSessionToken !== this.sessionToken) return;
-      this.autoContinue = false; this.goalArmed = false; disarmGoal(this.session);
-      recordDiagnostic(this.session, { at: Date.now(), kind: 'error', code: 'SUBMIT_FAILED' });
-      this.closeOpenPlanItems('stopped');
-      // Surface the error to the user AND release the streaming lock.
+      finishedNormally = false;
+      this.goalArmedIds.delete(target.id); disarmGoal(target);
+      recordDiagnostic(target, { at: Date.now(), kind: 'error', code: 'SUBMIT_FAILED' });
+      this.closeOpenPlanItems(target, 'stopped');
+      // Surface the error to the user AND release the run.
       console.error('[Glossa] submit failed', err);
-      quickNotice(bi(`Error: ${err?.message ?? err}`, `出错：${err?.message ?? err}`));
+      const chat = screen() ? '' : `${this.oneLine(target.title || bi('Untitled chat', '未命名对话'), 40)} · `;
+      quickNotice(chat + bi(`Error: ${err?.message ?? err}`, `出错：${err?.message ?? err}`));
       // Clean up the empty assistant bubble we optimistically pushed before
       // the loop started. Without this, a failed submit leaves a permanent
       // empty card in the saved session (and the DOM); reloading the
       // session shows a ghost message-of-air for every prior failed turn.
-      try {
-        const a = this.currentAsstMsg;
-        if (a && (!a.content || a.content.length === 0) && (!a.toolEvents || a.toolEvents.length === 0)) {
-          this.session.messages = this.session.messages.filter(m => m.id !== a.id);
-          // Remove the rendered bubble too.
-          try { this.streamingMsgUI?.wrap?.remove(); } catch { /* ignore */ }
-        }
-      } catch (e) { console.warn('[Glossa] empty-assistant cleanup failed', e); }
+      try { this.dropEmptySegment(run); } catch (e) { console.warn('[Glossa] empty-assistant cleanup failed', e); }
+      this.persistSession(target);
     } finally {
-      this.stopElapsedTicker();
-      this.streaming = false;
-      this.setTurnActivity(this.streamingMsgUI, '', 'idle');
-      // Drop the view-root streaming class so the act pulse stops animating
-      // (paired with .add() at submit start).
-      this.rootEl?.classList.remove('glossa-streaming');
-      this.updateSubmitBtn();
-      this.streamingMsgUI = null;
-      this.currentAsstMsg = null;
-      await this.refreshEditSummaries();
+      if (run.approval) run.approval.settle({ ok: false });
+      if (run.ui) this.setTurnActivity(run.ui, '', 'idle');
+      run.ui = null;
+      run.asst = null;
+      if (this.runs.get(target.id) === run) this.runs.delete(target.id);
+      this.notifyRuns();
+      const view = screen();
+      if (view) {
+        view.syncRunChrome();
+        view.renderCostBar();
+        await view.refreshEditSummaries();
+      }
     }
     // Consumed attachments were cleared when this turn started. Attachments
     // added during the run belong to the user's next draft and must survive.
+    return finishedNormally;
+  }
+
+  /** Remove the current segment when nothing arrived in it (failed or cancelled before output). */
+  private dropEmptySegment(run: ChatRun) {
+    const a = run.asst;
+    if (!a || a.content || a.reasoningContent || a.toolEvents?.length) return;
+    run.session.messages = run.session.messages.filter(m => m.id !== a.id);
+    run.ui?.wrap.remove();
+    run.ui = null;
   }
 
   /** After streaming ends, render the final message via Obsidian (math / wikilinks / mermaid). */
@@ -3856,7 +4278,7 @@ export class GlossaView extends ItemView {
       return;
     }
     const sum = ui.reasoningCard.querySelector('.nc-thinking-summary span');
-    if (sum) sum.textContent = `🧠 Reasoning (${content.length.toLocaleString()} chars)`;
+    if (sum) sum.textContent = reasoningLabel(content.length);
     // Collapse once thinking ends. Users want the finished thoughts out of the
     // way unless they explicitly request to read them.
     ui.reasoningCard.removeAttribute('open');
@@ -3909,7 +4331,7 @@ export class GlossaView extends ItemView {
     if (this.modelBtn) {
       this.modelBtn.disabled = this.streaming;
     }
-    if (this.reasoningPillEl) this.reasoningPillEl.disabled = this.streaming || !ep;
+    this.updateReasoningPill();
     if (this.apiProviderButton) {
       this.apiProviderButton.hidden = !!cli;
       this.apiProviderButton.disabled = this.streaming;
@@ -4097,10 +4519,10 @@ export class GlossaView extends ItemView {
     });
   }
 
-  private recordPruning(ids: string[]) {
-    this.session.prunedToolCallIds = [...new Set([...(this.session.prunedToolCallIds ?? []), ...ids])].slice(-4000);
-    recordDiagnostic(this.session, { at: Date.now(), kind: 'prune', count: ids.length });
-    this.persistSession();
+  private recordPruning(session: ChatSession, ids: string[]) {
+    session.prunedToolCallIds = [...new Set([...(session.prunedToolCallIds ?? []), ...ids])].slice(-4000);
+    recordDiagnostic(session, { at: Date.now(), kind: 'prune', count: ids.length });
+    this.persistSession(session);
   }
 
   private downloadDiagnostics() {
@@ -4112,14 +4534,15 @@ export class GlossaView extends ItemView {
     document.defaultView?.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  /** Stop the chat on screen. */
   private cancelStream() {
-    this.queueArmed = false;
-    this.goalArmed = false;
-    this.autoContinue = false;
-    disarmGoal(this.session);
-    this.abortCtl?.abort();
-    this.renderSessionControls();
-    this.persistSession();
+    this.cancelRun(this.session);
+  }
+
+  /** Stop one chat's turn and its queued or task continuation; what arrived is kept. */
+  private cancelRun(session: ChatSession) {
+    this.hub.cancel(session);
+    this.hub.screenFor(session)?.renderSessionControls();
   }
 
   /** Mirrors upstream Claude Code's two-zone system prompt:
@@ -4173,8 +4596,22 @@ export class GlossaView extends ItemView {
   /* ============================================================
      Cost bar
      ============================================================ */
+  /** Usage of the chat on screen, summed from its saved replies so it follows chat switches. */
+  private sessionUsage(session: ChatSession): { input: number; output: number; costUSD: number } {
+    const total = { input: 0, output: 0, costUSD: 0 };
+    for (const message of session.messages) {
+      const usage = message.usage;
+      if (!usage) continue;
+      total.input += usage.input ?? 0;
+      total.output += usage.output ?? 0;
+      total.costUSD += usage.costUSD ?? 0;
+    }
+    return total;
+  }
+
   private renderCostBar() {
-    const hasUsage = this.sessionInputTokens > 0 || this.sessionOutputTokens > 0 || this.sessionCostUSD > 0;
+    const usage = this.sessionUsage(this.session);
+    const hasUsage = usage.input > 0 || usage.output > 0 || usage.costUSD > 0;
     const ctxTokens = this.ctx.totalTokens();
     // Show the REAL model context window when we can infer it from the active
     // model id — that's what users compare against (Codex's own UI displays
@@ -4229,9 +4666,9 @@ export class GlossaView extends ItemView {
       lbl.title = tooltip;
     }
     if (hasUsage) {
-      el('span', { text: `usage in ${formatTokenCount(this.sessionInputTokens)}`, parent: this.costBar });
-      el('span', { text: `out ${formatTokenCount(this.sessionOutputTokens)}`, parent: this.costBar });
-      if (this.sessionCostUSD > 0) el('span', { text: `$${this.sessionCostUSD.toFixed(4)}`, parent: this.costBar });
+      el('span', { text: bi(`usage in ${formatTokenCount(usage.input)}`, `输入 ${formatTokenCount(usage.input)}`), parent: this.costBar });
+      el('span', { text: bi(`out ${formatTokenCount(usage.output)}`, `输出 ${formatTokenCount(usage.output)}`), parent: this.costBar });
+      if (usage.costUSD > 0) el('span', { text: `$${usage.costUSD.toFixed(4)}`, parent: this.costBar });
     }
   }
 
@@ -4245,7 +4682,7 @@ export class GlossaView extends ItemView {
 
   private newSession(): ChatSession {
     return {
-      id: uid(), title: 'New chat',
+      id: uid(), title: t('new_chat'),
       createdAt: Date.now(), updatedAt: Date.now(),
       mode: this.plugin.settings.mode,
       endpointId: this.plugin.settings.activeEndpointId,
@@ -4254,131 +4691,99 @@ export class GlossaView extends ItemView {
     };
   }
 
+  /** Open an empty chat. A chat that is still running keeps running in the background. */
   startNewSession() {
-    if (this.streaming) this.cancelStream();
     this.persistSession();
-    // Bump session token so in-flight chunks from the cancelled stream get
-    // dropped by the gates in submit() / on* callbacks.
-    this.sessionToken++;
-    this.session = this.newSession();
-    this.goalArmed = false; this.queueArmed = false; this.renderSessionControls();
-    this.historyWindow = latestHistoryWindow(this.session.messages);
-    this.pendingRegeneratePrompt = null;
-    this.recentVisualContext = null;
-    this.sessionCostUSD = 0; this.sessionInputTokens = 0; this.sessionOutputTokens = 0;
-    this.contextTokenBreakdown = null;
-    this.msgUIs.clear();
-    clear(this.messagesEl);
-    this.resetThreadRail();
-    this.renderPlanBoard();   // empty since session.plan is undefined
-    this.renderEmpty();
-    this.renderCostBar();
+    this.showSession(this.newSession());
   }
 
   private async loadSession(id: string) {
-    const s = this.plugin.store.getSession(id);
+    // Chats are read from disk when opened; the last chat asked for wins.
+    const request = ++this.loadRequest;
+    const s = this.runs.get(id)?.session ?? await this.plugin.store.openSession(id);
+    if (request !== this.loadRequest || this.viewClosed) return;
     if (!s) {
       if (this.session.id === id) this.resetToEmptySession();
+      else if (this.plugin.store.hasSession(id)) new Notice(bi('This chat could not be opened. Its file may be missing or damaged.', '无法打开这个对话，文件可能缺失或已损坏。'));
       return;
     }
-    if (this.streaming) this.cancelStream();
+    if (s === this.session) return;
     await this.flushPersistNow();
-    // Bump BEFORE swapping session so any chunk callback that was queued
-    // mid-await reads the new token and aborts. (The await above creates
-    // a microtask window where late chunks can fire — without the bump
-    // they'd write into `this.session.messages` AFTER the swap on the
-    // next line and corrupt the loaded session.)
+    if (request !== this.loadRequest || this.viewClosed) return;
+    // A restored task needs an explicit resume — unless that chat is running it right now.
+    if (!this.runs.has(s.id) && !this.submitting.has(s.id)) {
+      disarmGoal(s);
+      this.goalArmedIds.delete(s.id); this.queueArmedIds.delete(s.id);
+    }
+    this.showSession(s);
+  }
+
+  /** Put `session` on screen. Running turns are only detached from the old screen, never stopped. */
+  private showSession(session: ChatSession) {
+    this.detachRun();
+    // Composer work started for the previous chat (pasted images still
+    // preparing, a send waiting for attachments) must not land in this one.
     this.sessionToken++;
-    this.session = s;
-    disarmGoal(this.session);
-    this.goalArmed = false; this.queueArmed = false; this.renderSessionControls();
-    this.historyWindow = latestHistoryWindow(this.session.messages);
-    this.pendingRegeneratePrompt = null;
-    this.recentVisualContext = null;
-    this.contextTokenBreakdown = null;
-    if (this.session.messages.length === 0) {
+    this.session = session;
+    this.historyWindow = latestHistoryWindow(session.messages);
+    this.stickToBottom = true;
+    if (session.messages.length === 0) {
       this.msgUIs.clear();
       clear(this.messagesEl);
       this.resetThreadRail();
       this.renderEmpty();
+      const run = this.runs.get(session.id);
+      if (run) this.attachRun(run);
     } else {
       this.renderSessionHistory({ scrollToBottom: true });
     }
     this.rebuildPlanFromSession();
+    this.syncRunChrome();
+    this.updateTokenBadge();
+    this.renderCostBar();
+    this.notifyRuns();
   }
 
-  /** Debounced save. Long agent runs call this from every onText/onTool tick.
-   *  Without coalescing, chats.json is rewritten 10-20×/turn (~5MB each) which
-   *  thrashes SSDs and makes iCloud/Dropbox loud. flushPersistNow() forces an
-   *  immediate write at terminal points (stream end, view close, snapshot). */
-  private _persistTimer: AnyValue = null;
-  private sessionHasMeaningfulContent(session: ChatSession): boolean {
-    if (session.goal || session.inbox?.length) return true;
-    return (session.messages ?? []).some(m =>
-      (m.content ?? '').trim().length > 0 ||
-      (m.displayContent ?? '').trim().length > 0 ||
-      (m.reasoningContent ?? '').trim().length > 0 ||
-      ((m.toolEvents ?? []).length > 0));
+  /** Debounced save of a chat (the panel's chat by default); see ChatRunHub.persist. */
+  private persistSession(session: ChatSession = this.session) {
+    this.hub.persist(session);
   }
 
-  private persistSession() {
-    if (!this.sessionHasMeaningfulContent(this.session)) return;
-    if (this._persistTimer) return;
-    const session = this.session;
-    this._persistTimer = window.setTimeout(() => {
-      this._persistTimer = null;
-      void this.plugin.store.saveSession(session);
-    }, 1000);
-  }
 
-  private clearPendingPersist() {
-    if (!this._persistTimer) return;
-    window.clearTimeout(this._persistTimer);
-    this._persistTimer = null;
+  private forgetPendingPersist(session: ChatSession) {
+    this.hub.forget(session);
   }
 
   private resetToEmptySession() {
-    if (this.streaming) this.cancelStream();
-    this.clearPendingPersist();
-    this.sessionToken++;
-    this.session = this.newSession();
-    this.historyWindow = latestHistoryWindow(this.session.messages);
-    this.pendingRegeneratePrompt = null;
-    this.recentVisualContext = null;
-    this.sessionCostUSD = 0;
-    this.sessionInputTokens = 0;
-    this.sessionOutputTokens = 0;
-    this.contextTokenBreakdown = null;
-    this.currentTurnId = null;
-    this.streamingBuf = '';
-    this.streamingMsgUI = null;
-    this.currentAsstMsg = null;
-    this.msgUIs.clear();
-    clear(this.messagesEl);
-    this.resetThreadRail();
-    this.renderPlanBoard();
-    this.renderEmpty();
-    this.renderCostBar();
-    this.stickToBottom = true;
+    this.forgetPendingPersist(this.session);
+    this.showSession(this.newSession());
   }
 
   private handleHistorySessionDeleted(id: string) {
-    if (this.session.id !== id) return;
+    const run = this.runs.get(id);
+    if (run) {
+      this.cancelRun(run.session);
+      this.forgetPendingPersist(run.session);
+    }
+    if (this.session.id !== id) { this.notifyRuns(); return; }
     this.closeHistoryPopover({ immediate: true });
     this.resetToEmptySession();
   }
 
   private handleHistoryCleared() {
+    for (const run of [...this.runs.values()]) {
+      this.cancelRun(run.session);
+      this.forgetPendingPersist(run.session);
+    }
     this.closeHistoryPopover({ immediate: true });
     this.resetToEmptySession();
   }
 
-  /** Force-write the current session now (bypasses debounce). Use at stream
-   *  end, before navigation, or before destructive operations like compact. */
-  private async flushPersistNow() {
-    if (this._persistTimer) { window.clearTimeout(this._persistTimer); this._persistTimer = null; }
-    if (!this.sessionHasMeaningfulContent(this.session)) return;
-    await this.plugin.store.saveSession(this.session);
+  /** Force-write a chat now (bypasses debounce). Use at stream
+   *  end, before navigation, or before destructive operations like compact.
+   *  Other chats waiting for the debounced save are written in the same pass. */
+  private async flushPersistNow(session: ChatSession = this.session) {
+    await this.hub.flush(session);
   }
 
   private async exportChatToNote() {
@@ -4389,7 +4794,7 @@ export class GlossaView extends ItemView {
     const folder = this.plugin.settings.chatsFolder || 'Chats';
     try { await this.app.vault.createFolder(folder); } catch { /* ignore */ }
     const safeTitle = (this.session.title || 'chat').replace(/[\\/:*?"<>|]/g, '-').slice(0, 60);
-    const path = `${folder}/${new Date().toISOString().slice(0,10)}_${safeTitle}.md`;
+    const path = this.freeNotePath(`${folder}/${new Date().toISOString().slice(0,10)}_${safeTitle}`);
 
     const renderMessage = (m: typeof this.session.messages[number]): string => {
       const parts: string[] = [];
@@ -4446,12 +4851,19 @@ export class GlossaView extends ItemView {
     try {
       await this.app.vault.create(path, body);
     } catch {
-      quickNotice('Could not write file (already exists?).');
+      quickNotice(bi('Could not write file (already exists?).', '无法写入文件（可能已存在）。'));
       return;
     }
-    quickNotice(`Saved to ${path}`);
+    quickNotice(bi(`Saved to ${path}`, `已保存到 ${path}`));
     const f = this.app.vault.getAbstractFileByPath(path);
     if (f instanceof TFile) void this.app.workspace.getLeaf(true).openFile(f);
+  }
+
+  /** `<base>.md`, or `<base> 2.md`, `<base> 3.md`… when a note with that name exists. */
+  private freeNotePath(base: string): string {
+    let path = `${base}.md`;
+    for (let n = 2; this.app.vault.getAbstractFileByPath(path); n++) path = `${base} ${n}.md`;
+    return path;
   }
 
   private async saveResponseAsNote(m: ChatMessage) {
@@ -4461,18 +4873,18 @@ export class GlossaView extends ItemView {
     await this.app.vault.create(path, m.content);
     const f = this.app.vault.getAbstractFileByPath(path);
     if (f instanceof TFile) void this.app.workspace.getLeaf(true).openFile(f);
-    quickNotice(`Saved to ${path}`);
+    quickNotice(bi(`Saved to ${path}`, `已保存到 ${path}`));
   }
 
   private insertAtCursor(text: string) {
     const md = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!md?.editor) { quickNotice('No active markdown editor.'); return; }
+    if (!md?.editor) { quickNotice(bi('No active markdown editor.', '没有打开的 Markdown 编辑器。')); return; }
     md.editor.replaceSelection(text);
   }
 
   private applyEdit(text: string) {
     const md = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!md?.editor) { quickNotice('No active markdown editor.'); return; }
+    if (!md?.editor) { quickNotice(bi('No active markdown editor.', '没有打开的 Markdown 编辑器。')); return; }
     if (md.editor.getSelection()) md.editor.replaceSelection(text);
     else md.editor.replaceRange(text + '\n\n', md.editor.getCursor());
   }
@@ -4490,18 +4902,31 @@ export class GlossaView extends ItemView {
     // crash / quick reload between "regenerate" and the new turn finishing
     // leaves the on-disk session out of sync with what's in the bubble.
     await this.flushPersistNow();
-    this.pendingRegeneratePrompt = lastUser.content;
     this.inputEl.value = visibleUserContent(lastUser);
     this.recomputeInputHeight();
-    void this.submit();
+    void this.submit(undefined, undefined, { regeneratePrompt: lastUser.content });
   }
+}
+
+/** Activity shown while the model works before anything arrives. */
+function thinkingLabel(): string {
+  return bi('Thinking...', '思考中…');
+}
+
+/** Title of a reasoning card; `null` while nothing has arrived yet. */
+function reasoningLabel(chars: number | null, streaming = false): string {
+  if (chars === null) return bi('🧠 Reasoning (streaming…)', '🧠 推理（生成中…）');
+  const n = chars.toLocaleString();
+  return streaming
+    ? bi(`🧠 Reasoning (${n} chars · streaming)`, `🧠 推理（${n} 字符 · 生成中）`)
+    : bi(`🧠 Reasoning (${n} chars)`, `🧠 推理（${n} 字符）`);
 }
 
 function extractThinking(src: string): { visible: string; thinking: string } {
   if (!src) return { visible: '', thinking: '' };
-  const re = /<(?:thinking|reasoning)>([\s\S]*?)<\/(?:thinking|reasoning)>/gi;
+  const re = /<(think|thinking|reasoning)>([\s\S]*?)<\/\1>/gi;
   let thinking = '';
-  const visible = src.replace(re, (_, inner) => { thinking += (thinking ? '\n\n---\n\n' : '') + inner.trim(); return ''; }).trim();
+  const visible = src.replace(re, (_match: string, _tag: string, inner: string) => { thinking += (thinking ? '\n\n---\n\n' : '') + inner.trim(); return ''; }).trim();
   return { visible, thinking };
 }
 

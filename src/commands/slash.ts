@@ -1,4 +1,5 @@
 import type { SlashCommand } from '../types';
+import { bi } from '../utils/i18n';
 
 export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   {
@@ -70,6 +71,29 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     template: `Use the \`skill\` tool to invoke the skill named "${'${args}'}". Pass the skill body's instructions through; if it has \`$ARGUMENTS\` placeholders, leave them as-is — the user provided no extra arguments. Selection / current-file context:\n\n${'${selection-or-file}'}`,
   },
 ];
+
+/** Chinese titles of the built-in commands for the / menu; the prompts stay English. */
+const BUILTIN_TITLES_ZH: Record<string, string> = {
+  translate: '翻译',
+  summarize: '总结',
+  improve: '润色',
+  explain: '解释',
+  critique: '评审',
+  expand: '扩写大纲',
+  diagram: 'Mermaid 图',
+  cite: '查找引用',
+  define: '术语条目',
+  continue: '续写',
+  toc: '目录',
+  tldr: '一句话总结',
+  skill: '运行技能',
+};
+
+/** The title a command shows in the current language. */
+export function slashCommandTitle(command: SlashCommand): string {
+  const zh = command.custom ? undefined : BUILTIN_TITLES_ZH[command.id];
+  return zh ? bi(command.title, zh) : command.title;
+}
 
 /** Resolve template placeholders against the current editing context. */
 export function applySlashTemplate(opts: {

@@ -15,6 +15,8 @@ export type ChatChunk =
     /** Provider completion metadata for detecting truncated or thinking-only answers. */
     stopReason?: string;
     hasReasoning?: boolean;
+    /** Anthropic thinking blocks (with signatures) to pass back unchanged within the turn. */
+    thinkingBlocks?: AnyValue[];
   }
   /** Server rejected the prompt because it exceeded the model's context window.
    *  The agent loop should react by compacting the conversation and retrying. */
@@ -50,6 +52,9 @@ export interface MessageInput {
    * require their chain-of-thought blob to be sent back as `reasoning_content`
    * on the next request. Without this the API rejects the call. */
   reasoningContent?: string;
+  /** For role='assistant' — Anthropic thinking blocks from the same turn, replayed
+   *  before the tool_use blocks they preceded. Never persisted. */
+  thinkingBlocks?: AnyValue[];
 }
 
 export interface ToolSpec {

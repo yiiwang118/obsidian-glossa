@@ -28,7 +28,7 @@ Pasting a screenshot reads image data only from that explicit paste event. Gloss
 
 Selecting Codex, Claude Code or Grok explicitly starts the installed local binary. Detection runs its version command; sending passes the system prompt, conversation and selected text context over stdin for Codex/Claude Code. Grok receives a private temporary prompt file outside the vault in the OS temporary directory (owner-only permissions on POSIX), removed after completion, failure or cancellation. Conversation text is never placed in command-line arguments. An abrupt host crash can leave the temporary file for the OS to clean up. The CLI contacts its configured provider using its existing login. Glossa does not read authentication files, run login shells, install dependencies or upload telemetry. Child processes inherit the application environment, with common executable directories added to PATH and any explicitly configured proxy applied. The home directory is used only to find standard executable locations.
 
-The current vault is the CLI working directory. Codex uses its native read-only/workspace-write sandbox; Claude Code uses restricted mode and a limited set of file tools. Codex and Claude Code disable external MCP configuration. Grok requests native read-only/workspace sandboxing, limits built-in file tools and disables subagents; its local configuration, including hooks and MCP settings, still applies. Permission bypass is never enabled. Native CLI commands and file operations do not pass through Glossa approvals, workspace-subfolder restrictions or checkpoints. CLI settings, instructions and the CLI provider's privacy policy remain relevant; its own data retention or telemetry is outside Glossa's control. No automatic CLI login or background runs occur.
+The current vault is the CLI working directory. Codex uses its native read-only/workspace-write sandbox; Claude Code uses restricted mode and a limited set of file tools. Codex and Claude Code disable external MCP configuration. Grok requests native read-only/workspace sandboxing, limits built-in file tools and disables subagents; its local configuration, including hooks and MCP settings, still applies. Permission bypass is never enabled. Native CLI commands and file operations do not pass through Glossa approvals, workspace-subfolder restrictions or checkpoints. CLI settings, instructions and the CLI provider's privacy policy remain relevant; its own data retention or telemetry is outside Glossa's control. Glossa does not log in automatically or start unsolicited CLI conversations. Once you send a message, its CLI run can continue while you switch chats or close the panel; Stop, plugin unload or quitting Obsidian ends the run.
 
 Queued text is stored until consumed. A resumed persistent task authorizes up to its configured number of additional model rounds. Stop, errors, blockers or the round limit end continuation; a reopened task never resumes automatically. Diagnostic export is an explicit local download containing allowlisted metadata, without prompts, note text, tool arguments, paths, headers, endpoint URLs or keys.
 
@@ -39,7 +39,10 @@ All paths are inside the user's vault under its configured plugin directory (nor
 | File | What's in it | Encrypted? |
 |---|---|---|
 | `data.json` | Settings, endpoint configs (incl. API keys and extra JSON body parameters) | API keys: opt-in via passphrase (Settings → Security). Other fields, including extra body parameters: plaintext. Use the API key field for credentials. |
-| `chats.json` | Chat sessions, folders, pending text, task progress, bounded diagnostic metadata, tool events, reasoning and timestamps | Plaintext, including backups. |
+| `chats.json` | Chat index: folders, titles, timestamps and a bounded search preview of what you typed and the answers | Plaintext, including its `.bak` copy. |
+| `chats/<id>.json` | One file per chat: messages, pending text, task progress, bounded diagnostic metadata, tool events, reasoning and timestamps | Plaintext. |
+| `chats.deleted.json` | IDs and times of deleted chats, so a synced older copy cannot bring them back | Plaintext (no chat content). |
+| `chats.v3-backup.json` | Copy of the single-file `chats.json` kept when upgrading to per-chat files. Deleting a chat removes it here too; the copy is removed after 30 days or when you clear all chats | Plaintext. |
 | `embeddings.json` | Legacy semantic-index data from older builds, if present. The community review build does not rebuild it. | Encrypted **only** if encryption was enabled when created. Otherwise plaintext legacy data. |
 | `checkpoints.json` | Pre-edit snapshots of files touched by destructive tools (7-day TTL, 200-entry cap) | Encrypted **only** if encryption is enabled. |
 | `nested_skill_dirs.json` | Cached list of `.glossa/skills/` directories discovered in your vault | Plaintext (just paths). |
@@ -70,7 +73,7 @@ Some providers retain prompts for training by default. Disable training opt-in t
 - API keys default to **plaintext** in `data.json`. We recommend enabling encryption (Settings → Security) — but we do *not* force it, because losing the passphrase locks you out of your own keys.
 - Semantic indexing is disabled in the community review build.
 - New installs default to **Plan** + **read-only** mode. Raising permission to `workspace-write` or `full` is an explicit user action.
-- In API mode, the agent's `read-only` and `workspace-write` permission levels are designed so the LLM cannot run anything irreversible without you clicking "Approve" — even when auto-approve rules are configured, destructive tools never go through silently the first time.
+- In API mode, Plan/read-only blocks write tools. Writable modes consult explicit deny/ask rules, configured approvals and tool permission checks. Matching allow rules or a loaded skill's allowed tools can skip individual prompts; skill allowances are isolated to that chat run.
 
 ## Questions
 

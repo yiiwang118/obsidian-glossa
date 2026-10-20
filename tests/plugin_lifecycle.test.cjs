@@ -8,7 +8,7 @@ exports.run = async (t, loadModule) => {
   const source = fs.readFileSync(path.resolve(__dirname, '../src/main.ts'), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
   const saved = [], notices = [], timers = new Map();
-  let id = 0, storeWrites = 0, fetchCount = 0, resolveFetch;
+  let id = 0, storeWrites = 0, fetchCount = 0, resolveFetch, stoppedChats = 0;
   const originalSet = window.setTimeout, originalClear = window.clearTimeout;
   window.setTimeout = action => { timers.set(++id, action); return id; };
   window.clearTimeout = handle => timers.delete(handle);
@@ -24,6 +24,7 @@ exports.run = async (t, loadModule) => {
     './utils/media_cache': { clearMediaCaches() {} },
     './utils/pdf_render': { clearRenderedPdfPageCache() {} },
     './agent/skills': { async flushPersistedNestedSkillDirs() {} },
+    './ui/view': { async stopChatRuns() { stoppedChats++; } },
     './features/update_check': {
       UPDATE_CHECK_INTERVAL_MS: 12 * 60 * 60 * 1000,
       fetchLatestUpdate: () => { fetchCount++; return new Promise(resolve => { resolveFetch = resolve; }); },
@@ -34,7 +35,7 @@ exports.run = async (t, loadModule) => {
   const makePlugin = () => {
     const plugin = new exports.default();
     plugin.settings = { uiLanguage: 'en', updateCheckEnabled: true, updateLastCheckedAt: 0, updateLatestVersion: '', marker: 'initial' };
-    plugin.store = { async persist() { storeWrites++; } };
+    plugin.store = { async flush() { storeWrites++; } };
     return plugin;
   };
   const drain = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
@@ -50,7 +51,9 @@ exports.run = async (t, loadModule) => {
     await drain();
     t.eq(timers.size, 0, 'unload removes the delayed settings save');
     t.eq(saved.map(x => x.marker), ['latest edit'], 'unload persists the latest settings without losing them');
-    t.eq(storeWrites, 1, 'unload also persists queued history');
+    // Once with the queued settings save, once after the stopped chats were saved.
+    t.eq(storeWrites, 2, 'unload also persists queued history');
+    t.eq(stoppedChats, 1, 'unload stops chats that kept running without a panel');
     queuedSave();
     await drain();
     t.eq(saved.length, 1, 'already queued save callback cannot duplicate the unload flush');

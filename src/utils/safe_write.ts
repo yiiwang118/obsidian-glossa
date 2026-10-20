@@ -12,7 +12,7 @@
  * single `.bak` of the previous content so a corrupted current can be
  * manually recovered from `.bak`.
  *
- * Used by: chats.json (1.8), checkpoints (1.18), embeddings (1.27),
+ * Used by: chats.json and chats/<id>.json, checkpoints (1.18), embeddings (1.27),
  * skill_usage (P2-12), nested_skill_dirs (U5), tool_outputs.
  */
 

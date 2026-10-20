@@ -170,6 +170,9 @@ export interface Endpoint {
   reasoningEffort?: ReasoningEffort;
   /** Explicit provider-native effort, retained even when absent from a cached catalog. */
   customReasoningEffort?: string;
+  /** OpenAI-compatible sampling temperature: a number, `omit` to never send one,
+   *  or unset for automatic (0.7, left out for models that reject it). */
+  temperature?: number | 'omit';
 
   // cli (common)
   cliModels?: CliModelInfo[];
@@ -373,6 +376,8 @@ export interface GlossaSettings {
   agentMaxSteps: number;
   agentAlwaysApproveTools: string[];
   agentNeverApproveTools: string[];
+  /** Set once delete_note has been taken off the never-approve list it was on by default before 1.1. */
+  deleteToolRestored?: boolean;
   permissionLevel: PermissionLevel;     // claw-code-style 3-tier
   runMode: RunMode;                      // plan / act (Cline-style)
   loadProjectContext: boolean;           // auto-load AGENTS.md / CLAUDE.md / .codex.md
@@ -487,6 +492,14 @@ export interface McpServerConfig {
   env?: Record<string, string>;
 }
 
+/** delete_note sat on the never-approve list by default before 1.1, and that
+ *  list has no setting. Take it off once, so deleting works after approval. */
+export function restoreDeleteTool(settings: Pick<GlossaSettings, 'agentNeverApproveTools' | 'deleteToolRestored'>): void {
+  if (settings.deleteToolRestored) return;
+  settings.agentNeverApproveTools = (settings.agentNeverApproveTools ?? []).filter(name => name !== 'delete_note');
+  settings.deleteToolRestored = true;
+}
+
 export const DEFAULT_SETTINGS: GlossaSettings = {
   activeEndpointId: null,
   endpoints: [],
@@ -500,7 +513,7 @@ export const DEFAULT_SETTINGS: GlossaSettings = {
   warnTokenThreshold: 500_000,
   agentMaxSteps: 20,
   agentAlwaysApproveTools: ['read_note', 'get_active_file', 'get_selection', 'query_metadata', 'todo_write', 'view_image', 'discover_skills', 'run_skill'],
-  agentNeverApproveTools: ['delete_note'],
+  agentNeverApproveTools: [],
   permissionLevel: 'read-only',
   runMode: 'plan',
   loadProjectContext: true,
@@ -651,10 +664,10 @@ export function modelContextWindow(model: string | undefined | null): number | n
   if (!model) return null;
   const m = model.toLowerCase();
 
-  // Anthropic Claude: current Opus/Sonnet 4.6+ tier is 1M; older Claude 3.x /
-  // 4.5 and Haiku remain 200k.
-  if (/claude-(opus|sonnet)-4-7/.test(m)) return 1_000_000;
-  if (/claude-(opus|sonnet)-4-6/.test(m)) return 1_000_000;
+  // Anthropic Claude: Opus/Sonnet 4.6+ and every Claude 5 model (Fable, Opus,
+  // Sonnet, Haiku) have 1M; Claude 3.x, the 4.0–4.5 family and Haiku 4.5 have 200k.
+  if (/claude-(opus|sonnet)-4-[6-9]/.test(m)) return 1_000_000;
+  if (/claude-(opus|sonnet|haiku|fable|mythos)-([5-9]|\d{2})\b/.test(m)) return 1_000_000;
   if (/claude-(3[.-]5|3[.-]7|sonnet-4-5|haiku-4-5)/.test(m)) return 200_000;
   if (/claude/.test(m)) return 200_000;
 
@@ -674,7 +687,7 @@ export function modelContextWindow(model: string | undefined | null): number | n
   // DeepSeek: official V4 Flash/Pro tier is 1M; older V3/R1 public ids are 64k.
   // Ambiguous aliases such as "deepseek-chat" change over time, so leave them
   // unknown unless the id names a documented family.
-  if (/deepseek-v4|deepseek.*v4/.test(m)) return 1_000_000;
+  if (/deepseek-v4|deepseek.*v4|^deepseek-(flash|pro)\b/.test(m)) return 1_000_000;
   if (/deepseek-v3/.test(m)) return 64_000;
   if (/deepseek-r1/.test(m)) return 64_000;
   if (/deepseek/.test(m)) return null;

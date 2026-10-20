@@ -2,7 +2,7 @@ import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
 import type { ButtonComponent, SettingDefinitionItem } from 'obsidian';
 import type GlossaPlugin from './main';
 import type { Endpoint, CustomPrompt, SlashCommand, SelectionTranslateMode } from './types';
-import { reasoningOptionsForEndpoint } from './types';
+import { reasoningProfile, selectedReasoningEntry } from './providers/reasoning_catalog';
 import { openEffortModal } from './ui/effort_modal';
 import { uid, setStyle, setTrustedSvg } from './utils/dom';
 import { CustomApiProvider } from './providers/custom_api';
@@ -136,20 +136,28 @@ interface Preset {
   apiKeyHint?: string;
 }
 
+/** Official endpoints and current model ids (checked against each provider's docs, 2026-10). */
 const PRESETS: Preset[] = [
-  { name: 'DeepSeek',  color: '#4f6fff', baseUrl: 'https://api.deepseek.com/v1',                          defaultModel: 'deepseek-chat',            apiStyle: 'openai' },
-  { name: 'OpenAI',    color: '#10a37f', baseUrl: 'https://api.openai.com/v1',                            defaultModel: 'gpt-5.4',                  apiStyle: 'openai' },
-  { name: 'Anthropic', color: '#cc785c', baseUrl: 'https://api.anthropic.com/v1',                         defaultModel: 'claude-sonnet-4-6',        apiStyle: 'anthropic' },
-  { name: 'Qwen',      color: '#615ced', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',    defaultModel: 'qwen-max',                 apiStyle: 'openai' },
-  { name: 'GLM',       color: '#0c66e4', baseUrl: 'https://open.bigmodel.cn/api/paas/v4',                  defaultModel: 'glm-4-plus',               apiStyle: 'openai' },
-  { name: 'MiniMax',   color: '#ff5d2e', baseUrl: 'https://api.minimax.chat/v1',                          defaultModel: 'abab6.5s-chat',            apiStyle: 'openai' },
-  { name: 'MiMo',      color: '#ff7a45', baseUrl: 'https://api.mimo.ai/v1',                                defaultModel: 'mimo-7b',                  apiStyle: 'openai' },
-  { name: 'Moonshot',  color: '#0b3d91', baseUrl: 'https://api.moonshot.cn/v1',                            defaultModel: 'moonshot-v1-32k',          apiStyle: 'openai' },
-  { name: 'Doubao',    color: '#ff5722', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',              defaultModel: 'doubao-pro-32k',           apiStyle: 'openai' },
+  { name: 'DeepSeek',  color: '#4f6fff', baseUrl: 'https://api.deepseek.com',                             defaultModel: 'deepseek-flash',           apiStyle: 'openai' },
+  { name: 'OpenAI',    color: '#10a37f', baseUrl: 'https://api.openai.com/v1',                            defaultModel: 'gpt-6-astra',              apiStyle: 'openai' },
+  { name: 'Anthropic', color: '#cc785c', baseUrl: 'https://api.anthropic.com/v1',                         defaultModel: 'claude-opus-5-5',          apiStyle: 'anthropic' },
+  { name: 'Gemini',    color: '#4285f4', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-3.8-flash',      apiStyle: 'openai' },
+  { name: 'xAI',       color: '#111827', baseUrl: 'https://api.x.ai/v1',                                  defaultModel: 'grok-4.7',                 apiStyle: 'openai' },
+  { name: 'Qwen',      color: '#615ced', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',    defaultModel: 'qwen3.7-plus',             apiStyle: 'openai' },
+  { name: 'GLM',       color: '#0c66e4', baseUrl: 'https://open.bigmodel.cn/api/paas/v4',                  defaultModel: 'glm-5.3',                  apiStyle: 'openai' },
+  { name: 'Z.ai',      color: '#2563eb', baseUrl: 'https://api.z.ai/api/paas/v4',                          defaultModel: 'glm-5.3',                  apiStyle: 'openai' },
+  { name: 'Moonshot',  color: '#0b3d91', baseUrl: 'https://api.moonshot.cn/v1',                            defaultModel: 'kimi-k3',                  apiStyle: 'openai' },
+  { name: 'Kimi Global', color: '#1e40af', baseUrl: 'https://api.moonshot.ai/v1',                          defaultModel: 'kimi-k3',                  apiStyle: 'openai' },
+  { name: 'MiniMax',   color: '#ff5d2e', baseUrl: 'https://api.minimaxi.com/v1',                          defaultModel: 'MiniMax-M3',               apiStyle: 'openai' },
+  { name: 'MiniMax Global', color: '#f97316', baseUrl: 'https://api.minimax.io/v1',                       defaultModel: 'MiniMax-M3',               apiStyle: 'openai' },
+  { name: 'MiMo',      color: '#ff7a45', baseUrl: 'https://api.xiaomimimo.com/v1',                         defaultModel: 'mimo-v2.6-flash',          apiStyle: 'openai' },
+  { name: 'Doubao',    color: '#ff5722', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',              defaultModel: 'doubao-seed-2-1-pro-260915', apiStyle: 'openai' },
   { name: 'Yi',        color: '#7c4dff', baseUrl: 'https://api.lingyiwanwu.com/v1',                        defaultModel: 'yi-large',                 apiStyle: 'openai' },
+  { name: 'OpenRouter', color: '#6466f1', baseUrl: 'https://openrouter.ai/api/v1',                         defaultModel: 'openai/gpt-5.2',           apiStyle: 'openai' },
   { name: 'Together',  color: '#0f6cbd', baseUrl: 'https://api.together.xyz/v1',                          defaultModel: 'Qwen/Qwen2.5-72B-Instruct', apiStyle: 'openai' },
   { name: 'Groq',      color: '#f55036', baseUrl: 'https://api.groq.com/openai/v1',                        defaultModel: 'llama-3.3-70b-versatile',  apiStyle: 'openai' },
   { name: 'Ollama',    color: '#6b7280', baseUrl: 'http://localhost:11434/v1',                             defaultModel: 'qwen2.5',                  apiStyle: 'openai', apiKeyHint: 'ollama (any non-empty value)' },
+  { name: 'LM Studio', color: '#4b5563', baseUrl: 'http://localhost:1234/v1',                              defaultModel: '',                         apiStyle: 'openai', apiKeyHint: 'lm-studio (any non-empty value)' },
   { name: 'DeepInfra', color: '#9d50ff', baseUrl: 'https://api.deepinfra.com/v1/openai',                   defaultModel: 'Qwen/Qwen2.5-72B-Instruct', apiStyle: 'openai' },
   { name: 'SiliconFlow', color: '#00b96b', baseUrl: 'https://api.siliconflow.cn/v1',                       defaultModel: 'deepseek-ai/DeepSeek-V2.5', apiStyle: 'openai' },
 ];
@@ -1132,7 +1140,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         ? (this.plugin.isUnlocked() ? bi('🔓 unlocked', '🔓 已解锁') : bi('🔒 locked', '🔒 已锁定'))
         : bi('Off. Enabling wraps API keys with a passphrase-derived AES-256 key.',
              '关闭。开启后用 passphrase 派生 AES-256 加密 API key。') });
-    // Scope clarification — kept brief. Users should know chats.json is plaintext.
+    // Scope clarification — kept brief. Users should know chat files are plaintext.
     const scope = containerEl.createDiv({ cls: 'nc-info-hint' });
     scope.appendText(bi(
       'Scope: API keys, embeddings, checkpoints. Chats are NOT encrypted.',
@@ -1225,59 +1233,6 @@ export class GlossaSettingTab extends PluginSettingTab {
           new Notice(bi(`Stripped ${n} legacy fields.`, `已清理 ${n} 个旧字段。`));
         } finally {
           b.setDisabled(false).setButtonText(bi('Run', '运行'));
-        }
-      }));
-
-    /* ----- Embedding RAG ----- */
-    this.renderHeading(containerEl, bi('Semantic search', '语义搜索'), 'advanced');
-    const embeddingEndpointSetting = new Setting(containerEl)
-      .setName(bi('Embedding endpoint', '嵌入端点'))
-      .setDesc(bi('An OpenAI-compatible endpoint that implements /embeddings. Note content is sent to this service while indexing.', '需要实现 /embeddings 的 OpenAI 兼容端点。构建索引时，笔记内容会发送到该服务。'));
-    const embeddingEndpointOptions: AlignedSelectOption<string>[] = [
-      { value: '', label: bi('None', '无') },
-      ...this.plugin.settings.endpoints
-        .filter(ep => ep.kind === 'custom-api' && (ep.apiStyle ?? 'openai') === 'openai')
-        .map(ep => ({ value: ep.id, label: ep.label })),
-    ];
-    createAlignedSelect(
-      embeddingEndpointSetting.controlEl,
-      this.selectPopup,
-      embeddingEndpointOptions,
-      this.plugin.settings.embeddingEndpointId ?? '',
-      async value => {
-        this.plugin.settings.embeddingEndpointId = value || null;
-        await this.plugin.saveSettings();
-      },
-      bi('Embedding endpoint', '嵌入端点'),
-    );
-    new Setting(containerEl).setName(bi('Model', '模型'))
-      .setDesc(bi('e.g. text-embedding-3-small', '例：text-embedding-3-small'))
-      .addText(t => t.setValue(this.plugin.settings.embeddingModel).onChange(async v => { this.plugin.settings.embeddingModel = v; await this.plugin.saveSettings(); }));
-    new Setting(containerEl).setName(bi('Chunk size / overlap', '分块大小 / 重叠'))
-      .setDesc(bi('Characters per indexed chunk, followed by repeated characters shared with the next chunk.', '第一个值是每个索引分块的字符数，第二个值是与下一分块重复的字符数。'))
-      .addText(t => t.setValue(String(this.plugin.settings.embeddingChunkSize)).onChange(async v => {
-        const size = parseClampedInt(v, 1500, 300, 12_000);
-        this.plugin.settings.embeddingChunkSize = size;
-        this.plugin.settings.embeddingChunkOverlap = Math.min(this.plugin.settings.embeddingChunkOverlap, Math.max(0, size - 1));
-        await this.plugin.saveSettings();
-      }))
-      .addText(t => t.setValue(String(this.plugin.settings.embeddingChunkOverlap)).onChange(async v => {
-        const maxOverlap = Math.max(0, this.plugin.settings.embeddingChunkSize - 1);
-        this.plugin.settings.embeddingChunkOverlap = parseClampedInt(v, 200, 0, maxOverlap);
-        await this.plugin.saveSettings();
-      }));
-    new Setting(containerEl).setName(bi('Rebuild index', '重建索引'))
-      .setDesc(bi(
-        `${this.plugin.embeddingIndex.size()} chunks · ${this.plugin.embeddingIndex.modelInfo().model || '(none)'}`,
-        `${this.plugin.embeddingIndex.size()} 个分块 · ${this.plugin.embeddingIndex.modelInfo().model || '无模型'}`,
-      ))
-      .addButton(b => b.setButtonText(bi('Build', '构建')).setCta().onClick(async () => {
-        b.setDisabled(true).setButtonText(bi('Building…', '构建中…'));
-        try {
-          await this.plugin.rebuildEmbeddings();
-          this.refresh();
-        } finally {
-          b.setDisabled(false).setButtonText(bi('Build', '构建'));
         }
       }));
 
@@ -1410,7 +1365,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       if (isEmbedRef) refs.push(bi('semantic-search endpoint', '语义搜索端点'));
       const sessionRefs: string[] = [];
       try {
-        for (const s of (this.plugin.store?.all() ?? [])) {
+        for (const s of (this.plugin.store?.listSessions() ?? [])) {
           if (s.endpointId === ep.id) sessionRefs.push(s.title || s.id);
         }
       } catch { /* store might not be ready */ }
@@ -1445,13 +1400,10 @@ export class GlossaSettingTab extends PluginSettingTab {
       if (isEmbedRef) {
         this.plugin.settings.embeddingEndpointId = null;
       }
-      // 4. Detach session refs so loadSession sees null instead of a ghost id.
+      // 4. Detach session refs so loadSession sees null instead of a ghost id,
+      //    in opened chats and in chat files alike.
       try {
-        for (const s of (this.plugin.store?.all() ?? [])) {
-          if (s.endpointId === ep.id) s.endpointId = null;
-        }
-        // Persist sessions so detachment survives reload.
-        await this.plugin.store?.persist?.();
+        await this.plugin.store?.detachEndpoint(ep.id);
       } catch (e) { console.warn('[Glossa] endpoint deletion: session ref cleanup failed', e); }
 
       await this.plugin.saveSettings();
@@ -1566,8 +1518,8 @@ export class GlossaSettingTab extends PluginSettingTab {
       const extraBodySetting = new Setting(advanced)
         .setName(bi('Extra JSON body', '额外 JSON 请求体'))
         .setDesc(bi(
-          'Provider parameters override generated values (e.g. thinking, reasoning_split, max_tokens). Model, messages, tools and streaming fields are reserved. Off only omits reasoning effort; disabling thinking depends on the model.',
-          '服务商参数覆盖自动生成值（如 thinking、reasoning_split、max_tokens）。模型、消息、工具及流式字段不可覆盖。Off 仅省略推理强度；能否关闭思考取决于模型。',
+          'Provider parameters override generated values (e.g. thinking, reasoning_split, max_tokens). Model, messages, tools and streaming fields are reserved. Official APIs get the reasoning switches their documentation lists; on other hosts Off only omits reasoning effort.',
+          '服务商参数覆盖自动生成值（如 thinking、reasoning_split、max_tokens）。模型、消息、工具及流式字段不可覆盖。官方 API 按其文档发送思考开关；其他服务上 Off 仅省略推理强度。',
         ));
       const extraBodyError = extraBodySetting.descEl.createDiv({ attr: { role: 'status', 'aria-live': 'polite' } });
       extraBodySetting.addTextArea(tx => {
@@ -1585,6 +1537,31 @@ export class GlossaSettingTab extends PluginSettingTab {
             tx.inputEl.removeAttribute('aria-invalid');
             extraBodyError.setText('');
             ep.extraBody = parsed;
+            await this.plugin.saveSettings();
+          });
+      });
+      const temperatureSetting = new Setting(advanced)
+        .setName(bi('Temperature', '温度'))
+        .setDesc(bi(
+          'Empty: automatic — 0.7, left out for models that accept only their own value (OpenAI reasoning models, Kimi K2.5+). Type off to never send it, or a number from 0 to 2.',
+          '留空为自动：发送 0.7，但只接受自身取值的模型（OpenAI 推理模型、Kimi K2.5 及以上）不发送。填 off 表示从不发送，或填写 0 到 2 之间的数值。',
+        ));
+      const temperatureError = temperatureSetting.descEl.createDiv({ attr: { role: 'status', 'aria-live': 'polite' } });
+      temperatureSetting.addText(tx => {
+        tx.setPlaceholder(bi('Auto', '自动'))
+          .setValue(ep.temperature === 'omit' ? 'off' : typeof ep.temperature === 'number' ? String(ep.temperature) : '')
+          .onChange(async value => {
+            const text = value.trim().toLowerCase();
+            const parsed = Number(text);
+            if (text && text !== 'off' && !(Number.isFinite(parsed) && parsed >= 0 && parsed <= 2)) {
+              tx.inputEl.setAttribute('aria-invalid', 'true');
+              temperatureError.setText(bi('Not saved: use off or a number from 0 to 2.', '未保存：请填写 off 或 0 到 2 之间的数值。'));
+              return;
+            }
+            tx.inputEl.removeAttribute('aria-invalid');
+            temperatureError.setText('');
+            if (!text) delete ep.temperature;
+            else ep.temperature = text === 'off' ? 'omit' : parsed;
             await this.plugin.saveSettings();
           });
       });
@@ -1684,6 +1661,8 @@ export class GlossaSettingTab extends PluginSettingTab {
           ep.model = value;
           await this.plugin.saveSettings();
           inputComp.setValue(value);
+          // Reasoning choices depend on the model; show the new model's set.
+          this.refresh();
         },
         bi('Detected model', '已探测模型'),
       );
@@ -1693,20 +1672,31 @@ export class GlossaSettingTab extends PluginSettingTab {
     const reasoningSetting = new Setting(card)
       .setName(t('reasoning_effort'))
       .setDesc(t('reasoning_effort_desc'));
-    const reasoningOptions = reasoningOptionsForEndpoint(ep);
-    createAlignedSelect(
-      reasoningSetting.controlEl,
-      this.selectPopup,
-      reasoningOptions.map(value => ({ value, label: t(`effort_${value}`) })),
-      reasoningOptions.includes(ep.reasoningEffort ?? 'off') ? (ep.reasoningEffort ?? 'off') : 'off',
-      async value => {
-        ep.reasoningEffort = value;
-        delete ep.customReasoningEffort;
-        await this.plugin.saveSettings();
-      },
-      t('reasoning_effort'),
-    );
-    reasoningSetting.addButton(button => button.setButtonText(ep.customReasoningEffort || bi('Custom…', '自定义…')).onClick(() => {
+    // Official APIs list the values documented for the selected model; other
+    // hosts list every value, sent unchanged.
+    const profile = reasoningProfile(ep);
+    const entries = profile?.entries ?? [];
+    if (profile?.provider) {
+      reasoningSetting.setDesc(profile.note ?? (profile.known
+        ? bi('Values documented by the provider for this model.', '按服务商文档列出此模型支持的取值。')
+        : bi('Model not in the documented list yet; values the provider documents for its models are shown.', '此模型尚未收录，显示该服务商文档中的通用取值。')));
+    }
+    if (entries.length) {
+      const current = selectedReasoningEntry(profile, ep.reasoningEffort);
+      createAlignedSelect(
+        reasoningSetting.controlEl,
+        this.selectPopup,
+        entries.map(entry => ({ value: entry.value, label: entry.label })),
+        current?.value ?? entries[0].value,
+        async value => {
+          ep.reasoningEffort = value;
+          delete ep.customReasoningEffort;
+          await this.plugin.saveSettings();
+        },
+        t('reasoning_effort'),
+      );
+    }
+    if (profile?.allowCustom || ep.customReasoningEffort) reasoningSetting.addButton(button => button.setButtonText(ep.customReasoningEffort || bi('Custom…', '自定义…')).onClick(() => {
       openEffortModal(this.app, ep, async value => {
         ep.customReasoningEffort = value;
         if (!value) ep.reasoningEffort = 'off';
@@ -1807,7 +1797,7 @@ class AddEndpointModal extends Modal {
       const dot = chip.createSpan({ cls: 'nc-preset-dot' });
       setStyle(dot, { background: p.color });
       chip.createSpan({ cls: 'nc-preset-name', text: p.name });
-      chip.title = `${p.baseUrl} · ${p.defaultModel}`;
+      chip.title = p.defaultModel ? `${p.baseUrl} · ${p.defaultModel}` : p.baseUrl;
       chip.onclick = () => {
         this.draft.label = p.name;
         this.draft.baseUrl = p.baseUrl;

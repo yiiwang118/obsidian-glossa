@@ -296,6 +296,7 @@ function scanTrackedFilesForSecrets() {
     'data.json',
     'chats.json',
     'chats.deleted.json',
+    'chats.v3-backup.json',
     'checkpoints.json',
     'embeddings.json',
   ]);
@@ -309,7 +310,7 @@ function scanTrackedFilesForSecrets() {
 
   for (const file of files) {
     const base = path.basename(file);
-    if (forbiddenNames.has(base) || secretFilePattern.test(base)) {
+    if (forbiddenNames.has(base) || secretFilePattern.test(base) || /(?:^|\/)chats\/[^/]+\.json$/.test(file)) {
       fail(`${file} is a runtime/secret file and must not be tracked.`);
     }
     const text = readSmallTextFile(file);

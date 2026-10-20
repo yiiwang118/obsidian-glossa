@@ -258,33 +258,6 @@ export async function resolveFile(
   }
 }
 
-export async function resolveFolder(app: App, folder: TFolder): Promise<ContextItem> {
-  void app;
-  return {
-    id: uid(),
-    kind: 'folder',
-    label: folder.name + '/',
-    detail: folder.path,
-    content: 'Folder context is disabled in the community review build. Attach individual files instead.',
-    tokens: 0,
-    pinned: false,
-  };
-}
-
-export async function resolveTag(app: App, tag: string): Promise<ContextItem> {
-  void app;
-  const tagNorm = tag.startsWith('#') ? tag : '#' + tag;
-  return {
-    id: uid(),
-    kind: 'tag',
-    label: tagNorm,
-    detail: 'disabled',
-    content: 'Tag context is disabled in the community review build. Attach individual files instead.',
-    tokens: 0,
-    pinned: false,
-  };
-}
-
 const WEB_FETCH_BYTE_CAP = 80_000;
 const WEB_FETCH_TIMEOUT_MS = 15_000;
 

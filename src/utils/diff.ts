@@ -4,6 +4,8 @@
  * Uses LCS for modest files and falls back to a bounded preview for large edits.
  */
 
+import { bi } from './i18n';
+
 export type DiffOp =
   | { type: 'eq';  text: string; line: number }
   | { type: 'del'; text: string; line: number }
@@ -111,18 +113,18 @@ function exactDiffFeasible(oldLines: number, newLines: number): boolean {
 function largeDiffPreview(oldLines: string[], newLines: string[]): DiffOp[] {
   const out: DiffOp[] = [{
     type: 'eq',
-    text: `[diff too large for exact preview: ${oldLines.length.toLocaleString()} -> ${newLines.length.toLocaleString()} lines; showing first ${FALLBACK_PREVIEW_LINES} removed and added lines]`,
+    text: bi(`[diff too large for exact preview: ${oldLines.length.toLocaleString()} -> ${newLines.length.toLocaleString()} lines; showing first ${FALLBACK_PREVIEW_LINES} removed and added lines]`, `[改动太大，无法精确对比：${oldLines.length.toLocaleString()} → ${newLines.length.toLocaleString()} 行；只显示前 ${FALLBACK_PREVIEW_LINES} 行删除和新增]`),
     line: 0,
   }];
   const oldShown = oldLines.slice(0, FALLBACK_PREVIEW_LINES);
   for (let i = 0; i < oldShown.length; i++) out.push({ type: 'del', text: oldShown[i], line: i });
   if (oldLines.length > oldShown.length) {
-    out.push({ type: 'eq', text: `[${(oldLines.length - oldShown.length).toLocaleString()} removed lines hidden]`, line: oldShown.length });
+    out.push({ type: 'eq', text: bi(`[${(oldLines.length - oldShown.length).toLocaleString()} removed lines hidden]`, `[另有 ${(oldLines.length - oldShown.length).toLocaleString()} 行删除未显示]`), line: oldShown.length });
   }
   const newShown = newLines.slice(0, FALLBACK_PREVIEW_LINES);
   for (let i = 0; i < newShown.length; i++) out.push({ type: 'add', text: newShown[i], line: i });
   if (newLines.length > newShown.length) {
-    out.push({ type: 'eq', text: `[${(newLines.length - newShown.length).toLocaleString()} added lines hidden]`, line: newShown.length });
+    out.push({ type: 'eq', text: bi(`[${(newLines.length - newShown.length).toLocaleString()} added lines hidden]`, `[另有 ${(newLines.length - newShown.length).toLocaleString()} 行新增未显示]`), line: newShown.length });
   }
   return out;
 }

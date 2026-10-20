@@ -3,7 +3,7 @@
  * Mirrors the upstream Claude Code tool architecture: each tool lives in its own file
  * exporting a single ToolImpl literal; the registry in ../tools.ts imports them all.
  */
-import type { App } from 'obsidian';
+import { TFile, TFolder, type App } from 'obsidian';
 import type { ToolSpec, ToolContentBlock } from '../../providers/types';
 import type { ContextPruneRequest } from '../../utils/context_pruning';
 
@@ -13,7 +13,9 @@ import type { ContextPruneRequest } from '../../utils/context_pruning';
 export type PermissionResult<Input = AnyValue> =
   | { behavior: 'allow';  updatedInput?: Input; decisionReason?: string }
   | { behavior: 'ask';    updatedInput?: Input; message?: string }
-  | { behavior: 'deny';   message: string; decisionReason?: string };
+  | { behavior: 'deny';   message: string; decisionReason?: string }
+  /** No opinion: the usual approval policy applies. */
+  | { behavior: 'passthrough' };
 
 /** A tool may return either a plain string (most tools) or this structured shape
  *  when it wants to send rich content (images, resources) back to the model. */
@@ -418,6 +420,31 @@ export function normalizePathFields(fields: readonly string[]): (input: Record<s
       if (f in input) (input as AnyValue)[f] = canonicalizeVaultPath((input as AnyValue)[f]);
     }
   };
+}
+
+/** Files inside a folder, at any depth. */
+export function filesInFolder(folder: TFolder): TFile[] {
+  const files: TFile[] = [];
+  const visit = (current: TFolder) => {
+    for (const child of current.children) {
+      if (child instanceof TFolder) visit(child);
+      else if (child instanceof TFile) files.push(child);
+    }
+  };
+  visit(folder);
+  return files;
+}
+
+/** The vault root and Obsidian's configuration folder are never deleted or
+ *  moved, and nothing is moved into the configuration folder. Returns what
+ *  the path is when it is one of those. */
+export function protectedVaultPath(app: App, path: string): string | null {
+  const p = path.replace(/\\/g, '/').replace(/^\.\//, '').trim().replace(/\/+$/, '').toLowerCase();
+  if (!p) return 'the vault root';
+  const config = app.vault.configDir;
+  const configKey = (config ?? '').toLowerCase();
+  if (configKey && (p === configKey || p.startsWith(`${configKey}/`))) return `Obsidian's configuration folder (${config})`;
+  return null;
 }
 
 /** Extract the folder part of a vault path. Empty string if at vault root. */

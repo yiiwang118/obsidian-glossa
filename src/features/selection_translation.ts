@@ -5,6 +5,7 @@ import type { Endpoint, GlossaSettings, SelectionTranslateMode } from '../types'
 import type { SelectionInfo } from '../context/sources';
 import { getCurrentSelection } from '../context/sources';
 import { buildProvider } from '../providers/registry';
+import { lightestReasoningEffort, reasoningRemainsOn } from '../providers/reasoning_catalog';
 import { CustomApiProvider } from '../providers/custom_api';
 import type { ChatChunk } from '../providers/types';
 import { inferSelectionLanguage, inferSelectionTranslationTarget, type TranslationTarget } from '../utils/translation_target';
@@ -335,16 +336,20 @@ export function selectionTranslationMathMarkdown(
   return completeText === displayText && hasMarkdownMath(completeText) ? completeText : null;
 }
 
+/** Quick translation asks for the least reasoning the endpoint allows: thinking
+ *  switched off where the official API documents a switch, otherwise its
+ *  lightest level; third-party APIs get no reasoning parameter. */
 export function prepareTranslationEndpoint(endpoint: Endpoint): Endpoint {
-  return { ...endpoint, reasoningEffort: 'off', customReasoningEffort: undefined };
+  return { ...endpoint, reasoningEffort: lightestReasoningEffort({ ...endpoint, customReasoningEffort: undefined }), customReasoningEffort: undefined };
 }
 
 export function selectionTranslationMaxTokens(text: string, endpoint: Endpoint): number {
   const textBudget = Math.min(8192, Math.max(512, Math.ceil(text.length * 1.5)));
-  // M2.x always thinks, even when reasoningEffort is off. Leave room for that
-  // before the translation; this is a headroom heuristic, not a completion guarantee.
+  // M2.x always thinks, even when reasoningEffort is off, and so do official
+  // models whose reasoning cannot be switched off. Leave room for that before
+  // the translation; this is a headroom heuristic, not a completion guarantee.
   const needsThinkingHeadroom = endpoint.kind === 'custom-api'
-    && /^(?:minimax\/)?minimax-m2(?:\.\d+)?(?:-highspeed)?$/i.test(endpoint.model?.trim() ?? '');
+    && (/^(?:minimax\/)?minimax-m2(?:\.\d+)?(?:-highspeed)?$/i.test(endpoint.model?.trim() ?? '') || reasoningRemainsOn(endpoint));
   return needsThinkingHeadroom ? Math.max(16_384, textBudget) : textBudget;
 }
 

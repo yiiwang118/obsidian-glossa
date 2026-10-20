@@ -1,5 +1,5 @@
 import { TOOLS, listToolSpecs } from '../agent/tools';
-import { metaFor, type ToolMeta } from '../agent/tool_meta';
+import { TOOL_META, metaFor, type ToolMeta } from '../agent/tool_meta';
 
 export interface ToolCapability {
   name: string;
@@ -30,7 +30,8 @@ const TOOL_ZH: Record<string, ToolChineseCopy> = {
   create_note: { label: '创建笔记', description: '在 vault 中创建新笔记，并避免无意覆盖已有文件。' },
   edit_section: { label: '编辑章节', description: '按标题定位并替换单个章节，保留笔记其余部分。' },
   append_to_note: { label: '追加内容', description: '把内容追加到指定笔记末尾。' },
-  delete_note: { label: '删除笔记', description: '删除指定 vault 文件；执行前需要明确审批。' },
+  create_folder: { label: '新建文件夹', description: '在 vault 中新建文件夹，缺少的上级文件夹会一并创建；执行前需要确认。' },
+  delete_note: { label: '删除文件或文件夹', description: '把文件或整个文件夹移到 Obsidian 设置的废纸篓；执行前需要确认，库的根目录和配置文件夹不能删除。' },
   file_edit: { label: '精确编辑', description: '用可验证的原文匹配完成单处或多处精确替换。' },
   apply_patch: { label: '应用补丁', description: '通过结构化补丁完成多段或多文件编辑，并保留最小改动范围。' },
   todo_write: { label: '任务计划', description: '维护多步骤任务的计划、进度和当前执行状态。' },
@@ -50,7 +51,7 @@ const TOOL_ZH: Record<string, ToolChineseCopy> = {
   patch_note: { label: '局部修改笔记', description: '按标题、块引用或属性键对笔记做结构化局部修改。' },
   manage_frontmatter: { label: '管理属性', description: '读取、设置、删除或合并 YAML frontmatter 属性。' },
   manage_tags: { label: '管理标签', description: '添加、删除或替换笔记中的属性标签与行内标签。' },
-  rename_note: { label: '重命名笔记', description: '重命名或移动笔记，并按 vault 规则维护相关链接。' },
+  rename_note: { label: '重命名或移动', description: '重命名或移动文件、文件夹，并按 vault 规则更新相关链接。' },
   resolve_wikilink: { label: '解析双链', description: '把 wikilink 解析为真实文件路径，并处理标题或块引用。' },
   get_backlinks: { label: '查询反向链接', description: '列出链接到指定笔记的来源与相关上下文。' },
   get_outgoing_links: { label: '查询出链', description: '列出指定笔记指向的内部链接、嵌入与目标状态。' },
@@ -85,13 +86,14 @@ export function buildToolCapabilities(alwaysApprove: readonly string[]): ToolCap
   return all.map(spec => {
     const tool = TOOLS[spec.name];
     const meta = metaFor(spec.name);
+    const labels = TOOL_META[spec.name]?.label ?? [spec.name, spec.name];
     const zh = TOOL_ZH[spec.name] ?? {
-      label: meta.label,
+      label: labels[1],
       description: `调用 ${spec.name} 完成对应任务。`,
     };
     return {
       name: spec.name,
-      labelEn: meta.label,
+      labelEn: labels[0],
       labelZh: zh.label,
       descriptionEn: spec.description,
       descriptionZh: zh.description,

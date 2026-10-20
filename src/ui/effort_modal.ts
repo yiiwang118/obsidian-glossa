@@ -1,5 +1,6 @@
 import { App, Modal } from 'obsidian';
-import { customEffortValue, reasoningOptionsForEndpoint, type Endpoint } from '../types';
+import { customEffortValue, type Endpoint } from '../types';
+import { reasoningProfile } from '../providers/reasoning_catalog';
 import { el, uid } from '../utils/dom';
 import { bi } from '../utils/i18n';
 
@@ -11,12 +12,12 @@ export function openEffortModal(app: App, endpoint: Endpoint, save: (value?: str
       el('h3', { parent: this.contentEl, text: bi('Custom effort', '自定义 effort') });
       el('p', { parent: this.contentEl, text: bi('Enter a value supported by your model. It is sent as entered; leave blank to use the default.', '填写模型支持的 effort，按填写值发送；留空恢复默认。') });
       const form = el('form', { parent: this.contentEl });
-      const label = el('label', { parent: form, text: 'Effort' });
+      const label = el('label', { parent: form, text: bi('Effort', '强度') });
       const id = `glossa-effort-${uid()}`;
       const input = el('input', { parent: label, type: 'text', attrs: { list: id, placeholder: 'high', maxlength: '32', autocomplete: 'off' } });
       input.value = endpoint.customReasoningEffort || (endpoint.reasoningEffort === 'off' ? '' : endpoint.reasoningEffort ?? '');
       const options = el('datalist', { parent: form, attrs: { id } });
-      for (const value of reasoningOptionsForEndpoint(endpoint).filter(v => v !== 'off')) el('option', { parent: options, attrs: { value } });
+      for (const entry of reasoningProfile(endpoint)?.entries ?? []) if (entry.kind === 'level') el('option', { parent: options, attrs: { value: entry.value } });
       const error = el('p', { className: 'nc-effort-error', parent: form, attrs: { role: 'alert' } });
       const actions = el('div', { className: 'nc-effort-actions', parent: form });
       const cancel = el('button', { parent: actions, type: 'button', text: bi('Cancel', '取消') });

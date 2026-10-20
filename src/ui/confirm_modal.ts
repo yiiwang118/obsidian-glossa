@@ -13,6 +13,7 @@
  */
 import { App, Modal } from 'obsidian';
 import { setStyle } from '../utils/dom';
+import { bi } from '../utils/i18n';
 
 class ConfirmModal extends Modal {
   private decided = false;
@@ -102,9 +103,9 @@ class PromptModal extends Modal {
     setStyle(row, { gap: '8px' });
     setStyle(row, { justifyContent: 'flex-end' });
     setStyle(row, { marginTop: '12px' });
-    const cancelBtn = row.createEl('button', { text: 'Cancel' });
+    const cancelBtn = row.createEl('button', { text: bi('Cancel', '取消') });
     cancelBtn.onclick = () => this.finish(null);
-    const okBtn = row.createEl('button', { text: 'OK', cls: 'mod-cta' });
+    const okBtn = row.createEl('button', { text: bi('OK', '确定'), cls: 'mod-cta' });
     okBtn.onclick = () => this.finish(inputEl.value);
 
     inputEl.addEventListener('keydown', (e: KeyboardEvent) => {

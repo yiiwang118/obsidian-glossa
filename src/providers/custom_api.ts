@@ -1,8 +1,11 @@
 import { requestUrl } from 'obsidian';
 import { customEffortValue, isDeepSeekEndpoint, mapOpenAIReasoningEffort, type Endpoint } from '../types';
+import { applyOfficialAnthropicThinking, applyOfficialOpenAIReasoning, effortPassesThroughUnchanged, officialProvider, requestTemperature } from './reasoning_catalog';
 import { nativeStreamingHttpRequest } from '../utils/native_http';
 import type { LLMProvider, ChatRequest, ChatChunk, ToolContentBlock } from './types';
 import { customApiBody, customApiUrl } from './custom_api_config';
+import { ThinkTagSplitter, splitThinkTags } from '../utils/think_tags';
+import { bi } from '../utils/i18n';
 
 /** Strip the SYSTEM_PROMPT_DYNAMIC_BOUNDARY marker used by buildSystemPrompt() for the
  *  Anthropic two-zone cache split. Non-cacheable endpoints get a clean single string. */
@@ -33,6 +36,8 @@ function redactErrorBody(s: string): string {
 function withReasoningEffortHint(ep: Endpoint, message: string): string {
   const effort = customEffortValue(ep.customReasoningEffort) || ep.reasoningEffort;
   if (!effort || effort === 'off') return message;
+  // Documented models get documented values; the hint is only for pass-through.
+  if (!ep.customReasoningEffort && !effortPassesThroughUnchanged(ep)) return message;
   return `${message}\nReasoning effort "${effort}" was sent unchanged. The selected model or gateway may not support this value.`;
 }
 
@@ -59,6 +64,9 @@ export class CustomApiProvider implements LLMProvider {
   defaultModel() { return this.ep.model ?? ''; }
 
   private applyOpenAIReasoning(body: AnyValue): void {
+    // Official APIs: the values and switches their documentation lists for the model.
+    if (applyOfficialOpenAIReasoning(this.ep, body, customEffortValue(this.ep.customReasoningEffort))) return;
+    // Third-party gateways: the selected value is sent unchanged.
     const effort = customEffortValue(this.ep.customReasoningEffort) || this.ep.reasoningEffort;
     if (isDeepSeekEndpoint(this.ep)) {
       if (effort === 'off') {
@@ -71,8 +79,17 @@ export class CustomApiProvider implements LLMProvider {
     if (mapped) body.reasoning_effort = mapped;
   }
 
-  private applyAnthropicThinking(body: AnyValue): void {
+  private applyAnthropicThinking(body: AnyValue, streaming = true): void {
     const custom = customEffortValue(this.ep.customReasoningEffort);
+    if (officialProvider(this.ep) === 'anthropic') {
+      // An explicit thinking setting in Extra body stays the user's decision.
+      if (this.ep.extraBody && Object.prototype.hasOwnProperty.call(this.ep.extraBody, 'thinking')) {
+        if (custom) body.output_config = { ...(body.output_config ?? {}), effort: custom };
+        return;
+      }
+      applyOfficialAnthropicThinking(this.ep, body, custom, streaming);
+      return;
+    }
     if (custom) {
       body.output_config = { effort: custom };
       return;
@@ -99,8 +116,8 @@ export class CustomApiProvider implements LLMProvider {
   /** Lightweight connectivity probe — HEAD /models for OpenAI-style, or POST /messages
    *  with max_tokens:1 for Anthropic-only endpoints that don't expose /models. */
   async testConnect(): Promise<{ ok: boolean; message: string }> {
-    if (!this.ep.baseUrl) return { ok: false, message: 'Base URL missing.' };
-    if (!this.ep.apiKey)  return { ok: false, message: 'API key missing.' };
+    if (!this.ep.baseUrl) return { ok: false, message: bi('Base URL missing.', '缺少 Base URL。') };
+    if (!this.ep.apiKey)  return { ok: false, message: bi('API key missing.', '缺少 API key。') };
     try {
       const style = this.ep.apiStyle ?? 'openai';
       const url = customApiUrl(this.ep, style === 'anthropic' ? 'chat' : 'models');
@@ -109,8 +126,8 @@ export class CustomApiProvider implements LLMProvider {
         headers['x-api-key'] = this.ep.apiKey;
         headers['anthropic-version'] = '2023-06-01';
         const r = await requestUrl({ url, method: 'POST', headers, throw: false,
-          body: JSON.stringify(customApiBody(this.ep, { model: this.ep.model ?? 'claude-sonnet-4-6', max_tokens: 1, messages: [{ role: 'user', content: 'ping' }], stream: false })) });
-        if (r.status < 400) return { ok: true, message: `HTTP 200 · ${this.ep.model ?? 'default model'}` };
+          body: JSON.stringify(customApiBody(this.ep, { model: this.ep.model || 'claude-opus-5-5', max_tokens: 1, messages: [{ role: 'user', content: 'ping' }], stream: false })) });
+        if (r.status < 400) return { ok: true, message: `HTTP 200 · ${this.ep.model || bi('default model', '默认模型')}` };
         return { ok: false, message: `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 160)}` };
       } else {
         headers['Authorization'] = `Bearer ${this.ep.apiKey}`;
@@ -118,7 +135,7 @@ export class CustomApiProvider implements LLMProvider {
         if (r.status < 400) {
           const j: AnyValue = r.json;
           const n = Array.isArray(j?.data) ? j.data.length : 0;
-          return { ok: true, message: `HTTP 200 · ${n} models available` };
+          return { ok: true, message: bi(`HTTP 200 · ${n} models available`, `HTTP 200 · 可用模型 ${n} 个`) };
         }
         return { ok: false, message: `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 160)}` };
       }
@@ -171,7 +188,8 @@ export class CustomApiProvider implements LLMProvider {
           if (m.toolIsError) trBlock.is_error = true;
           messages.push({ role: 'user', content: [trBlock] });
         } else if (m.role === 'assistant' && m.toolCalls?.length) {
-          const blocks: AnyValue[] = [];
+          // Thinking blocks of this turn go back first and unchanged.
+          const blocks: AnyValue[] = [...(m.thinkingBlocks ?? [])];
           if (m.content) blocks.push({ type: 'text', text: m.content });
           for (const tc of m.toolCalls) blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.args ?? {} });
           messages.push({ role: 'assistant', content: blocks });
@@ -185,7 +203,7 @@ export class CustomApiProvider implements LLMProvider {
         } else if (m.role !== 'system') messages.push({ role: m.role, content: m.content });
       }
       const body: AnyValue = { model: req.model ?? this.ep.model, max_tokens: req.maxTokens ?? 4096, messages, stream: false };
-      this.applyAnthropicThinking(body);
+      this.applyAnthropicThinking(body, false);
       if (req.systemPrompt) body.system = stripBoundary(req.systemPrompt);
       try {
         const r = await requestUrl({ url, method: 'POST', headers, body: JSON.stringify(customApiBody(this.ep, body)), throw: false });
@@ -195,6 +213,12 @@ export class CustomApiProvider implements LLMProvider {
         }
         const j = r.json;
         const blocks: AnyValue[] = j.content ?? [];
+        const thinkingBlocks = blocks.filter((b: AnyValue) => b.type === 'thinking' || b.type === 'redacted_thinking');
+        // Thinking text and replay blocks are surfaced for the official API, where
+        // Glossa requests readable summaries; gateways keep their earlier behaviour.
+        const surfaceThinking = officialProvider(this.ep) === 'anthropic';
+        const reasoning = surfaceThinking ? thinkingBlocks.map((b: AnyValue) => typeof b.thinking === 'string' ? b.thinking : '').filter(Boolean).join('\n\n') : '';
+        if (reasoning) yield { type: 'reasoning', text: reasoning };
         const text = blocks.filter((b: AnyValue) => b.type === 'text').map((b: AnyValue) => b.text).join('');
         if (text) yield { type: 'text', text };
         // Emit any tool_use blocks as tool_call chunks. Without this, agent
@@ -209,7 +233,8 @@ export class CustomApiProvider implements LLMProvider {
         yield {
           type: 'final', text,
           stopReason: typeof j.stop_reason === 'string' ? j.stop_reason : undefined,
-          hasReasoning: blocks.some((b: AnyValue) => b.type === 'thinking' || b.type === 'redacted_thinking'),
+          hasReasoning: thinkingBlocks.length > 0,
+          thinkingBlocks: surfaceThinking && thinkingBlocks.length ? thinkingBlocks : undefined,
           usage: { input: j.usage?.input_tokens, output: j.usage?.output_tokens },
         };
       } catch (e) { yield { type: 'error', error: e.message }; }
@@ -223,7 +248,9 @@ export class CustomApiProvider implements LLMProvider {
       ...(this.ep.headers ?? {}),
     };
     const messages = buildOpenAICompatibleMessages(req);
-    const body: AnyValue = { model: req.model ?? this.ep.model, messages, stream: false, temperature: req.temperature ?? 0.7 };
+    const body: AnyValue = { model: req.model ?? this.ep.model, messages, stream: false };
+    const temperature = requestTemperature(this.ep, req.temperature);
+    if (temperature !== undefined) body.temperature = temperature;
     if (req.maxTokens) body.max_tokens = req.maxTokens;
     this.applyOpenAIReasoning(body);
     try {
@@ -234,7 +261,10 @@ export class CustomApiProvider implements LLMProvider {
       }
       const j = r.json;
       const msg = j.choices?.[0]?.message ?? {};
-      const text = msg.content ?? '';
+      const split = splitThinkTags(typeof msg.content === 'string' ? msg.content : '');
+      const reasoning = [typeof msg.reasoning_content === 'string' ? msg.reasoning_content : typeof msg.reasoning === 'string' ? msg.reasoning : '', split.reasoning].filter(Boolean).join('\n\n');
+      if (reasoning) yield { type: 'reasoning', text: reasoning };
+      const text = split.text;
       if (text) yield { type: 'text', text };
       // Emit tool_calls if the model asked for them. Parallel to the
       // Anthropic non-stream path above — without this, useObsidianFetch +
@@ -255,7 +285,7 @@ export class CustomApiProvider implements LLMProvider {
         }
         yield { type: 'tool_call', id: String(tc.id ?? Date.now().toString(36)), name: String(fn.name ?? 'unknown'), args };
       }
-      yield { type: 'final', text, usage: j.usage ? { input: j.usage.prompt_tokens, output: j.usage.completion_tokens } : undefined };
+      yield { type: 'final', text, reasoningContent: reasoning || undefined, usage: j.usage ? { input: j.usage.prompt_tokens, output: j.usage.completion_tokens } : undefined };
     } catch (e) { yield { type: 'error', error: e.message }; }
   }
 
@@ -309,9 +339,10 @@ export class CustomApiProvider implements LLMProvider {
       model: req.model ?? this.ep.model,
       messages,
       stream: true,
-      temperature: req.temperature ?? 0.7,
       stream_options: { include_usage: true },   // OpenAI usage in stream
     };
+    const temperature = requestTemperature(this.ep, req.temperature);
+    if (temperature !== undefined) body.temperature = temperature;
     if (req.maxTokens) body.max_tokens = req.maxTokens;
     if (req.tools?.length) body.tools = req.tools.map(t => ({
       type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters },
@@ -342,6 +373,8 @@ export class CustomApiProvider implements LLMProvider {
     let bufReasoning = '';      // DeepSeek-reasoner style
     let usage: AnyValue;
     const toolCalls = new Map<number, { id: string; name: string; argsStr: string }>();
+    // Reasoning written into the answer as <think>…</think> goes to the reasoning card.
+    const thinkTags = new ThinkTagSplitter();
 
     // Idle watchdog — if no chunk in 90s, cancel the reader so the agent loop doesn't
     // sit there forever waiting on a silently-dropped TCP connection.
@@ -383,11 +416,17 @@ export class CustomApiProvider implements LLMProvider {
             catch { ev = null; }
             if (ev) {
               const delta = ev.choices?.[0]?.delta;
-              if (delta?.content) { yield { type: 'text', text: delta.content }; bufText += delta.content; }
-              // DeepSeek-reasoner: reasoning stream before content.
-              if (delta?.reasoning_content) {
-                yield { type: 'reasoning', text: delta.reasoning_content };
-                bufReasoning += delta.reasoning_content;
+              // DeepSeek / Kimi / LM Studio: `reasoning_content`; OpenRouter and Ollama: `reasoning`.
+              const reasoningDelta = typeof delta?.reasoning_content === 'string' ? delta.reasoning_content
+                : typeof delta?.reasoning === 'string' ? delta.reasoning : '';
+              if (reasoningDelta) {
+                yield { type: 'reasoning', text: reasoningDelta };
+                bufReasoning += reasoningDelta;
+              }
+              if (delta?.content) {
+                const part = thinkTags.push(delta.content);
+                if (part.reasoning) { yield { type: 'reasoning', text: part.reasoning }; bufReasoning += part.reasoning; }
+                if (part.text) { yield { type: 'text', text: part.text }; bufText += part.text; }
               }
               if (delta?.tool_calls) for (const tc of delta.tool_calls) {
                 const slot = toolCalls.get(tc.index ?? 0) ?? { id: '', name: '', argsStr: '' };
@@ -408,6 +447,9 @@ export class CustomApiProvider implements LLMProvider {
     } finally {
       window.clearInterval(watchdog);
     }
+    const tail = thinkTags.flush();
+    if (tail.reasoning) { yield { type: 'reasoning', text: tail.reasoning }; bufReasoning += tail.reasoning; }
+    if (tail.text) { yield { type: 'text', text: tail.text }; bufText += tail.text; }
     if (timedOut) {
       yield { type: 'error', error: 'No data from server for 90s — connection timed out. The model or proxy may have dropped the stream.' };
       return;
@@ -475,8 +517,9 @@ export class CustomApiProvider implements LLMProvider {
       }
       if (m.role === 'system') continue;
       if (m.role === 'assistant' && m.toolCalls?.length) {
-        // Anthropic canonical: assistant content is an array of text + tool_use blocks
-        const blocks: AnyValue[] = [];
+        // Anthropic canonical: assistant content is an array of thinking + text + tool_use
+        // blocks. Thinking blocks produced in this turn are passed back unchanged.
+        const blocks: AnyValue[] = [...(m.thinkingBlocks ?? [])];
         if (m.content) blocks.push({ type: 'text', text: m.content });
         for (const tc of m.toolCalls) blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.args ?? {} });
         messages.push({ role: 'assistant', content: blocks });
@@ -562,6 +605,10 @@ export class CustomApiProvider implements LLMProvider {
     let usage: AnthropicStreamUsage | undefined;
     let stopReason: string | undefined;
     let hasReasoning = false;
+    // Thinking / redacted_thinking blocks by stream index, kept verbatim for replay.
+    // Surfaced for the official API, where Glossa asks for readable summaries.
+    const thinkingBlocks = new Map<number, AnyValue>();
+    const surfaceThinking = officialProvider(this.ep) === 'anthropic';
 
     let lastChunkAt = Date.now();
     let timedOut = false;
@@ -601,6 +648,18 @@ export class CustomApiProvider implements LLMProvider {
                 || (ev.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta')) {
                 hasReasoning = true;
               }
+              if (!surfaceThinking) { /* gateways: presence only */ }
+              else if (ev.type === 'content_block_start' && ['thinking', 'redacted_thinking'].includes(ev.content_block?.type)) {
+                thinkingBlocks.set(ev.index, { ...ev.content_block });
+                if (typeof ev.content_block?.thinking === 'string' && ev.content_block.thinking) yield { type: 'reasoning', text: ev.content_block.thinking };
+              } else if (ev.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
+                const block = thinkingBlocks.get(ev.index);
+                if (block) block.thinking = (block.thinking ?? '') + (ev.delta.thinking ?? '');
+                if (ev.delta.thinking) yield { type: 'reasoning', text: ev.delta.thinking };
+              } else if (ev.type === 'content_block_delta' && ev.delta?.type === 'signature_delta') {
+                const block = thinkingBlocks.get(ev.index);
+                if (block) block.signature = (block.signature ?? '') + (ev.delta.signature ?? '');
+              }
               if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
                 toolBuffers.set(ev.index, { id: ev.content_block.id, name: ev.content_block.name, argsStr: '' });
               } else if (ev.type === 'content_block_delta') {
@@ -638,7 +697,8 @@ export class CustomApiProvider implements LLMProvider {
         yield { type: 'error', error: `Tool call "${slot.name}" had truncated/unparsable JSON args from stream — likely the proxy dropped the connection mid-message.` };
       }
     }
-    yield { type: 'final', text: bufText, stopReason, hasReasoning, usage: usage ? {
+    const replay = [...thinkingBlocks.entries()].sort((a, b) => a[0] - b[0]).map(([, block]) => block);
+    yield { type: 'final', text: bufText, stopReason, hasReasoning, thinkingBlocks: replay.length ? replay : undefined, usage: usage ? {
       input: usage.input_tokens, output: usage.output_tokens,
       cacheRead: usage.cache_read_input_tokens, cacheWrite: usage.cache_creation_input_tokens,
     } : undefined };
@@ -776,7 +836,9 @@ function toAnthropicContentBlock(block: ToolContentBlock): AnyValue {
   };
 }
 
+/** Shown when an Anthropic-format endpoint cannot list its models. */
 const ANTHROPIC_KNOWN_MODELS = [
-  'claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5',
-  'claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest',
+  'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1',
+  'claude-opus-5', 'claude-sonnet-5', 'claude-opus-4-8', 'claude-opus-4-7',
+  'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5',
 ];

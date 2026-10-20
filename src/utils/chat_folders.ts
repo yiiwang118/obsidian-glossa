@@ -19,6 +19,6 @@ export function normalizeFolders(value: unknown): ChatFolder[] {
 }
 
 /** Missing/deleted folders always resolve to Unfiled; chats are never deleted. */
-export function sessionFolder(session: ChatSession, folders: ChatFolder[]): string {
-  return folders.some(f => f.id === session.folderId) ? session.folderId : '';
+export function sessionFolder(session: Pick<ChatSession, 'folderId'>, folders: ChatFolder[]): string {
+  return session.folderId && folders.some(f => f.id === session.folderId) ? session.folderId : '';
 }

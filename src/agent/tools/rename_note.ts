@@ -1,26 +1,34 @@
 /**
- * rename_note — move or rename a note, preserving all wikilinks to it.
+ * rename_note — move or rename a note or a folder, preserving all wikilinks to it.
  *
  * Uses `app.fileManager.renameFile()` which is the Obsidian-blessed rename
  * path: it (a) physically moves/renames the file, (b) updates every wikilink
  * across the vault that pointed at the old name. A plain
  * `vault.rename` does NOT update backlinks — so we delegate to fileManager.
  */
-import { TFile } from 'obsidian';
-import { assertVaultPath, buildTool, normalizePathFields, vaultFolderOf, type ToolImpl } from './_shared';
+import { TFile, TFolder, type App } from 'obsidian';
+import { assertVaultPath, buildTool, filesInFolder, normalizePathFields, protectedVaultPath, vaultFolderOf, type ToolImpl } from './_shared';
+
+/** The source or destination that must not be moved (vault root, configuration folder). */
+function protectedMove(app: App, from: string, to: string): string | null {
+  const source = protectedVaultPath(app, from);
+  if (source) return `Refusing to move ${source}.`;
+  const destination = protectedVaultPath(app, to);
+  return destination ? `Refusing to move into ${destination}.` : null;
+}
 
 export const renameNote: ToolImpl = buildTool({
   isReadOnly: () => false,
   isDestructive: () => true,
   isConcurrencySafe: () => false,
   shouldDefer: true,
-  searchHint: 'rename or move note preserving wikilinks',
-  searchTags: ['move file', 'rename file', '重命名笔记', '移动文件'],
+  searchHint: 'rename or move a note or folder preserving wikilinks',
+  searchTags: ['move file', 'rename file', 'move folder', 'rename folder', '重命名笔记', '移动文件', '移动文件夹', '重命名文件夹'],
   backfillObservableInput: normalizePathFields(['from', 'to']),
   describe: a => `rename ${a.from} → ${a.to}`,
   spec: {
     name: 'rename_note',
-    description: 'Move or rename one vault file through the file manager so resolvable internal links can be updated. The destination must not exist. Requires user approval.',
+    description: 'Move or rename one vault file or folder through the file manager so resolvable internal links can be updated. The destination must not exist. Requires user approval.',
     parameters: {
       type: 'object',
       properties: {
@@ -31,7 +39,21 @@ export const renameNote: ToolImpl = buildTool({
       additionalProperties: false,
     },
   },
-  preview: async (a) => `Rename:\n  ${a.from}\n→ ${a.to}\n\n(wikilinks pointing at the old path will be auto-updated)`,
+  preview: async (app: App, a: AnyValue) => {
+    const from: unknown = a.from;
+    const source = app.vault.getAbstractFileByPath(typeof from === 'string' ? from : '');
+    const what = source instanceof TFolder ? `Move folder (${filesInFolder(source).length} files)` : 'Rename';
+    return `${what}:\n  ${a.from}\n→ ${a.to}\n\n(wikilinks pointing at the old path will be auto-updated)`;
+  },
+  // Refused before an approval card is shown.
+  checkPermissions: async (app, args) => {
+    try {
+      const reason = protectedMove(app, assertVaultPath(args?.from, 'from'), assertVaultPath(args?.to, 'to'));
+      return reason ? { behavior: 'deny', message: reason } : { behavior: 'passthrough' };
+    } catch {
+      return { behavior: 'passthrough' };
+    }
+  },
   run: async (app, args) => {
     let from: string, to: string;
     try {
@@ -39,8 +61,11 @@ export const renameNote: ToolImpl = buildTool({
       to = assertVaultPath(args.to, 'to');
     } catch (e) { return `Error: ${e.message}`; }
     if (from === to) return 'Error: from and to are identical — nothing to rename.';
+    const blocked = protectedMove(app, from, to);
+    if (blocked) return `Error: ${blocked}`;
     const f = app.vault.getAbstractFileByPath(from);
-    if (!(f instanceof TFile)) return `Error: source not found: ${from}`;
+    if (!(f instanceof TFile) && !(f instanceof TFolder)) return `Error: source not found: ${from}`;
+    if (f instanceof TFolder && to.toLowerCase().startsWith(`${from.toLowerCase()}/`)) return `Error: cannot move a folder into itself: ${from} → ${to}`;
     if (app.vault.getAbstractFileByPath(to)) return `Error: destination already exists: ${to}`;
     try {
       const folder = vaultFolderOf(to);

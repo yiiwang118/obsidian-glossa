@@ -19,6 +19,7 @@ import { createNote } from './tools/create_note';
 import { editSection } from './tools/edit_section';
 import { appendToNote } from './tools/append_to_note';
 import { deleteNote } from './tools/delete_note';
+import { createFolder } from './tools/create_folder';
 import { fileEdit } from './tools/file_edit';
 import { applyPatch } from './tools/apply_patch';
 import { todoWrite } from './tools/todo_write';
@@ -91,6 +92,7 @@ export const TOOLS: Record<string, ToolImpl> = {
   edit_section: editSection,
   append_to_note: appendToNote,
   delete_note: deleteNote,
+  create_folder: createFolder,
   file_edit: fileEdit,
   apply_patch: applyPatch,
 

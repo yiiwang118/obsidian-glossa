@@ -6,10 +6,8 @@ Only the latest minor version receives security fixes. As of this writing:
 
 | Version | Supported |
 |---|---|
-| 0.6.x   | ✅ |
-| 0.5.x   | ❌ (please upgrade) |
-| 0.4.x   | ❌ (please upgrade) |
-| < 0.4   | ❌ |
+| 1.1.x | ✅ |
+| 1.0.x and earlier | ❌ (please upgrade) |
 
 ## Reporting a vulnerability
 
@@ -29,7 +27,7 @@ The following are explicitly in scope:
 - **Approval bypass** — any way for the model to invoke a `dangerous: true` tool without hitting the approval modal or matching a persisted rule
 - **SSRF / DNS rebinding** in `web_fetch`, `@url` mentions, or the proxy override path
 - **Crypto correctness** — IV reuse, weak KDF, verifier tampering, plaintext fallback when locked
-- **Atomic write races** — situations where `chats.json` / `checkpoints.json` can be silently corrupted
+- **Atomic write races** — situations where `chats.json`, chat files under `chats/` or `checkpoints.json` can be silently corrupted
 
 Out of scope:
 
@@ -44,9 +42,9 @@ For attackers reading this: yes, we know. Recent audit findings already addresse
 - `view_image` path validation
 - `assertVaultPath` URL-decoding to block `..%2F` traversal
 - `checkpoint.snapshot` write mutex (FIFO queue) to prevent read-modify-write races
-- `chats.json` / `checkpoints.json` atomic write via tmp+rename
+- `chats.json`, chat files under `chats/` and `checkpoints.json` use staged writes and serialized persistence
 - Local CLI execution is isolated in a desktop-only boundary: no shell interpolation, no arbitrary extra arguments, explicit native permission limits, and owned-process cancellation. Codex and Claude Code disable external MCP configuration. Grok uses native sandbox profiles and a built-in tool allowlist; its local configuration still applies. Grok prompt files are private, temporary and removed on exit/cancellation. See PRIVACY.md for native CLI boundaries.
-- AES-GCM-256 with PBKDF2 (200k iterations) for at-rest API-key encryption
+- AES-GCM-256 with PBKDF2 (600,000 iterations for current keys; older keys may use 200,000) for at-rest API-key encryption
 
 ## Bounty
 

@@ -13,6 +13,7 @@ const NON_PRUNABLE_TOOLS = new Set([
   'append_to_note',
   'edit_section',
   'delete_note',
+  'create_folder',
   'file_edit',
   'apply_patch',
   'patch_note',

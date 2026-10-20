@@ -38,9 +38,9 @@ export class ContextManager {
     this.emit();
   }
 
-  /** Remove non-pinned items (used after sending). */
-  resetUnpinned() {
-    this.items = this.items.filter(x => x.pinned || x.isCurrent);
+  /** Remove non-pinned items (used after sending); only those in `ids` when given. */
+  resetUnpinned(ids?: ReadonlySet<string>) {
+    this.items = this.items.filter(x => x.pinned || x.isCurrent || (ids !== undefined && !ids.has(x.id)));
     this.emit();
   }
 

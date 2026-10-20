@@ -2183,14 +2183,19 @@ details[open] > .nc-selection-echo-summary::before { transform: rotate(90deg); }
 .nc-msg-body pre.nc-has-code-actions {
   padding-right: 96px;
 }
-/* Obsidian's MarkdownRenderer may inject a native copy-code button directly
-   into <pre>. It uses host/theme button styles, which can become a large
-   rounded control inside Glossa. We hide that native control and keep only
-   Glossa's compact .nc-code-actions toolbar. */
+/* Obsidian's MarkdownRenderer injects a native copy-code button into <pre>.
+   Glossa moves it into the compact .nc-code-actions toolbar (where it keeps
+   Obsidian's own copy behaviour); any host control left outside is hidden. */
 .glossa-view .nc-msg-body pre > button:not(.nc-code-action),
-.glossa-view .nc-msg-body pre .copy-code-button,
-.glossa-view .nc-msg-body pre .code-copy-button {
+.glossa-view .nc-msg-body pre .copy-code-button:not(.nc-code-action),
+.glossa-view .nc-msg-body pre .code-copy-button:not(.nc-code-action) {
   display: none;
+}
+.glossa-view .nc-code-actions .copy-code-button.nc-code-action {
+  position: static;
+  inset: auto;
+  opacity: 1;
+  box-shadow: none;
 }
 .nc-msg-body code {
   background: var(--nc-bg-soft);
@@ -8393,3 +8398,94 @@ button.nc-aligned-select[aria-expanded="true"] .nc-aligned-select-chevron {
 .nc-effort-modal p { color: var(--text-muted); font-size: 13px; }
 .nc-effort-modal .nc-effort-error { color: var(--text-error); }
 .nc-effort-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* Chats running in the background: count on the history button, marks in the list. */
+.glossa-view .nc-header .nc-history-btn { position: relative; }
+.glossa-view .nc-history-run-count {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  pointer-events: none;
+}
+.glossa-view .nc-history-run-count.visible { display: inline-flex; }
+.glossa-view .nc-history-run-count.approval { background: var(--color-orange); }
+.nc-history-run-mark {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+  border-top-color: var(--interactive-accent);
+  animation: nc-spin 0.9s linear infinite;
+}
+.nc-history-run-mark.approval {
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 999px;
+  animation: none;
+  padding: 1px 6px;
+  font-size: calc(var(--nc-base-font, 13px) - 3px);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-orange);
+  background: color-mix(in srgb, var(--color-orange) 14%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .nc-history-run-mark { animation: none; border-color: var(--interactive-accent); }
+}
+
+/* ---------- Message typography ----------
+   Answers are read in a narrow sidebar: headings stay close to the body size
+   (Obsidian's note headings would wrap and dominate the column) and spacing
+   does the structuring instead. Scoped to chat messages; notes keep their
+   own styles. */
+.glossa-view :is(.nc-msg-body, .nc-thinking-body) :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.1em 0 0.4em;
+  line-height: 1.4;
+  font-weight: 650;
+  font-variant: normal;
+  letter-spacing: 0;
+  color: var(--glossa-ink, var(--text-normal));
+}
+.glossa-view :is(.nc-msg-body, .nc-thinking-body) h1 { font-size: 1.2em; }
+.glossa-view :is(.nc-msg-body, .nc-thinking-body) h2 { font-size: 1.1em; }
+.glossa-view :is(.nc-msg-body, .nc-thinking-body) h3 { font-size: 1.03em; }
+.glossa-view :is(.nc-msg-body, .nc-thinking-body) :is(h4, h5, h6) { font-size: 1em; font-weight: 600; }
+.glossa-view :is(.nc-msg-body, .nc-thinking-body) :is(h5, h6) { color: var(--glossa-muted, var(--text-muted)); }
+.glossa-view :is(.nc-msg-body, .nc-thinking-body) > :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+
+.glossa-view .nc-msg:not(.user) > .nc-msg-body { line-height: 1.65; }
+.glossa-view .nc-msg:not(.user) > .nc-msg-body :is(p, ul, ol, blockquote, pre, table) { margin: 0 0 0.65em; }
+.glossa-view .nc-msg:not(.user) > .nc-msg-body :is(p, li) { line-height: 1.65; }
+.glossa-view .nc-msg:not(.user) > .nc-msg-body > :last-child { margin-bottom: 0; }
+.glossa-view .nc-msg:not(.user) > .nc-msg-body :is(ul, ol) { padding-left: 1.4em; }
+.glossa-view .nc-msg:not(.user) > .nc-msg-body li { margin: 0.25em 0; }
+.glossa-view .nc-msg:not(.user) > .nc-msg-body li > :is(p, ul, ol) { margin: 0.25em 0 0; }
+.glossa-view .nc-msg:not(.user) > .nc-msg-body li > p:first-child { margin-top: 0; }
+.glossa-view .nc-msg:not(.user) > .nc-msg-body blockquote { padding: 4px 12px; }
+.glossa-view .nc-msg:not(.user) > .nc-msg-body blockquote > :last-child { margin-bottom: 0; }
+.glossa-view .nc-msg:not(.user) > .nc-msg-body hr {
+  margin: 1.1em 0;
+  border: 0;
+  border-top: 1px solid var(--glossa-line-soft, var(--background-modifier-border));
+}
+.glossa-view .nc-msg-body :is(strong, b) { font-weight: 600; }
+.glossa-view .nc-msg-body :not(pre) > code {
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
