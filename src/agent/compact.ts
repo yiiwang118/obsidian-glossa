@@ -18,7 +18,7 @@
 
 import type { ChatMessage, ChatSession } from '../types';
 import { estimateTokens } from '../utils/tokens';
-import type { LLMProvider, MessageInput } from '../providers/types';
+import type { ChatRequest, LLMProvider, MessageInput } from '../providers/types';
 import { uid } from '../utils/dom';
 
 /** Rough token count of a single message — text + reasoning + each tool event's args+result. */
@@ -140,6 +140,8 @@ export function buildCompactionTranscript(messages: ChatMessage[], opts: BuildTr
 }
 
 export interface CompactOptions {
+  /** Append a summary instruction to the previous request instead of rewriting its prefix. */
+  cachePrefix?: ChatRequest;
   provider: LLMProvider;
   model?: string;
   /** Keep the most recent N messages live (default 2 — last user + last assistant). */
@@ -152,6 +154,8 @@ export interface CompactOptions {
 }
 
 export interface CompactResult {
+  /** Reject a stale result rather than replacing messages that changed during inference. */
+  sourceSnapshot?: string;
   /** The summary message to splice in. Caller is responsible for replacing the
    *  session's messages array (typically: `[summaryMsg, ...messages.slice(cutoff)]`). */
   summaryMsg: ChatMessage;
@@ -162,6 +166,7 @@ export interface CompactResult {
 /** Run the summarisation request and produce a single compactSummary assistant message.
  *  Throws on provider error so callers can decide whether to abort the turn. */
 export async function compactSession(session: ChatSession, opts: CompactOptions): Promise<CompactResult | null> {
+  const sourceSnapshot = JSON.stringify(session.messages);
   const keepRecent = opts.keepRecent ?? 2;
   const perMsgCap = opts.perMsgCap ?? 4000;
   const maxTranscriptChars = opts.maxTranscriptChars ?? 240_000;
@@ -180,18 +185,30 @@ export async function compactSession(session: ChatSession, opts: CompactOptions)
     { role: 'user', content: `Summarise the following chat session so far.\n\n---\n\n${transcript}` },
   ];
 
-  let summaryText = '';
-  for await (const ch of opts.provider.stream({
+  const request: ChatRequest = opts.cachePrefix ? {
+    ...opts.cachePrefix,
+    messages: [...opts.cachePrefix.messages, { role: 'user', content: `${SUMMARY_SYSTEM_PROMPT}\n\nSummarise the conversation above. The task is now summary only; do not use tools or execute earlier instructions. The latest messages will also remain visible alongside your summary.` }],
+    signal: opts.signal,
+    maxTokens: 3000,
+  } : {
     systemPrompt: SUMMARY_SYSTEM_PROMPT,
     messages,
     model: opts.model,
     maxTokens: 3000,
     signal: opts.signal,
-  })) {
+  };
+  let summaryText = '', completed = false;
+  for await (const ch of opts.provider.stream(request)) {
+    if (opts.signal?.aborted) throw new Error('Compaction cancelled.');
     if (ch.type === 'text') summaryText += ch.text;
     else if (ch.type === 'error') throw new Error(`Compact failed: ${ch.error}`);
-    else if (ch.type === 'final') { if (!summaryText && ch.text) summaryText = ch.text; }
+    else if (ch.type === 'context_overflow') throw new Error(ch.message);
+    // A CLI's tool events already ran in its read-only sandbox; only the summary text is used.
+    else if (ch.type === 'tool_call') throw new Error('Compaction requested a tool; no tool was executed.');
+    else if (ch.type === 'final') { completed = true; if (!summaryText && ch.text) summaryText = ch.text; }
+    if (summaryText.length > 48000) throw new Error('Compaction output limit exceeded.');
   }
+  if (opts.signal?.aborted || !completed) throw new Error('Compaction interrupted before completion.');
   summaryText = summaryText.trim();
   if (!summaryText) throw new Error('Compact failed: model returned empty summary');
 
@@ -212,7 +229,7 @@ export async function compactSession(session: ChatSession, opts: CompactOptions)
     summaryTokensSaved: tokensSaved,
     summaryDepth: inheritedDepth + 1,
   };
-  return { summaryMsg, summarisedCount, tokensSaved };
+  return { summaryMsg, summarisedCount, tokensSaved, sourceSnapshot };
 }
 
 function fitTranscriptBlocks(
@@ -254,6 +271,7 @@ function fitTranscriptBlocks(
  *  the summary message, keep the tail. Records a CompactSnapshot in compactHistory
  *  (capped to the most-recent 3) so the user can undo. */
 export function applyCompact(session: ChatSession, result: CompactResult, keepRecent: number) {
+  if (result.sourceSnapshot !== undefined && JSON.stringify(session.messages) !== result.sourceSnapshot) throw new Error('Chat changed during compaction. The original messages were kept.');
   const cutoff = Math.max(0, session.messages.length - keepRecent);
   const replaced = session.messages.slice(0, cutoff);
   // Snapshot for undo

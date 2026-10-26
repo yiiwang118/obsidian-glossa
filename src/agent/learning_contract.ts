@@ -1,6 +1,7 @@
 import type { ChatMessage, ChatSession } from '../types';
 import type { Skill } from './skills';
 import { validateSkillDefinition } from './skill_validation';
+import { parseFileExamples, type FileExample } from './file_evaluation_contract';
 
 export interface LearningExample {
   name: string;
@@ -27,6 +28,7 @@ export interface LearningContent {
   whenToUse: string;
   body: string;
   examples: LearningExample[];
+  fileExamples?: FileExample[];
 }
 
 export interface ExampleOutcome {
@@ -53,6 +55,7 @@ export interface LearningVersion extends LearningContent {
   correction: string;
   source?: LearningSource;
   evaluation?: LearningEvaluation;
+  fileEvaluation?: LearningEvaluation;
 }
 
 export function objectValue(value: unknown): Record<string, unknown> {
@@ -111,13 +114,15 @@ export function parseLearningContent(value: unknown): LearningContent {
     whenToUse: textField(data.whenToUse, 'When to use', 2000).trim(),
     body: textField(data.body, 'Workflow', 16000).trim(),
     examples: parseExamples(data.examples),
+    ...(data.fileExamples === undefined ? {} : { fileExamples: parseFileExamples(data.fileExamples) }),
   };
+  if (content.fileExamples?.length && learningSignature(content).length > 200000) throw new Error('Skill and examples exceed the evaluation input limit. Shorten the examples.');
   const issues = validateSkillDefinition(learningSkill(content));
   if (issues.length) throw new Error(issues.map(issue => issue.message).join('\n'));
   return content;
 }
 
-export function parseLearningEvaluation(value: unknown): LearningEvaluation {
+export function parseLearningEvaluation(value: unknown, minimumRows = 3): LearningEvaluation {
   const data = objectValue(value);
   const number = (value: unknown): number => {
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error('Invalid evaluation metric.');
@@ -134,7 +139,7 @@ export function parseLearningEvaluation(value: unknown): LearningEvaluation {
       outputTokens: item.outputTokens === undefined ? undefined : number(item.outputTokens),
     };
   };
-  if (!Array.isArray(data.rows) || data.rows.length < 3 || data.rows.length > 5) throw new Error('Invalid evaluation rows.');
+  if (!Array.isArray(data.rows) || data.rows.length < minimumRows || data.rows.length > 5) throw new Error('Invalid evaluation rows.');
   return {
     signature: textField(data.signature, 'Evaluation input', 200000),
     baselineId: data.baselineId === null ? null : textField(data.baselineId, 'Baseline version', 200),
@@ -176,14 +181,17 @@ export function learningMarkdown(content: LearningContent): string {
 
 /** Exact serialized input binds validation to the reviewed skill AND examples. */
 export function learningSignature(content: LearningContent): string {
-  return JSON.stringify([learningMarkdown(content), content.examples]);
+  return JSON.stringify([learningMarkdown(content), content.examples, ...(content.fileExamples?.length ? [content.fileExamples] : [])]);
 }
 
-export function canActivate(content: LearningContent, evaluation: LearningEvaluation | undefined, baselineId: string | null): boolean {
+export function canActivate(content: LearningContent, evaluation: LearningEvaluation | undefined, baselineId: string | null, fileEvaluation?: LearningEvaluation): boolean {
   return !!evaluation && evaluation.signature === learningSignature(content)
     && evaluation.baselineId === baselineId
     && evaluation.rows.length === content.examples.length
-    && evaluation.rows.every((row, index) => row.name === content.examples[index].name && row.candidate.failures.length === 0);
+    && evaluation.rows.every((row, index) => row.name === content.examples[index].name && row.candidate.failures.length === 0)
+    && (!content.fileExamples?.length || (!!fileEvaluation && fileEvaluation.signature === learningSignature(content)
+      && fileEvaluation.baselineId === baselineId && fileEvaluation.rows.length === content.fileExamples.length
+      && fileEvaluation.rows.every((row, index) => row.name === content.fileExamples[index].name && row.candidate.failures.length === 0)));
 }
 
 export function scoreExample(example: LearningExample, reply: unknown, checkTrigger: boolean): Pick<ExampleOutcome, 'output' | 'triggered' | 'failures'> {

@@ -33,6 +33,33 @@ Glossa turns the sidebar into a working surface, not a separate chatbot. The act
 | 🧩 | **Runs focused Skills** | Use built-in workflows for Markdown, Canvas, Bases, PDFs, images, or create and validate your own vault Skills. |
 | 🔐 | **Keeps actions accountable** | Start read-only, approve writes, inspect tool results, and restore checkpointed files when an edit needs to be rolled back. |
 
+## Temporary chat
+
+Ask a side question about part of an answer without adding it to the main conversation. Select text in the conversation, right-click and choose **Add to temporary chat**, or use the bubble-plus button under a message (it quotes the selection, or the whole message when nothing is selected). **Glossa: Open temporary chat** in the command palette reopens it.
+
+- Opens in a separate window of about 560 × 740, so the main sidebar stays readable; a tab is the fallback. Each main chat has its own temporary chat, and later quotes from the same chat join it.
+- The window holds only the quotes, the conversation and a question box. **Save as note** and **Clear** sit in its title bar; its **⋯** menu also opens the source chat and, when you have more than one API endpoint, switches the model.
+- Quotes wait above the question box, one line each (click one to read all of it), then stay attached to the question they were asked with. Formulas are quoted as their LaTeX source, and code, lists and tables keep their Markdown structure; selecting a whole message quotes its original text.
+- Each question sends only its quotes (with the question each quoted reply answered) and the earlier turns of this temporary chat. Nothing else from the main chat goes along: no other messages, notes, attachments, tool results or reasoning. When a long discussion would overflow the model's context, the oldest turns are left out and a line in the window marks where.
+- Answers come from an **API endpoint**: the main chat's, or your first API endpoint while the main chat uses Codex, Claude Code or Grok. There are no tools, vault access or CLI sessions. Replies follow the language of your question, stream as rendered Markdown with math and code, and keep model reasoning folded. Esc stops a reply; a failed or stopped reply can be retried, and the last answer regenerated. A failed or stopped regeneration keeps the previous completed answer.
+- **Place in main composer**, under each answer, puts that reply into the source chat's composer, switching to that chat if needed; it is never sent automatically. **Save as note** writes the discussion, with its quotes, to a Markdown note in your chats folder. It saves a snapshot taken when you click and retains any output-limit warning.
+- Up to 8 quotes and 24,000 characters per question; a single quote is cut at 12,000 characters, and Glossa tells you when that happens. A temporary chat holds up to 50 turns.
+- Closing the window stops a reply in progress; received text and an unsent draft stay available until Obsidian restarts or Glossa is disabled. Content lives only in memory, and windows restored from a saved layout close themselves. Temporary storage does not change your API provider's retention policy.
+
+The question rail now follows the turn being read, including the bottom of a long final answer. Positions are recalculated after Markdown rendering, folding and window resizing.
+
+## Agent improvements in the development build
+
+These changes are available when building this branch; the latest published release remains 1.1.0.
+
+- **Recover interrupted runs clearly.** Each turn records ordered, bounded status events. Reopening a chat preserves completed results and marks unfinished operations as interrupted; it never automatically repeats a file write.
+- **Resume native Codex threads.** Enable **Native Codex sessions** in the Codex endpoint’s advanced settings. This optional App Server mode keeps a thread across messages and restarts, and adds Glossa’s instructions to Codex’s own. Changed history, forked chats, working directories, permission modes or Glossa instructions (for example a new day or edited project instructions) start a fresh thread. Use **Reset connection** in chat to detach it. Failed turns are not replayed automatically; turning the setting off keeps the existing CLI workflow.
+- **Verify skills against files.** In **Learned skills → draft → File operation tests**, provide sample Markdown files and exact expected contents. Baseline and candidate each operate on fresh temporary files using read, list, edit, write and rename tools. `repeat: true` checks the same task twice; unchanged files, YAML and links can be checked exactly. Expected contents stay local. This requires an API endpoint with tool calling and can make multiple model calls. It does not exercise Obsidian’s automatic link updates or other plugins. A skill with file examples must pass both text and file checks before activation or restoration.
+- **Control forked skill subtasks.** Skills with `context: fork` show their status, tools, step count and recent output. Stop one subtask or add an instruction for its next model step. Children inherit Plan/Act mode, workspace boundaries and approval rules. Stopping keeps completed changes, and restarting does not silently resume unfinished children.
+- **Optionally compact while idle.** Enable **Compact during idle cache window** and enter your API provider’s documented **Prompt cache lifetime (seconds)**. After a successful turn with at least 100,000 reported input tokens, Glossa can make one summary request near expiry, preserving the last request prefix where supported. Typing, pending messages and running tasks prevent it. Unknown cache lifetimes, CLI conversations and requests with latest-user image attachments are skipped. It adds a model call and does not guarantee cache hits, lower cost or a lossless summary. Existing manual and pressure-based compaction remain available, with undo and protection against applying a summary to changed history.
+
+Native Codex conversations are also stored by Codex itself. File evaluation uses private `.glossa/evaluations/` directories and removes each run’s directory on normal completion, failure or cancellation; a host crash may leave a fixture directory. See [Privacy & data flow](PRIVACY.md) for storage and request details.
+
 ## New in 1.1.0
 
 [**1.1.0 — October 20, 2026**](https://github.com/yiiwang118/obsidian-glossa/releases/tag/1.1.0) adds background conversations, per-chat history files, folder operations and model-aware reasoning controls.

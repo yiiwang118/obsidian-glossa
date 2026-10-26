@@ -153,6 +153,8 @@ export interface CliModelInfo {
 }
 
 export interface Endpoint {
+  /** User-declared API prompt cache lifetime; absent means unknown. */
+  cacheWindowSeconds?: number;
   id: string;
   label: string;
   kind: 'custom-api' | 'codex-cli' | 'claude-code-cli' | 'grok-cli';
@@ -179,6 +181,8 @@ export interface Endpoint {
   cliModelsUpdatedAt?: number;
   cliModelsBinaryPath?: string;
   binaryPath?: string;
+  /** Opt-in native Codex thread persistence; legacy CLI execution remains available. */
+  codexNativeSession?: boolean;
   cwd?: string;
   cliExtraArgs?: string[];
   /** Let the CLI run its own agent (tools / files / etc) instead of single-shot LLM. */
@@ -466,6 +470,7 @@ export interface GlossaSettings {
   // auto-compaction
   /** When true, auto-summarise the conversation when token usage crosses the threshold. */
   autoCompactEnabled: boolean;
+  idleCompactEnabled: boolean;
   /** Trigger threshold as a percentage of maxContextTokens. e.g. 75 → compact when
    *  estimated session tokens exceed 75% of the budget. */
   autoCompactThresholdPct: number;
@@ -538,6 +543,7 @@ export const DEFAULT_SETTINGS: GlossaSettings = {
   embeddingAutoUpdate: false,
   checkpointEnabled: true,
   autoCompactEnabled: true,
+  idleCompactEnabled: false,
   autoCompactThresholdPct: 75,
   mcpServers: [],
   mcpCatalogUrls: [],
@@ -629,6 +635,7 @@ export interface RunDiagnostic {
 }
 
 export interface ChatSession {
+  subtasks?: import('./agent/subtasks').SubtaskRecord[];
   id: string;
   title: string;
   createdAt: number;
@@ -639,6 +646,9 @@ export interface ChatSession {
   inbox?: PendingMessage[];
   goal?: SessionGoal;
   diagnostics?: RunDiagnostic[];
+  /** Bounded metadata journal; used to distinguish completed and interrupted turns. */
+  runs?: import('./agent/run_journal').RunJournal[];
+  nativeSession?: import('./providers/codex_session').CodexSessionBinding;
   /** Model-only pruning markers; full visible history remains available. */
   prunedToolCallIds?: string[];
   messages: ChatMessage[];

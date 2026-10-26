@@ -28,4 +28,23 @@ exports.run = async (t, load) => {
   t.ok(!pressure.messages.some(m=>m.toolCallId==='old'||m.toolCalls?.some(c=>c.id==='old')),'call and result removed together');
   t.ok(pressure.messages.some(m=>m.toolCallId==='write'),'write evidence retained');
   t.eq(messages.length,10,'visible original history untouched');
+  const cliEvents = [], cliErrors = [];
+  const cli = { async *stream() {
+    yield { type: 'tool_event', id: 'native-tool', name: 'bash', args: {}, status: 'success', result: 'finished output' };
+    yield { type: 'tool_event', id: 'native-tool', name: 'bash', args: {}, status: 'running' };
+    yield { type: 'final', text: '' };
+  } };
+  await runAgentLoop({ ...options, provider: cli, enableTools: false, onToolEnd: ev => cliEvents.push(ev), onError: error => cliErrors.push(error) });
+  t.eq(cliEvents.length, 1, 'native completion-only events finalize once');
+  t.eq(cliEvents[0].result, 'finished output', 'native completion-only event retains result');
+  t.eq(cliEvents[0].status, 'success', 'late running event cannot reopen a tool');
+  let finalUsage, cacheUsage;
+  const summed = { async *stream() { yield { type: 'text', text: 'Done' }; yield { type: 'final', text: '', usage: { input: 1300, output: 130, lastInput: 700 } }; } };
+  await runAgentLoop({ ...options, provider: summed, onFinal: usage => { finalUsage = usage; }, onCacheContext: (_request, _answer, _at, usage) => { cacheUsage = usage; } });
+  t.eq([finalUsage.input, finalUsage.lastInput], [1300, 700], 'a provider that sums calls keeps its latest prompt size for the gauge');
+  t.eq(cacheUsage.input, 1300, 'the final request usage reaches the idle-compaction hook');
+  const disconnected = { async *stream() { yield { type: 'text', text: 'Partial output' }; } };
+  await runAgentLoop({ ...options, provider: disconnected, onError: error => cliErrors.push(error) });
+  t.ok(cliErrors.some(e => e.includes('disconnected')), 'missing final frame reports failure instead of completion');
+
 };

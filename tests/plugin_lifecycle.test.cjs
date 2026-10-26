@@ -5,6 +5,7 @@ const ts = require('typescript');
 
 exports.run = async (t, loadModule) => {
   const { DeferredTasks } = await loadModule(path.resolve(__dirname, '../src/utils/deferred_tasks.ts'));
+  const { TemporaryChatStore } = await loadModule(path.resolve(__dirname, '../src/temporary_chat.ts'));
   const source = fs.readFileSync(path.resolve(__dirname, '../src/main.ts'), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
   const saved = [], notices = [], timers = new Map();
@@ -20,11 +21,13 @@ exports.run = async (t, loadModule) => {
   const modules = {
     obsidian: { Plugin, Notice: class { constructor(text) { notices.push(text); } } },
     './utils/deferred_tasks': { DeferredTasks },
+    './temporary_chat': { TemporaryChatStore },
+    './ui/temporary_chat_view': { VIEW_TYPE_TEMPORARY_CHAT: 'glossa-temporary-chat', TemporaryChatView: class {}, closeEndedTemporaryChats() {} },
     './utils/i18n': { setLanguage() {}, bi: en => en },
     './utils/media_cache': { clearMediaCaches() {} },
     './utils/pdf_render': { clearRenderedPdfPageCache() {} },
     './agent/skills': { async flushPersistedNestedSkillDirs() {} },
-    './ui/view': { async stopChatRuns() { stoppedChats++; } },
+    './ui/view': { GlossaView: class {}, async stopChatRuns() { stoppedChats++; } },
     './features/update_check': {
       UPDATE_CHECK_INTERVAL_MS: 12 * 60 * 60 * 1000,
       fetchLatestUpdate: () => { fetchCount++; return new Promise(resolve => { resolveFetch = resolve; }); },
@@ -41,6 +44,8 @@ exports.run = async (t, loadModule) => {
   const drain = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
   try {
     const plugin = makePlugin();
+    const temporary = plugin.temporaryChats.forParent({ id: 'main', title: 'Source', messages: [] }, 'api');
+    temporary.draft = 'Temporary draft';
     plugin.settings.marker = 'first edit';
     await plugin.saveSettings();
     plugin.settings.marker = 'latest edit';
@@ -49,6 +54,8 @@ exports.run = async (t, loadModule) => {
     const queuedSave = [...timers.values()][0];
     plugin.onunload();
     await drain();
+    t.eq(plugin.temporaryChats.get(temporary.id), undefined, 'plugin unload removes temporary conversation associations');
+    t.eq(temporary.draft, '', 'plugin unload clears temporary text without writing it to disk');
     t.eq(timers.size, 0, 'unload removes the delayed settings save');
     t.eq(saved.map(x => x.marker), ['latest edit'], 'unload persists the latest settings without losing them');
     // Once with the queued settings save, once after the stopped chats were saved.

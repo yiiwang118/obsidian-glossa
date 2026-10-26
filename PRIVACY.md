@@ -32,6 +32,18 @@ The current vault is the CLI working directory. Codex uses its native read-only/
 
 Queued text is stored until consumed. A resumed persistent task authorizes up to its configured number of additional model rounds. Stop, errors, blockers or the round limit end continuation; a reopened task never resumes automatically. Diagnostic export is an explicit local download containing allowlisted metadata, without prompts, note text, tool arguments, paths, headers, endpoint URLs or keys.
 
+Opt-in **Native Codex sessions** use the installed Codex App Server. Glossa saves the thread association in the chat file; Codex also retains the conversation in its own local storage. Resetting the association or deleting a Glossa chat does not delete Codex’s copy. Native sessions use the same vault-level sandbox boundary described above.
+
+Skill generation and text/file evaluations send the reviewed correction, skill and supplied examples to the selected model. File evaluation gives the API model access only to temporary sample files via a restricted tool set, without shell, network tools or existing notes. Expected file contents are checked locally and are not included in prompts. Samples and evaluation results are stored in `.glossa/learning.json`. Temporary files under `.glossa/evaluations/<run-id>/` are removed after completion, failure or cancellation; abrupt host termination can leave them on disk. Both locations are plaintext and may be synced with the vault.
+
+Opt-in idle compaction makes one additional request to the chat’s API endpoint after an eligible large conversation becomes idle near its configured cache expiry. It may resend the previous request prefix and results to request a summary. The prefix is retained in memory only until the attempt is finished or cancelled, is capped in size, and is not restored after restart. Cache lifetime is user-declared; a cache hit and lower cost are not guaranteed. Typing, new requests, pending messages and active tasks prevent the attempt. Manual and context-pressure compaction can also send history to the configured model.
+
+## Temporary discussions
+
+Temporary chat is a separate, API-only text discussion. Each question sends the passages quoted with it (and, for a quoted reply, the visible question it answered) and the earlier turns of that temporary chat, including stopped or failed ones marked as unfinished. The quotes are shown with each question. Nothing else from the main conversation is sent: no other messages, vault notes, attachments, hidden reasoning, tool output or CLI sessions, and it has no tools. When a discussion is too long for the model, the oldest turns are left out rather than sent. The API endpoint the temporary chat uses (the main chat's, otherwise your first API endpoint, or the one picked in the window's menu) receives these requests and its retention policy applies.
+
+Temporary quotes, messages, reasoning shown in the window and drafts live only in plugin memory. They are not written to chat files, the chat index or the saved workspace view state; a temporary chat window restored from a saved layout closes itself. Closing a window stops generation but keeps the discussion for reopening during this app lifetime; restarting Obsidian or disabling Glossa clears it. Two explicit actions move content out of memory: **Place in main composer** puts one reply into the source chat's composer without sending it (if you send it, it becomes part of the ordinary persisted main conversation), and **Save as note** writes the discussion, with its quotes, as a plaintext Markdown note in your chats folder.
+
 ## Data stored locally
 
 All paths are inside the user's vault under its configured plugin directory (normally `.obsidian/plugins/glossa/`). The configuration directory can be customized. These files may be synced if your vault sync setup (Obsidian Sync, iCloud, Dropbox, …) includes that directory.
@@ -40,7 +52,7 @@ All paths are inside the user's vault under its configured plugin directory (nor
 |---|---|---|
 | `data.json` | Settings, endpoint configs (incl. API keys and extra JSON body parameters) | API keys: opt-in via passphrase (Settings → Security). Other fields, including extra body parameters: plaintext. Use the API key field for credentials. |
 | `chats.json` | Chat index: folders, titles, timestamps and a bounded search preview of what you typed and the answers | Plaintext, including its `.bak` copy. |
-| `chats/<id>.json` | One file per chat: messages, pending text, task progress, bounded diagnostic metadata, tool events, reasoning and timestamps | Plaintext. |
+| `chats/<id>.json` | One file per chat: messages, pending text, task and subtask progress with bounded recent output, bounded run-status events, optional Codex thread association, bounded diagnostic metadata, tool events, reasoning and timestamps | Plaintext. |
 | `chats.deleted.json` | IDs and times of deleted chats, so a synced older copy cannot bring them back | Plaintext (no chat content). |
 | `chats.v3-backup.json` | Copy of the single-file `chats.json` kept when upgrading to per-chat files. Deleting a chat removes it here too; the copy is removed after 30 days or when you clear all chats | Plaintext. |
 | `embeddings.json` | Legacy semantic-index data from older builds, if present. The community review build does not rebuild it. | Encrypted **only** if encryption was enabled when created. Otherwise plaintext legacy data. |
@@ -55,7 +67,7 @@ If you turn encryption ON in Settings → Security, API keys and newly written c
 - No usage analytics
 - No crash reports
 - No identifier of you, your machine, or your vault
-- No content unless you explicitly send/queue a message, resume a bounded task, attach context, approve a web fetch or note tool, invoke translation, or enable automatic translation or inline completion
+- No content unless you explicitly send/queue a message, resume a bounded task, attach context, approve a web fetch or note tool, invoke translation, run skill generation/evaluations or compaction, or enable idle compaction, automatic translation or inline completion
 - PDF text extraction is local through Obsidian/PDF.js; extracted text is only sent if you attach it or the agent returns it to the LLM as tool context
 
 ## Provider-side privacy

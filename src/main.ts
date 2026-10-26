@@ -1,3 +1,5 @@
+import { TemporaryChatStore } from './temporary_chat';
+import { TemporaryChatView, VIEW_TYPE_TEMPORARY_CHAT, closeEndedTemporaryChats } from './ui/temporary_chat_view';
 import { Plugin, WorkspaceLeaf, Notice, addIcon } from 'obsidian';
 import { GlossaView, VIEW_TYPE_GLOSSA, stopChatRuns } from './ui/view';
 import { GlossaSettingTab } from './settings';
@@ -29,6 +31,7 @@ import { DeferredTasks } from './utils/deferred_tasks';
 export default class GlossaPlugin extends Plugin {
   settings: GlossaSettings;
   store: ChatStore;
+  readonly temporaryChats = new TemporaryChatStore();
 
   // Encryption — passphrase derived key held in memory only.
   private cryptoHandle: SubtleKeyHandle | null = null;
@@ -139,6 +142,7 @@ export default class GlossaPlugin extends Plugin {
     addIcon('glossa-ribbon', GLOSSA_RIBBON_SVG);
 
     this.registerView(VIEW_TYPE_GLOSSA, (leaf) => new GlossaView(leaf, this));
+    this.registerView(VIEW_TYPE_TEMPORARY_CHAT, leaf => new TemporaryChatView(leaf, this));
     this.registerEditorExtension(createInlineCompletionExtension(this));
     this.selectionTranslation = new SelectionTranslationController(this);
     this.selectionTranslation.start();
@@ -151,6 +155,7 @@ export default class GlossaPlugin extends Plugin {
     ribbonIconEl.addClass('glossa-ribbon-icon');
 
     this.addCommand({ id: 'open-sidebar', name: 'Open sidebar', callback: () => this.activateView() });
+    this.addCommand({ id: 'temporary-chat', name: 'Open temporary chat', callback: async () => { await this.activateView(); this.getView()?.openSideChat(); } });
     this.addCommand({ id: 'learned-skills', name: 'Manage learned skills', callback: () => openLearningModal(this) });
     this.addCommand({ id: 'new-chat', name: 'New chat',
       callback: async () => { await this.activateView(); (this.getView() as AnyValue)?.startNewSession?.(); } });
@@ -225,6 +230,9 @@ export default class GlossaPlugin extends Plugin {
       import('./agent/skills').then(m => { if (this.deferredTasks.active) return m.loadPersistedNestedSkillDirs(this.app); }).catch(e => console.warn('[nested-dirs] load failed', e));
       import('./agent/plugin_bridges').then(m => { if (this.deferredTasks.active) this.register(m.watchPluginBridges(this.app)); }).catch(e => console.warn('[plugin-bridges] failed', e));
     });
+
+    // A saved layout can restore a temporary chat window, never its content.
+    this.app.workspace.onLayoutReady(() => { if (this.deferredTasks.active) closeEndedTemporaryChats(this.app); });
 
     this.app.workspace.onLayoutReady(() => {
       this.deferredTasks.schedule(() => {
@@ -308,6 +316,10 @@ export default class GlossaPlugin extends Plugin {
   }
 
   onunload() {
+    this.temporaryChats.dispose();
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_TEMPORARY_CHAT)) {
+      if (leaf.view instanceof TemporaryChatView) leaf.view.endSession();
+    }
     // Chats keep running while panels close; unloading the plugin stops them
     // and writes what arrived.
     void stopChatRuns(this)
@@ -340,8 +352,9 @@ export default class GlossaPlugin extends Plugin {
   }
 
   getView(): GlossaView | null {
-    const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_GLOSSA)[0];
-    return (leaf?.view as GlossaView) ?? null;
+    // A leaf in the background can still hold a deferred placeholder view.
+    const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_GLOSSA)[0]?.view;
+    return view instanceof GlossaView ? view : null;
   }
 
   async checkForUpdates(opts: { force?: boolean; notify?: boolean } = {}): Promise<UpdateInfo | null> {
@@ -575,6 +588,10 @@ export default class GlossaPlugin extends Plugin {
     }
     setLanguage(this.settings.uiLanguage);
     this.getView()?.refreshFromSettings?.();
+    // An endpoint added or removed in settings shows up in open temporary chats at once.
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_TEMPORARY_CHAT)) {
+      if (leaf.view instanceof TemporaryChatView) leaf.view.refresh();
+    }
     this.deferredTasks.cancel(this._saveTimer);
     this._saveTimer = this.deferredTasks.schedule(() => {
       this._saveTimer = null;

@@ -3,6 +3,7 @@ import type { CliModelInfo, Endpoint } from '../types';
 import type { ChatChunk, ChatRequest, LLMProvider } from './types';
 import { CliDecoder, cliArguments, cliPrompt } from './cli_protocol';
 import { cliRecord, parseCliModels } from './cli_catalog';
+import { CodexSessionProtocol, codexPolicyKey } from './codex_session';
 
 /** Audited desktop boundary. No shell, installation, auth-file reads or arbitrary arguments. */
 async function desktopRuntime() {
@@ -158,6 +159,10 @@ export class LocalCliProvider implements LLMProvider {
     const binary = await findLocalCli(this.ep.kind, this.ep.binaryPath);
     if (!binary) throw new Error('Local CLI not found. Set its executable path in Glossa settings after installing and signing in.');
     if (request.signal?.aborted) return;
+    if (this.ep.kind === 'codex-cli' && this.ep.codexNativeSession && request.nativeSession) {
+      yield* this.nativeStream(binary, cwd, request);
+      return;
+    }
     const { childProcess, processApi, env, fs, os } = await desktopRuntime();
     applyProxy(env, this.proxy);
     const args = cliArguments(this.ep, request, cwd);
@@ -232,6 +237,69 @@ export class LocalCliProvider implements LLMProvider {
         await finished;
         fs.rmSync(promptDir, { recursive: true, force: true });
       }
+    }
+  }
+
+  private async *nativeStream(binary: string, cwd: string, request: ChatRequest): AsyncGenerator<ChatChunk> {
+    const { childProcess, processApi, env } = await desktopRuntime();
+    applyProxy(env, this.proxy);
+    const policyKey = await codexPolicyKey(this.ep, request, cwd);
+    const child = childProcess.spawn(binary, ['-c', 'mcp_servers={}', 'app-server'], {
+      cwd, env, shell: false, detached: !Platform.isWin, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let failure: Error | undefined, buffer = '', stderr = '', killTimer: number | undefined;
+    // An old Codex without app-server explains itself only on stderr.
+    const stderrTail = () => stderr.trim() ? `\n${stderr.trim().slice(-1500)}` : '';
+    const exited = new Promise<void>(resolve => { child.once('close', () => resolve()); child.once('error', () => resolve()); });
+    const kill = (hard = false) => {
+      try {
+        if (!Platform.isWin && child.pid) processApi.kill(-child.pid, hard ? 'SIGKILL' : 'SIGTERM');
+        else if (child.pid) childProcess.spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill());
+      } catch { /* This request only owns this child process group. */ }
+    };
+    const protocol = new CodexSessionProtocol(this.ep, request, cwd, policyKey, value => {
+      if (!child.stdin.destroyed) child.stdin.write(JSON.stringify(value) + '\n');
+    });
+    const stop = () => {
+      protocol.interrupt();
+      child.stdin.end();
+      kill();
+      killTimer ??= window.setTimeout(() => kill(true), 1500);
+    };
+    const startup = window.setTimeout(() => { failure = new Error(`Codex app-server setup timed out. Check its version and login.${stderrTail()}`); stop(); }, 30_000);
+    const deadline = window.setTimeout(() => { failure = new Error('Codex exceeded the 30-minute run limit.'); stop(); }, 30 * 60_000);
+    child.on('error', error => { failure = error; });
+    child.stdin.on('error', error => { if (!request.signal?.aborted) { failure = error; kill(); } });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (data: string) => { stderr = (stderr + data).slice(-8000); });
+    child.stdout.setEncoding('utf8');
+    request.signal?.addEventListener('abort', stop, { once: true });
+    try {
+      if (request.signal?.aborted) { stop(); return; }
+      protocol.start();
+      for await (const part of child.stdout) {
+        if (request.signal?.aborted) return;
+        buffer += String(part);
+        if (buffer.length > 8_000_000) throw new Error('Codex event exceeded the output limit.');
+        let newline: number;
+        while ((newline = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, newline).trim(); buffer = buffer.slice(newline + 1);
+          if (!line) continue;
+          let event: unknown;
+          try { event = JSON.parse(line) as unknown; } catch { throw new Error('Codex returned invalid app-server JSON.'); }
+          const row = cliRecord(event);
+          if (row.id === 3 && !row.error) window.clearTimeout(startup);
+          for (const chunk of await protocol.receive(event)) yield chunk;
+          if (protocol.completed) return;
+        }
+      }
+      if (request.signal?.aborted) return;
+      throw failure ?? new Error(`Codex disconnected before completing this turn. Partial results were kept; no task was replayed.${stderrTail()}`);
+    } finally {
+      window.clearTimeout(startup); window.clearTimeout(deadline);
+      request.signal?.removeEventListener('abort', stop);
+      if (child.exitCode === null && child.signalCode === null) stop();
+      void exited.finally(() => { if (killTimer) window.clearTimeout(killTimer); });
     }
   }
 }

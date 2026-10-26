@@ -3,8 +3,11 @@ import type { ChatSession, PendingMessage, SessionGoal } from '../types';
 import { newGoal } from '../agent/session_runtime';
 import { bi } from '../utils/i18n';
 import { el } from '../utils/dom';
+import type { SubtaskRegistry } from '../agent/subtasks';
 
 export interface SessionControlActions {
+  app?: App;
+  subtasks?: SubtaskRegistry;
   busy: boolean;
   pause: () => void;
   resume: () => void;
@@ -12,12 +15,30 @@ export interface SessionControlActions {
   removeMessage: (id: string) => void;
   editMessage: (id: string, text: string) => void;
   sendMessage: (item: PendingMessage) => void;
+  resetNativeSession?: () => void;
+}
+
+function openSubtaskIds(root: HTMLElement): Set<string | undefined> {
+  return new Set(Array.from(root.querySelectorAll<HTMLDetailsElement>('details[data-subtask-id][open]')).map(node => node.dataset.subtaskId));
 }
 
 export function renderSessionControls(host: HTMLElement, session: ChatSession, actions: SessionControlActions) {
+  const expanded = openSubtaskIds(host);
   host.replaceChildren();
   host.className = 'nc-session-controls';
-  host.hidden = !session.goal && !session.inbox?.length;
+  const lastRun = session.runs?.[session.runs.length - 1];
+  const interrupted = !actions.busy && lastRun?.state.phase === 'interrupted';
+  host.hidden = !session.goal && !session.inbox?.length && !interrupted && !session.nativeSession && !session.subtasks?.length;
+  const list = el('div', { className: 'nc-subtasks', parent: host, attrs: { 'aria-label': bi('Subtasks', '子任务') } });
+  renderSubtasks(list, session, actions, expanded);
+  if (interrupted) el('p', { className: 'nc-goal-blocker', text: bi('The previous run was interrupted. Saved results are kept. Check file changes before asking to continue.', '上次运行被中断，已保存的结果仍在。继续前请检查文件修改。'), parent: host });
+  if (session.nativeSession && actions.resetNativeSession) {
+    const row = el('div', { className: 'nc-goal-actions', parent: host });
+    el('span', { text: bi('Codex native session', 'Codex 原生会话'), parent: row });
+    const reset = el('button', { text: bi('Reset connection', '重置关联'), type: 'button', parent: row });
+    reset.disabled = actions.busy;
+    reset.onclick = actions.resetNativeSession;
+  }
   const goal = session.goal;
   if (goal) {
     const card = el('section', { className: 'nc-goal-card', parent: host, attrs: { 'aria-label': bi('Persistent task', '持续任务') } });
@@ -63,6 +84,51 @@ export function renderSessionControls(host: HTMLElement, session: ChatSession, a
         const send = el('button', { text: bi('Send', '发送'), type: 'button', parent: row });
         send.onclick = () => actions.sendMessage(item);
       }
+    }
+  }
+}
+
+/** Progress updates replace only this list, so an open pending-message editor keeps its text, focus and IME input. */
+export function renderSubtasks(list: HTMLElement, session: ChatSession, actions: Pick<SessionControlActions, 'app' | 'subtasks'>, expanded = openSubtaskIds(list)) {
+  list.replaceChildren();
+  list.hidden = !session.subtasks?.length;
+  const phases = { running: bi('Running', '运行中'), stopping: bi('Stopping', '正在停止'), completed: bi('Complete', '已完成'), failed: bi('Failed', '失败'), cancelled: bi('Stopped', '已停止'), interrupted: bi('Interrupted', '已中断') };
+  for (const task of session.subtasks ?? []) {
+    const row = el('section', { className: 'nc-subtask', parent: list });
+    const head = el('div', { className: 'nc-goal-actions', parent: row });
+    el('span', { text: `${task.title} · ${phases[task.phase]} · ${task.steps} ${bi('steps', '步')}${task.tool ? ` · ${task.tool}` : ''}`, parent: head });
+    if (task.phase === 'running' && actions.subtasks) {
+      const registry = actions.subtasks;
+      const stop = el('button', { text: bi('Stop', '停止'), type: 'button', parent: head });
+      stop.onclick = () => { registry.stop(task.id); };
+      if (actions.app) {
+        const steer = el('button', { text: bi('Add instruction', '补充指令'), type: 'button', parent: head });
+        steer.onclick = () => {
+          class SteerModal extends Modal {
+            onOpen() {
+              el('h3', { text: task.title, parent: this.contentEl });
+              el('p', { text: bi('Applied at the next model step. Does not undo completed changes.', '将在下一模型步骤接收，不会撤销已完成的修改。'), parent: this.contentEl });
+              const field = el('textarea', { parent: this.contentEl, attrs: { rows: '4', maxlength: '4000', 'aria-label': bi('Instruction', '补充指令') } });
+              const status = el('p', { parent: this.contentEl, attrs: { role: 'status' } });
+              const send = el('button', { type: 'button', text: bi('Send', '发送'), parent: this.contentEl });
+              send.onclick = () => {
+                if (registry.steer(task.id, field.value)) this.close();
+                else status.textContent = bi('Task ended, queue is full, or instruction is empty.', '任务已结束、队列已满或指令为空。');
+              };
+              field.focus();
+            }
+            onClose() { this.contentEl.empty(); }
+          }
+          new SteerModal(actions.app).open();
+        };
+      }
+    }
+    if (task.queued) el('span', { text: bi(`${task.queued} instruction(s) queued`, `${task.queued} 条指令待接收`), parent: row });
+    if (task.output || task.error) {
+      const details = el('details', { parent: row, attrs: { 'data-subtask-id': task.id } });
+      details.open = expanded.has(task.id);
+      el('summary', { text: bi('Latest output', '最近输出'), parent: details });
+      el('pre', { className: 'nc-subtask-output', text: task.error || task.output, parent: details });
     }
   }
 }

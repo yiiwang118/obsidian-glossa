@@ -64,6 +64,7 @@ export interface ToolSpec {
 }
 
 export interface ChatRequest {
+  nativeSession?: import('./codex_session').NativeSessionRequest;
   execution?: { mode: 'plan' | 'act'; permission: import('../types').PermissionLevel };
   systemPrompt?: string;
   messages: MessageInput[];

@@ -39,7 +39,7 @@ export const TOOL_META: Record<string, ToolMetaEntry> = {
     color: '#5b9bff', category: 'read',
   },
   view_image: {
-    icon: ICON.file, label: ['View image', '查看图片'], verb: ['Loading image', '正在加载图片'],
+    icon: ICON.image, label: ['View image', '查看图片'], verb: ['Loading image', '正在加载图片'],
     color: '#b66cf0', category: 'read',
     summarize: a => a.path,
   },
@@ -64,17 +64,17 @@ export const TOOL_META: Record<string, ToolMetaEntry> = {
     summarize: a => a.path,
   },
   edit_section: {
-    icon: ICON.apply, label: ['Edit section', '编辑段落'], verb: ['Editing', '正在编辑'],
+    icon: ICON.pencil, label: ['Edit section', '编辑段落'], verb: ['Editing', '正在编辑'],
     color: '#ff9d3d', category: 'write',
     summarize: a => a.path,
   },
   file_edit: {
-    icon: ICON.apply, label: ['Edit file', '编辑文件'], verb: ['Editing', '正在编辑'],
+    icon: ICON.pencil, label: ['Edit file', '编辑文件'], verb: ['Editing', '正在编辑'],
     color: '#ff9d3d', category: 'write',
     summarize: a => `${a.file_path}${a.replace_all ? bi(' (all)', '（全部）') : ''}`,
   },
   apply_patch: {
-    icon: ICON.apply, label: ['Apply patch', '应用补丁'], verb: ['Patching', '正在应用补丁'],
+    icon: ICON.pencil, label: ['Apply patch', '应用补丁'], verb: ['Patching', '正在应用补丁'],
     color: '#ff9d3d', category: 'write',
     summarize: a => {
       // Envelope mode — count ops and pick the salient one
@@ -170,7 +170,7 @@ export const TOOL_META: Record<string, ToolMetaEntry> = {
 
   // Phase 1 surgical tools.
   patch_note: {
-    icon: ICON.apply, label: ['Patch note', '修改笔记'], verb: ['Patching', '正在修改'],
+    icon: ICON.pencil, label: ['Patch note', '修改笔记'], verb: ['Patching', '正在修改'],
     color: '#ff9d3d', category: 'write',
     summarize: a => {
       const t = a?.target ?? {};
@@ -192,22 +192,22 @@ export const TOOL_META: Record<string, ToolMetaEntry> = {
     summarize: a => `${a.op} · ${a.path}${Array.isArray(a.tags) ? ` (${a.tags.length})` : ''}`,
   },
   rename_note: {
-    icon: ICON.apply, label: ['Rename', '重命名'], verb: ['Renaming', '正在重命名'],
+    icon: ICON.pencil, label: ['Rename', '重命名'], verb: ['Renaming', '正在重命名'],
     color: '#ff9d3d', category: 'write',
     summarize: a => `${a.from} → ${a.to}`,
   },
   resolve_wikilink: {
-    icon: ICON.tag, label: ['Resolve link', '解析链接'], verb: ['Resolving', '正在解析'],
+    icon: ICON.link, label: ['Resolve link', '解析链接'], verb: ['Resolving', '正在解析'],
     color: '#5b9bff', category: 'meta',
     summarize: a => `[[${a.link}]]`,
   },
   get_backlinks: {
-    icon: ICON.tag, label: ['Backlinks', '反向链接'], verb: ['Listing backlinks', '正在列出反向链接'],
+    icon: ICON.link, label: ['Backlinks', '反向链接'], verb: ['Listing backlinks', '正在列出反向链接'],
     color: '#5b9bff', category: 'meta',
     summarize: a => a.path,
   },
   get_outgoing_links: {
-    icon: ICON.tag, label: ['Outgoing links', '出链'], verb: ['Listing links', '正在列出链接'],
+    icon: ICON.link, label: ['Outgoing links', '出链'], verb: ['Listing links', '正在列出链接'],
     color: '#5b9bff', category: 'meta',
     summarize: a => a.path,
   },
@@ -222,7 +222,7 @@ export const TOOL_META: Record<string, ToolMetaEntry> = {
     summarize: a => a.path,
   },
   patch_canvas: {
-    icon: ICON.apply, label: ['Patch canvas', '修改白板'], verb: ['Patching canvas', '正在修改白板'],
+    icon: ICON.pencil, label: ['Patch canvas', '修改白板'], verb: ['Patching canvas', '正在修改白板'],
     color: '#ff9d3d', category: 'write',
     summarize: a => `${a.op} · ${a.path}`,
   },
@@ -250,12 +250,12 @@ export const TOOL_META: Record<string, ToolMetaEntry> = {
   },
   // Phase 3 plugin bridges.
   dataview_query: {
-    icon: ICON.brain, label: ['Dataview', 'Dataview'], verb: ['Querying Dataview', '正在查询 Dataview'],
+    icon: ICON.database, label: ['Dataview', 'Dataview'], verb: ['Querying Dataview', '正在查询 Dataview'],
     color: '#b66cf0', category: 'search',
     summarize: a => `${a.mode ?? 'query'}: ${String(a.query ?? a.source ?? '').slice(0, 40)}`,
   },
   templater_render: {
-    icon: ICON.apply, label: ['Templater', 'Templater'], verb: ['Rendering template', '正在渲染模板'],
+    icon: ICON.pencil, label: ['Templater', 'Templater'], verb: ['Rendering template', '正在渲染模板'],
     color: '#b66cf0', category: 'write',
     summarize: a => `${a.mode ?? '?'} · ${a.template_path}`,
   },

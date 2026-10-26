@@ -3,7 +3,7 @@ import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, isReadOnlyTool, n
 import { acquireFileLocks } from './file_locks';
 import { askApproval, type ApprovalResult } from './approval';
 import { CheckpointManager, filesTouchedByTool, pathsTouchedByTool } from './checkpoint';
-import type { LLMProvider, MessageInput, ToolContentBlock, ToolSpec } from '../providers/types';
+import type { ChatRequest, LLMProvider, MessageInput, ToolContentBlock, ToolSpec } from '../providers/types';
 import type { TokenUsage, ToolEvent, PermissionLevel, PermissionRule } from '../types';
 import { matchPermissionRule, modelContextWindow } from '../types';
 import { uid } from '../utils/dom';
@@ -57,6 +57,11 @@ interface McpHubLike {
 }
 
 export interface AgentLoopOptions {
+  onCacheContext?: (request: ChatRequest, answer: MessageInput, requestedAt: number, usage?: TokenUsage) => void;
+  subtasks?: import('./subtasks').SubtaskRegistry;
+  forkDepth?: number;
+  parentSubtaskId?: string;
+  nativeSession?: import('../providers/codex_session').NativeSessionRequest;
   app: App;
   provider: LLMProvider;
   systemPrompt: string;
@@ -99,7 +104,7 @@ export interface AgentLoopOptions {
   mcp?: McpHubLike;
   /** Approval handler. If not provided, falls back to the floating Modal. The view
    *  passes one that renders an inline ✓/✗ card next to the current assistant message. */
-  approver?: (tool: ToolImpl, args: AnyValue) => Promise<ApprovalResult>;
+  approver?: (tool: ToolImpl, args: AnyValue, signal?: AbortSignal) => Promise<ApprovalResult>;
 
   /** Server reported a context overflow (HTTP 413 / context_length_exceeded). The
    *  caller is expected to compact the conversation and return a fresh message array
@@ -382,9 +387,11 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     const toolCalls: { id: string; name: string; args: AnyValue }[] = [];
     const passthroughCardsById = new Map<string, ToolEvent>();
 
-    let aborted = false;
-    try {
-      for await (const ch of opts.provider.stream({
+    let aborted = false, providerCompleted = false;
+    let requestUsage: TokenUsage | undefined;
+    const requestedAt = Date.now();
+    const request: ChatRequest = {
+        nativeSession: opts.nativeSession,
         systemPrompt: sysPrompt,
         messages: withoutStaleThinking(
           filterPrunedToolContext(messages, prunedToolCallIds),
@@ -397,7 +404,9 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         execution: { mode: opts.runMode, permission: opts.permissionLevel },
         // attach images only on the FIRST step's user message
         attachedImages: step === 0 ? opts.attachedImages : undefined,
-      })) {
+      };
+    try {
+      for await (const ch of opts.provider.stream(request)) {
         if (ch.type === 'text') {
           assistantText += ch.text;
           opts.onText(ch.text);
@@ -415,19 +424,21 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           if (!card) {
             card = {
               id: ch.id, name: ch.name || 'tool', args: ch.args,
-              status: ch.status, startedAt: Date.now(),
+              status: 'running', startedAt: Date.now(),
             };
             passthroughCardsById.set(ch.id, card);
-            opts.onToolStart(card);
-          } else {
-            if (ch.name) card.name = ch.name;
-            if (ch.args && Object.keys(ch.args).length) card.args = ch.args;
-            if (ch.result != null) card.result = ch.result;
-            card.status = ch.status;
-            if (ch.status === 'success' || ch.status === 'error') card.endedAt = Date.now();
-            opts.onToolEnd(card);
+            opts.onToolStart({ ...card });
           }
+          if (card.endedAt !== undefined) continue;
+          if (ch.name) card.name = ch.name;
+          if (ch.args && Object.keys(ch.args).length) card.args = ch.args;
+          if (ch.result != null) card.result = ch.result;
+          card.status = ch.status;
+          if (ch.status !== 'running') card.endedAt = Date.now();
+          opts.onToolEnd({ ...card });
         } else if (ch.type === 'final') {
+          providerCompleted = true;
+          requestUsage = ch.usage;
           if (ch.reasoningContent && !assistantReasoning) assistantReasoning = ch.reasoningContent;
           if (ch.thinkingBlocks?.length) assistantThinkingBlocks = ch.thinkingBlocks;
           if (ch.usage) {
@@ -436,9 +447,11 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
             totalUsage.cacheRead = (totalUsage.cacheRead ?? 0) + (ch.usage.cacheRead ?? 0);
             totalUsage.cacheWrite = (totalUsage.cacheWrite ?? 0) + (ch.usage.cacheWrite ?? 0);
             totalUsage.costUSD = (totalUsage.costUSD ?? 0) + (ch.usage.costUSD ?? 0);
-            if (typeof ch.usage.input === 'number' && ch.usage.input >= 0) {
-              totalUsage.lastInput = ch.usage.input;
-              totalUsage.peakInput = Math.max(totalUsage.peakInput ?? 0, ch.usage.input);
+            // A provider that sums several calls reports the latest prompt size separately.
+            const prompt = ch.usage.lastInput ?? ch.usage.input;
+            if (typeof prompt === 'number' && prompt >= 0) {
+              totalUsage.lastInput = prompt;
+              totalUsage.peakInput = Math.max(totalUsage.peakInput ?? 0, prompt);
             }
           }
         } else if (ch.type === 'error') {
@@ -452,6 +465,10 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       else { opts.onError(e.message ?? String(e)); opts.onFinal(totalUsage); return; }
     }
     if (aborted) { opts.onFinal(totalUsage); return; }
+    if (!opts.signal?.aborted && !providerCompleted && !contextOverflowSeen) {
+      opts.onError('Provider disconnected before completing this response. Partial results were kept.');
+      opts.onFinal(totalUsage); return;
+    }
 
     // Reactive compaction: the server said the prompt is too long → ask the caller to
     // shrink the conversation, then retry the SAME step with the new message array.
@@ -483,6 +500,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
     // record assistant reply (with tool_calls flag)
     if (toolCalls.length === 0) {
       // no tools used → done
+      if (!opts.signal?.aborted) opts.onCacheContext?.(request, { role: 'assistant', content: assistantText, reasoningContent: assistantReasoning || undefined, thinkingBlocks: assistantThinkingBlocks }, requestedAt, requestUsage);
       opts.onFinal(totalUsage);
       return;
     }
@@ -734,7 +752,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           run: async () => '',
         });
         const askFn = opts.approver ?? ((t: ToolImpl, a: AnyValue) => askApproval(opts.app, t, a));
-        const res = await askFn(previewTool, effectiveArgs);
+        const res = await askFn(previewTool, effectiveArgs, opts.signal);
         if (!res.ok) {
           opts.onPermissionDecision?.({
             at: Date.now(), tool: call.name, args: JSON.stringify(call.args ?? {}).slice(0, 200),
@@ -882,6 +900,19 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
                   systemPrompt: opts.systemPrompt,
                   skill,
                   args: argStr,
+                  runMode: opts.runMode,
+                  forkDepth: opts.forkDepth,
+                  subtasks: opts.subtasks,
+                  parentSubtaskId: opts.parentSubtaskId,
+                  workspaceFolders: opts.workspaceFolders,
+                  approver: opts.approver,
+                  onPermissionRulePersist: opts.onPermissionRulePersist,
+                  onPermissionDecision: opts.onPermissionDecision,
+                  sessionId: opts.sessionId,
+                  turnId: opts.turnId,
+                  model: opts.model,
+                  runtimeTools: opts.runtimeTools,
+                  contextBudget: opts.contextBudget,
                   permissionLevel: opts.permissionLevel,
                   autoApproveTools: opts.autoApproveTools,
                   neverApproveTools: opts.neverApproveTools,
@@ -892,9 +923,14 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
                   mcp: opts.mcp,
                   signal: opts.signal,
                 });
+                if (fork.usage) {
+                  for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'costUSD'] as const) {
+                    totalUsage[key] = (totalUsage[key] ?? 0) + (fork.usage[key] ?? 0);
+                  }
+                }
                 raw = fork.ok
                   ? `[forked skill "${skillName}" completed]\n\n${fork.result || '(no text result)'}`
-                  : `[forked skill "${skillName}" failed]\n\n${fork.error ?? 'unknown error'}\n\n--- partial ---\n${fork.result}`;
+                  : { status: 'error', errorCode: 'SUBTASK_FAILED', text: `[forked skill "${skillName}" failed]\n\n${fork.error ?? 'unknown error'}\n\n--- partial ---\n${fork.result}` };
               } else {
                 raw = await tool.run(opts.app, effectiveArgs, toolCtx);
               }

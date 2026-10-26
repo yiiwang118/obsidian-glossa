@@ -205,5 +205,16 @@ exports.run = async (t, load) => {
   t.ok(long.every((_, i) => preview.includes(`topic-${i} `)), 'every message keeps its start in the preview');
   t.eq(chatSearchPreview([{ id: 'x', role: 'user', content: 'short', timestamp: 1 }]), 'short', 'short chats are whole');
 
+  // A copy starts without the original's run status, subtask progress and Codex thread.
+  const dv = fakeVault();
+  const ds = await open(dv);
+  const running = chat('d1', { runs: [{ id: 'turn', startedAt: 1, checkpoint: { seq: 0, phase: 'running' }, events: [], state: { seq: 1, phase: 'running' } }],
+    subtasks: [{ id: 's', title: 'Child', phase: 'running', startedAt: 1, steps: 0, output: '', queued: 0 }],
+    nativeSession: { threadId: 'thread', ownerId: 'cd1', endpointId: 'codex', policyKey: 'p', historyKey: 'h' } });
+  await ds.saveSession(running);
+  const copy = await ds.duplicateSession('cd1');
+  t.eq([copy.runs, copy.subtasks, copy.nativeSession], [undefined, undefined, undefined], 'a duplicated chat owns no run, subtask or Codex thread');
+  t.eq(running.runs.length + running.subtasks.length, 2, 'the original keeps its own records');
+
   for (const s of stores) await s.flush();
 };

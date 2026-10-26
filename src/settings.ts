@@ -1252,6 +1252,9 @@ export class GlossaSettingTab extends PluginSettingTab {
       .addSlider(s => s.setLimits(40, 95, 5).setValue(this.plugin.settings.autoCompactThresholdPct)
         .onChange(async v => { this.plugin.settings.autoCompactThresholdPct = v; await this.plugin.saveSettings(); }));
 
+    new Setting(containerEl).setName(bi('Compact during idle cache window', '缓存窗口内空闲压缩'))
+      .setDesc(bi('Off by default. For API chats over 100k input tokens with a declared cache lifetime, try one summary near cache expiry. Reuses the request prefix where possible; cache hits and savings are not guaranteed. Adds a model call. Typing, queued messages and active tasks prevent it.', '默认关闭。API 对话输入超过 10 万 token 且填写了缓存时长时，在缓存临近过期的空闲阶段尝试一次摘要。尽量保留请求前缀，但不保证缓存命中或费用降低，会增加一次模型调用。输入中、有待发消息或任务运行时跳过。'))
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.idleCompactEnabled).onChange(async value => { this.plugin.settings.idleCompactEnabled = value; await this.plugin.saveSettings(); }));
     /* ----- Endpoints ----- */
     this.renderHeading(containerEl, bi('Model endpoints', '模型端点'), 'providers');
     const addBtn = containerEl.createEl('button', { text: bi('+ Add endpoint', '+ 添加端点'), cls: 'nc-add-endpoint-btn mod-cta' });
@@ -1567,7 +1570,20 @@ export class GlossaSettingTab extends PluginSettingTab {
       });
     }
 
+    if (ep.kind === 'custom-api') new Setting(advanced).setName(bi('Prompt cache lifetime (seconds)', '提示词缓存时长（秒）'))
+      .setDesc(bi('Optional. Use the lifetime documented by your API provider, from 60 to 86400 seconds. Empty means unknown and disables idle compaction for this endpoint. This does not configure server caching.', '可选。填写 API 服务商说明的缓存时长，范围 60–86400 秒。留空代表未知，该端点不进行空闲压缩；此项不会配置服务端缓存。'))
+      .addText(text => text.setValue(ep.cacheWindowSeconds ? String(ep.cacheWindowSeconds) : '').onChange(async value => {
+        const parsed = Number(value.trim());
+        if (value.trim() && (!Number.isFinite(parsed) || parsed < 60 || parsed > 86400)) { text.inputEl.setAttribute('aria-invalid', 'true'); return; }
+        text.inputEl.removeAttribute('aria-invalid');
+        if (!value.trim()) delete ep.cacheWindowSeconds; else ep.cacheWindowSeconds = Math.round(parsed);
+        await this.plugin.saveSettings();
+      }));
+
     if (ep.kind !== 'custom-api') {
+      if (ep.kind === 'codex-cli') new Setting(advanced).setName(bi('Native Codex sessions', 'Codex 原生会话'))
+        .setDesc(bi('Experimental. Resume Codex threads across messages and restarts. Codex also saves these conversations locally. Turn off to use the existing CLI mode. Requires a compatible app-server; failed turns are never automatically replayed.', '实验功能。跨消息和重启继续 Codex 原生会话；Codex 也会在本机保存对话。关闭后使用现有 CLI 模式。需要兼容的 app-server，失败时不会自动重做任务。'))
+        .addToggle(toggle => toggle.setValue(!!ep.codexNativeSession).onChange(async value => { ep.codexNativeSession = value; await this.plugin.saveSettings(); }));
       new Setting(basic).setName(bi('Executable path', '可执行文件路径'))
         .setDesc(bi('Leave empty to detect an installed CLI. Sign in using its terminal command first.', '留空自动检测已安装的 CLI。请先在终端完成该 CLI 的登录。'))
         .addText(tx => tx.setValue(ep.binaryPath ?? '').onChange(async value => { ep.binaryPath = value.trim(); await this.plugin.saveSettings(); }))

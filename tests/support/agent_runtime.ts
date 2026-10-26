@@ -2,3 +2,4 @@
 // share module state.
 export { runAgentLoop } from '../../src/agent/loop';
 export { registerBundledSkill } from '../../src/agent/skills';
+export { forkSkill } from '../../src/agent/sub_agent';

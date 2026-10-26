@@ -1,39 +1,25 @@
-/**
- * Minimal sub-agent harness for forked skill execution.
- *
- * A forked skill (frontmatter `context: fork`) runs in an isolated agent
- * loop: its own message buffer, its own token budget tracking, its own
- * tool-result store. The parent loop awaits the fork's final assistant
- * text and surfaces it as the tool result.
- *
- * This is a deliberately small implementation:
- *   - No coordinator / queue: forks run sequentially in the same JS turn as
- *     the parent's tool call.
- *   - No nested fork limit beyond a depth counter (5) to prevent infinite
- *     recursion if a forked skill body re-invokes itself.
- *   - Tool registry is INHERITED from the parent (same `provider`, `app`,
- *     `mcp`, `checkpoint`). Permission rules carry over too.
- *   - UI callbacks are stubbed so the fork doesn't pollute the parent's
- *     tool stream — the user sees only one "Skill: <name> (forked)" card.
- *
- * Mirrors upstream Claude Code's `executeForkedSkill` shape, scaled down.
- */
+/** Isolated skill execution with inherited permissions and per-task controls. */
 import type { App } from 'obsidian';
 import type { LLMProvider, ToolSpec } from '../providers/types';
 import type { PermissionLevel, PermissionRule, TokenUsage } from '../types';
 import type { CheckpointManager } from './checkpoint';
 import type { Skill } from './skills';
 import { renderSkillBody } from './skill_render';
+import type { AgentLoopOptions } from './loop';
+import { SubtaskRegistry } from './subtasks';
 
 const MAX_FORK_DEPTH = 5;
-let activeForkDepth = 0;
+
 
 interface McpHubLike {
   asToolSpecs(): ToolSpec[];
   findClient(name: string): { client: { callTool(name: string, args: AnyValue): Promise<AnyValue> }; originalName: string } | null;
 }
 
-export interface ForkOptions {
+export interface ForkOptions extends Pick<AgentLoopOptions, 'workspaceFolders' | 'approver' | 'onPermissionRulePersist' | 'onPermissionDecision' | 'sessionId' | 'turnId' | 'model' | 'runMode' | 'runtimeTools' | 'contextBudget'> {
+  forkDepth?: number;
+  subtasks?: SubtaskRegistry;
+  parentSubtaskId?: string;
   app: App;
   provider: LLMProvider;
   /** Parent's system prompt (forked agent inherits it; skill body is the
@@ -51,7 +37,7 @@ export interface ForkOptions {
   endpointFullAgent?: boolean;
   checkpoint?: CheckpointManager;
   mcp?: McpHubLike;
-  /** Skill-specific token budget (default: 4096). */
+  /** Maximum model steps for this child (default: 12). */
   maxSteps?: number;
   signal?: AbortSignal;
 }
@@ -70,30 +56,19 @@ export interface ForkResult {
  *  Re-entry uses a dynamic import to break the circular dependency between
  *  this module and loop.ts (loop.ts imports `forkSkill` from here). */
 export async function forkSkill(opts: ForkOptions): Promise<ForkResult> {
-  if (activeForkDepth >= MAX_FORK_DEPTH) {
+  if ((opts.forkDepth ?? 0) >= MAX_FORK_DEPTH) {
     return { ok: false, result: '', error: `Fork depth limit (${MAX_FORK_DEPTH}) reached. Refusing to fork further.` };
   }
-  activeForkDepth += 1;
-
-  // Render the skill body with substitutions. The body becomes the fork's
-  // INITIAL USER MESSAGE — same as if the user had typed the body verbatim.
-  // The fork's job is to execute the body's instructions and produce a final
-  // text answer.
-  const body = await renderSkillBody(opts.app, opts.skill, opts.args);
-  const userContent = body;
-
-  // Collect output from the fork — we want the FINAL assistant text, which
-  // is whatever the fork emits before completing (with or without
-  // attempt_completion).
+  const registry = opts.subtasks ?? new SubtaskRegistry([]);
+  const task = registry.start(opts.skill.name, opts.signal, opts.parentSubtaskId);
   let collectedText = '';
   let collectedUsage: TokenUsage | undefined;
   let collectedError: string | undefined;
 
-  // Use dynamic import to break circular dep with loop.ts.
-  const { runAgentLoop } = await import('./loop');
-  // The fork's loop has its own skill-scoped allows, separate from the parent's.
-
   try {
+    if (task.signal.aborted) throw new Error('Subtask cancelled.');
+    const userContent = await renderSkillBody(opts.app, opts.skill, opts.args);
+    const { runAgentLoop } = await import('./loop');
     await runAgentLoop({
       app: opts.app,
       provider: opts.provider,
@@ -102,7 +77,7 @@ export async function forkSkill(opts: ForkOptions): Promise<ForkResult> {
       history: [],                       // fresh context — that's the point
       enableTools: true,
       permissionLevel: opts.permissionLevel,
-      runMode: 'act',                    // forks act; planning would defeat the purpose
+      runMode: opts.runMode,
       endpointKind: opts.endpointKind,
       endpointFullAgent: opts.endpointFullAgent,
       maxSteps: opts.maxSteps ?? 12,     // forks should resolve quickly
@@ -111,20 +86,33 @@ export async function forkSkill(opts: ForkOptions): Promise<ForkResult> {
       permissionRules: opts.permissionRules,
       checkpoint: opts.checkpoint,
       mcp: opts.mcp,
-      signal: opts.signal,
-      // UI callbacks — stub them so the fork doesn't render its own bubbles.
-      // The parent's loop will render ONE tool card for the entire fork.
-      onText: (delta) => { collectedText += delta; },
-      onToolStart: () => {},
-      onToolEnd: () => {},
-      onStepBoundary: () => {},
+      signal: task.signal,
+      forkDepth: (opts.forkDepth ?? 0) + 1,
+      subtasks: registry,
+      parentSubtaskId: task.record.id,
+      workspaceFolders: opts.workspaceFolders,
+      approver: opts.approver,
+      onPermissionRulePersist: opts.onPermissionRulePersist,
+      onPermissionDecision: opts.onPermissionDecision,
+      sessionId: opts.sessionId,
+      turnId: opts.turnId,
+      model: opts.model,
+      runtimeTools: opts.runtimeTools,
+      contextBudget: opts.contextBudget,
+      takeSteering: async () => registry.takeSteering(task.record.id),
+      // Child progress lives in its own card; the parent receives one result.
+      onText: (delta) => { if (!task.signal.aborted) { collectedText += delta; registry.update(task.record, { output: collectedText }, false); } },
+      onToolStart: ev => registry.update(task.record, { tool: ev.name }),
+      onToolEnd: ev => registry.update(task.record, { tool: ev.status === 'running' || ev.status === 'pending' ? ev.name : undefined }),
+      onStepBoundary: () => registry.update(task.record, { steps: task.record.steps + 1 }),
       onFinal: (usage) => { collectedUsage = usage; },
       onError: (err) => { collectedError = err; },
     });
   } catch (e) {
     collectedError = e?.message ?? String(e);
   } finally {
-    activeForkDepth -= 1;
+    if (task.signal.aborted) collectedError = 'Subtask cancelled. Completed file changes are kept; check them before retrying.';
+    registry.finish(task.record, collectedError);
   }
 
   if (collectedError) {

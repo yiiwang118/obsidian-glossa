@@ -120,7 +120,8 @@ function scanDesktopBoundary() {
     ts.forEachChild(node, visit);
   }
   visit(tree);
-  if (launches !== 4) fail('CLI launch boundaries changed; review detection, model metadata, execution and owned-process cleanup');
+  // Detection, model catalog, compatibility run + cleanup, native app-server + cleanup.
+  if (launches !== 6) fail('CLI launch boundaries changed; review detection, model metadata, execution, native sessions and owned-process cleanup');
 }
 
 function scanTopTypeUnions(file, source) {

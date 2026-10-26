@@ -1,0 +1,45 @@
+const path = require('path');
+exports.run = async (t, load) => {
+  const j = await load(path.resolve(__dirname, '../src/agent/run_journal.ts'));
+  const session = { messages: [] };
+  const run = j.beginRun(session, 'turn', 1);
+  j.appendRunEvent(run, 'waiting');
+  j.appendRunEvent(run, 'resumed');
+  j.appendRunEvent(run, 'tool-started', 'write');
+  t.ok(!j.appendRunEvent(run, 'tool-started', 'write'), 'duplicate tool start is not appended');
+  for (let n = 0; n < 900; n++) j.appendRunEvent(run, 'step');
+  t.eq(run.events.length, 512, 'long runs have bounded event retention');
+  t.eq(j.replayRun(run), run.state, 'checkpoint plus tail replays the complete state');
+  j.appendRunEvent(run, 'completed');
+  t.eq(run.events.length, 0, 'a finished run keeps only its outcome');
+  t.eq(j.replayRun(run), run.state, 'a finished run still replays to its outcome');
+  t.ok(!j.appendRunEvent(run, 'waiting'), 'late approval cannot reopen a completed run');
+  t.ok(!j.appendRunEvent(run, 'failed'), 'terminal outcome settles once');
+  t.eq(j.foldRun(run.state, { seq: run.state.seq, kind: 'completed', at: 0 }), run.state, 'duplicate terminal delivery is idempotent');
+  t.throws(() => j.foldRun({ seq: 0, phase: 'running' }, { seq: 2, kind: 'completed' }), 'missing events are detected');
+  const next = j.beginRun(session, 'next');
+  t.throws(() => j.beginRun(session, 'overlap'), 'overlapping runs are rejected');
+  session.messages = [{ toolEvents: [{ id: 'pending', status: 'running' }, { id: 'done', status: 'success', result: 'written' }] }];
+  const saved = JSON.parse(JSON.stringify(session));
+  t.ok(j.recoverRuns(saved, 10), 'a crashed run is recovered');
+  t.eq(saved.runs.at(-1).state.phase, 'interrupted', 'recovery does not claim success');
+  t.eq(saved.messages[0].toolEvents[0].errorCode, 'RUN_INTERRUPTED', 'uncertain side effects are marked');
+  t.eq(saved.messages[0].toolEvents[1].result, 'written', 'completed tool results are retained');
+  t.eq(next.state.phase, 'running', 'recovering a disk snapshot does not affect a live run');
+  t.ok(!j.recoverRuns(saved), 'recovery is idempotent');
+  const legacy = { messages: [{ content: 'old answer' }] };
+  t.ok(!j.recoverRuns(legacy), 'legacy chats stay unchanged');
+  for (let n = 0; n < 25; n++) { const r = j.beginRun(saved, 'r' + n); j.appendRunEvent(r, 'completed'); }
+  t.eq(saved.runs.length, 20, 'old run metadata is bounded');
+  const damaged = { messages: [{ content: 'Keep this' }], runs: [null, { id: 'bad', events: [], checkpoint: { seq: 0, phase: 'alien' } }] };
+  t.ok(j.recoverRuns(damaged), 'invalid new metadata recovers without hiding the chat');
+  t.ok(damaged.runs.every(run => run.state.phase === 'interrupted'), 'damaged journals become terminal without replay');
+  t.eq(damaged.messages[0].content, 'Keep this', 'corrupt metadata never discards messages');
+  t.ok(!j.recoverRuns(damaged), 'normalized corrupt journal recovery is idempotent');
+  const odd = { messages: [{ content: 'Keep this' }], subtasks: { length: 1 } };
+  t.ok(j.recoverRuns(odd) && odd.subtasks === undefined, 'non-list subtask data is dropped instead of blocking the chat');
+  const holes = { messages: [], subtasks: [null, { phase: 'running', queued: 1 }] };
+  j.recoverRuns(holes);
+  t.eq([holes.subtasks.length, holes.subtasks[0].phase], [1, 'interrupted'], 'invalid subtask entries are removed, valid ones recovered');
+
+};

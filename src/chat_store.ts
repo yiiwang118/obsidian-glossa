@@ -4,6 +4,7 @@ import type { ChatSession, ChatFolder, ChatMessage } from './types';
 import { chatMessagesForStorage, purgeTransientChatPayloads } from './utils/chat_storage';
 import { folderName, normalizeFolders } from './utils/chat_folders';
 import { disarmGoal } from './agent/session_runtime';
+import { recoverRuns } from './agent/run_journal';
 import { visibleUserContent } from './utils/prompt_snapshot';
 import { safeWrite, safeWriteJson } from './utils/safe_write';
 import { bi } from './utils/i18n';
@@ -121,7 +122,8 @@ function chatFileName(id: string): string {
 function prepareLoaded(session: ChatSession): boolean {
   // A restored task needs an explicit resume.
   disarmGoal(session);
-  let changed = purgeTransientChatPayloads(session.messages ?? []) > 0;
+  let changed = recoverRuns(session);
+  changed = purgeTransientChatPayloads(session.messages ?? []) > 0 || changed;
   for (const m of session.messages ?? []) {
     for (const item of Array.isArray(m.contextSnapshot) ? m.contextSnapshot : []) {
       if (item && typeof (item as AnyValue).content === 'string') { delete (item as AnyValue).content; changed = true; }
@@ -807,6 +809,8 @@ export class ChatStore {
       inbox: [],
       goal: src.goal ? { ...src.goal, phase: 'paused' } : undefined,
       diagnostics: [],
+      // Run status, subtask progress and the Codex thread belong to the original chat.
+      runs: undefined, subtasks: undefined, nativeSession: undefined,
     };
     await this.saveNow(copy);
     return copy;

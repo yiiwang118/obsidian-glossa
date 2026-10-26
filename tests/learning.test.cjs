@@ -128,4 +128,8 @@ exports.run = async (t, loadModule) => {
   t.eq(source.source.tools[0], { name: 'skill', status: 'success', skillVersion: 'v1' }, 'feedback includes the actual skill revision without arguments');
   const legacy = core.correctionContext({ id: 'chat', messages: [{ role: 'user', content: 'PRIVATE LEGACY ATTACHMENT' }, message] }, message);
   t.ok(!legacy.context.includes('PRIVATE'), 'legacy prompts without a separate visible snapshot are not swept into feedback');
+  const files = [{ name: 'File case', request: 'Keep note', files: { 'note.md': 'Original' }, expectedFiles: { 'note.md': 'Original' }, repeat: true }];
+  const regenerated = await model.proposeLearning(proposing, 'Keep YAML', '', { ...draft, fileExamples: files }, new AbortController().signal);
+  t.eq(regenerated.fileExamples, files, 'regenerating a workflow keeps user-reviewed file tests');
+
 };

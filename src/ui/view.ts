@@ -1,10 +1,16 @@
+import { excerptSourceText, makeChatExcerpt, type ChatExcerpt } from '../temporary_chat';
+import { openTemporaryChat } from './temporary_chat_view';
+import { selectedChatPassages } from './chat_excerpt_selection';
+import { activeQuestionIndex } from './thread_rail';
+import { IdleCompactor, idleCompactDelay, cacheablePrefix, requestPromptTokens } from '../agent/idle_compaction';
+import { SubtaskRegistry } from '../agent/subtasks';
 import {
   ItemView, WorkspaceLeaf, MarkdownView, TFile, TFolder, Notice, Menu, FileSystemAdapter,
 } from 'obsidian';
 import type GlossaPlugin from '../main';
 import { ContextManager } from '../context/manager';
 import { enqueueMessage, takeSteering, disarmGoal, canContinueGoal, goalPrompt, goalStatusTool, recordDiagnostic, exportDiagnostics } from '../agent/session_runtime';
-import { renderSessionControls, openGoalModal } from './session_controls';
+import { renderSessionControls, renderSubtasks, openGoalModal } from './session_controls';
 import { filterPrunedToolContext } from '../utils/context_pruning';
 import { pruneUnderPressure } from '../utils/context_pressure';
 import {
@@ -33,8 +39,10 @@ import type { ChatMessage, ContextItem, ContextItemRef, ChatSession, Endpoint, T
 import { effectiveProxy, modelContextWindow, customEffortValue } from '../types';
 import { reasoningProfile, requiresReasoningReplay, selectedReasoningEntry, type ReasoningProfile } from '../providers/reasoning_catalog';
 import { CustomApiProvider } from '../providers/custom_api';
-import type { MessageInput } from '../providers/types';
+import type { ChatRequest, MessageInput } from '../providers/types';
 import { runAgentLoop } from '../agent/loop';
+import { beginRun, appendRunEvent, isRunOpen, type RunJournal } from '../agent/run_journal';
+import { conversationKey } from '../providers/codex_session';
 import { isMeaningfulChat } from '../chat_store';
 import { filesInFolder } from '../agent/tools/_shared';
 import { compactSession, applyCompact, estimateSessionTokens, undoCompact as undoCompactInSession } from '../agent/compact';
@@ -170,6 +178,8 @@ interface PendingApproval {
 /** One running turn. It belongs to its chat, not to the screen: switching
  *  chats only detaches `ui`, and the turn keeps writing into `session`. */
 interface ChatRun {
+  subtasks: SubtaskRegistry;
+  journal: RunJournal;
   session: ChatSession;
   /** Snapshot taken at send time, so edits made while viewing another chat
    *  never change a turn that is already running. */
@@ -193,6 +203,7 @@ export type ChatRunState = 'running' | 'approval';
  *  saving with no panel open. */
 class ChatRunHub {
   readonly runs = new Map<string, ChatRun>();
+  readonly idleCompactor = new IdleCompactor();
   /** Chats whose send is being prepared (attachments, unlock, compaction). */
   readonly submitting = new Set<string>();
   readonly goalArmed = new Set<string>();
@@ -234,6 +245,7 @@ class ChatRunHub {
 
   /** Stop one chat's turn and its queued or task continuation; what arrived is kept. */
   cancel(session: ChatSession) {
+    this.idleCompactor.cancel(session.id);
     this.queueArmed.delete(session.id);
     this.goalArmed.delete(session.id);
     disarmGoal(session);
@@ -261,6 +273,7 @@ class ChatRunHub {
 
   /** A deleted chat must not be written back by a save that was already queued. */
   forget(session: ChatSession) {
+    this.idleCompactor.cancel(session.id);
     this.pending.delete(session);
     if (this.pending.size || this.timer === null) return;
     window.clearTimeout(this.timer);
@@ -304,6 +317,7 @@ class ChatRunHub {
   /** Plugin unload: stop every chat and write what arrived. */
   async stopAll() {
     this.stopped = true;
+    this.idleCompactor.stop();
     for (const run of [...this.runs.values()]) this.cancel(run.session);
     await this.flush();
   }
@@ -341,6 +355,7 @@ export class GlossaView extends ItemView {
   private threadRailEl: HTMLElement;
   private railPreviewEl: HTMLElement | null = null;
   private railItems: ThreadRailItem[] = [];
+  private railResizeObserver?: ResizeObserver;
   private activeRailId: string | null = null;
   private hoverRailId: string | null = null;
   private stickToBottom = true;
@@ -429,9 +444,14 @@ export class GlossaView extends ItemView {
     return !this.viewClosed && this.session === session;
   }
 
-  /** Open a chat from outside the panel (background notices). */
-  async openChat(id: string) {
+  /** Open a chat from outside the panel (background notices, temporary chats).
+   *  False when it no longer exists or another chat was opened meanwhile. */
+  async openChat(id: string): Promise<boolean> {
+    if (this.viewClosed) return false;
+    if (this.session.id === id) return true;
+    if (!this.runs.has(id) && !this.plugin.store.hasSession(id)) return false;
     await this.loadSession(id);
+    return !this.viewClosed && this.session.id === id;
   }
 
   getViewType() { return VIEW_TYPE_GLOSSA; }
@@ -462,6 +482,16 @@ export class GlossaView extends ItemView {
     });
     this.messagesEl = el('div', { className: 'nc-messages', parent: this.rootEl });
     this.messagesEl.addEventListener('scroll', this.onMessagesScroll, { passive: true });
+    this.railResizeObserver = new ResizeObserver(() => this.scheduleThreadRailActiveUpdate());
+    this.railResizeObserver.observe(this.messagesEl);
+    this.messagesEl.addEventListener('contextmenu', event => {
+      const excerpts = this.selectedSideChatExcerpts();
+      if (!excerpts.length) return;
+      event.preventDefault();
+      const menu = new Menu();
+      menu.addItem(item => item.setTitle(bi('Add to temporary chat', '添加到临时聊天')).setIcon('message-circle-plus').onClick(() => this.openSideChat(excerpts)));
+      menu.showAtMouseEvent(event);
+    });
     this.renderEmpty();
     this.buildInput();
     this.costBar = el('div', { className: 'nc-cost-bar', parent: this.rootEl });
@@ -551,6 +581,10 @@ export class GlossaView extends ItemView {
     // their on-screen parts. A panel opened later shows them again.
     this.detachRun();
     this.viewClosed = true;
+    this.railResizeObserver?.disconnect();
+    if (this.railScrollRaf) window.cancelAnimationFrame(this.railScrollRaf);
+    this.railScrollRaf = 0;
+    this.resetThreadRail();
     this.hub.views.delete(this);
     this.stopElapsedTicker();
     for (const request of this.cliCatalogRequests.values()) request.controller.abort();
@@ -1500,6 +1534,7 @@ export class GlossaView extends ItemView {
 
     const ui: MsgUI = { msg: m, wrap, body, activityEl, elapsedEl, activityTimeEl, toolStack, reasoningCard, reasoningBody };
     this.msgUIs.set(m.id, ui);
+    this.railResizeObserver?.observe(wrap);
     this.registerThreadRailItem(m, ui);
 
     this.renderMessageActions(wrap, m);
@@ -1517,6 +1552,8 @@ export class GlossaView extends ItemView {
       window.cancelAnimationFrame(this.railActiveUpdateRaf);
       this.railActiveUpdateRaf = 0;
     }
+    this.railResizeObserver?.disconnect();
+    if (!this.viewClosed && this.messagesEl) this.railResizeObserver?.observe(this.messagesEl);
     this.railItems = [];
     this.activeRailId = null;
     this.threadRailEl?.empty();
@@ -1537,6 +1574,7 @@ export class GlossaView extends ItemView {
       parent: this.threadRailEl,
       attrs: {
         type: 'button',
+        'aria-label': title,
       },
     });
     setVars(marker, { ['--rail-i']: String(this.railItems.length) });
@@ -1580,7 +1618,7 @@ export class GlossaView extends ItemView {
   }
 
   private scheduleThreadRailActiveUpdate() {
-    if (this.railActiveUpdateRaf) return;
+    if (this.viewClosed || this.railActiveUpdateRaf) return;
     this.railActiveUpdateRaf = window.requestAnimationFrame(() => {
       this.railActiveUpdateRaf = 0;
       this.updateActiveRailItem();
@@ -1589,24 +1627,14 @@ export class GlossaView extends ItemView {
 
   private updateActiveRailItem() {
     if (!this.messagesEl || this.railItems.length === 0) return;
-    const top = this.messagesEl.getBoundingClientRect().top;
-    let best: ThreadRailItem | null = null;
-    let bestDist = Number.POSITIVE_INFINITY;
-    for (const item of this.railItems) {
-      if (!item.messageEl.isConnected) continue;
-      const rect = item.messageEl.getBoundingClientRect();
-      const dist = Math.abs(rect.top - top - 36);
-      if (rect.bottom < top + 8) {
-        if (!best) best = item;
-        continue;
-      }
-      if (dist < bestDist) {
-        best = item;
-        bestDist = dist;
-      }
-      if (rect.top > top + this.messagesEl.clientHeight) break;
-    }
-    if (best) this.setActiveRailItem(best.id);
+    const items = this.railItems.filter(item => item.messageEl.isConnected);
+    const index = activeQuestionIndex(items.map(item => item.messageEl.getBoundingClientRect().top), {
+      top: this.messagesEl.getBoundingClientRect().top,
+      height: this.messagesEl.clientHeight,
+      scrollTop: this.messagesEl.scrollTop,
+      scrollHeight: this.messagesEl.scrollHeight,
+    });
+    if (index >= 0) this.setActiveRailItem(items[index].id);
   }
 
   private setActiveRailItem(id: string) {
@@ -1668,6 +1696,7 @@ export class GlossaView extends ItemView {
       const marker = this.railItems[i].markerEl;
       const distance = hoverIndex >= 0 ? Math.abs(i - hoverIndex) : 99;
       marker.classList.toggle('active', this.activeRailId === this.railItems[i].id);
+      if (this.activeRailId === this.railItems[i].id) marker.setAttribute('aria-current', 'true'); else marker.removeAttribute('aria-current');
       marker.classList.toggle('hover-focus', this.hoverRailId === this.railItems[i].id);
       marker.classList.toggle('near-1', distance === 1);
       marker.classList.toggle('near-2', distance === 2);
@@ -2094,6 +2123,15 @@ export class GlossaView extends ItemView {
       b.onclick = onClick;
       return b;
     };
+    if (m.role !== 'tool') {
+      const side = mkBtn(ICON.sideChat, bi('Ask in temporary chat (selection or this message)', '在临时聊天追问（选中片段或本条消息）'), () => {
+        const selected = this.selectedSideChatExcerpts();
+        const text = excerptSourceText(m);
+        this.openSideChat(selected.length ? selected : text.trim() ? [makeChatExcerpt(this.session, m.id, text)] : []);
+      });
+      // Clicking the action must not collapse an existing transcript selection.
+      side.onmousedown = event => event.preventDefault();
+    }
     if (m.role === 'assistant') {
       if (!m.compactSummary) mkBtn(ICON.brain, bi('Remember this correction', '记住这次纠正'), () => {
         if (this.streaming) { quickNotice(bi('Wait for the reply to finish.', '请等待本轮回复完成。')); return; }
@@ -2104,8 +2142,40 @@ export class GlossaView extends ItemView {
       // use them — hidden in 0.3 to declutter the footer. They live in the
       // command palette (Glossa: Edit selection with AI…) if needed.
       mkBtn(ICON.file, t('save_as_note'), () => { void this.saveResponseAsNote(m); });
-      mkBtn(ICON.history, t('fork_from'), () => this.forkFromMessage(m));
+      mkBtn(ICON.branch, t('fork_from'), () => this.forkFromMessage(m));
     }
+  }
+
+  private selectedSideChatExcerpts(): ChatExcerpt[] {
+    const uis = [...this.msgUIs.values()].filter(ui => ui.msg.role !== 'tool');
+    const excerpts: ChatExcerpt[] = [];
+    for (const passage of selectedChatPassages(this.messagesEl, uis.map(ui => ({ id: ui.msg.id, body: ui.body })))) {
+      const message = this.session.messages.find(item => item.id === passage.id);
+      // A whole message is quoted from its source, so tables and formulas survive verbatim.
+      const text = passage.whole && message ? excerptSourceText(message) || passage.text : passage.text;
+      try { excerpts.push(makeChatExcerpt(this.session, passage.id, text)); } catch { /* Not part of this chat any more. */ }
+    }
+    return excerpts;
+  }
+
+  openSideChat(excerpts?: ChatExcerpt[]) {
+    void openTemporaryChat(this.plugin, this.session, excerpts ?? this.selectedSideChatExcerpts())
+      .catch(error => quickNotice(bi('Could not open temporary chat: ', '无法打开临时聊天：') + String(error instanceof Error ? error.message : error), 5000));
+  }
+
+  /** A temporary-chat reply lands, unsent, in the composer of the chat it came from. */
+  async placeInComposer(parentId: string, text: string): Promise<boolean> {
+    if (!await this.openChat(parentId) || this.viewClosed || this.session.id !== parentId) {
+      quickNotice(bi('The source conversation is no longer available.', '来源主聊已不存在或无法打开。'), 4000);
+      return false;
+    }
+    this.inputEl.value += (this.inputEl.value.trim() ? '\n\n' : '') + bi('From temporary chat:\n', '临时聊天摘录：\n') + text;
+    this.hub.idleCompactor.cancel(parentId);
+    this.historyCursor = -1;
+    this.recomputeInputHeight(); this.updateSubmitBtn();
+    this.inputEl.ownerDocument.defaultView?.focus(); this.inputEl.focus();
+    this.inputEl.setSelectionRange(this.inputEl.value.length, this.inputEl.value.length);
+    return true;
   }
 
   private async refreshEditSummaries(): Promise<void> {
@@ -2422,9 +2492,8 @@ export class GlossaView extends ItemView {
   /** A tool call waiting for approval belongs to its turn. The card is shown
    *  while the chat is on screen; a chat in the background keeps waiting and
    *  is marked in the history until the user opens it. */
-  private askInlineApproval(run: ChatRun, tool: ToolImpl, args: AnyValue): Promise<ApprovalResult> {
+  private askInlineApproval(run: ChatRun, tool: ToolImpl, args: AnyValue, signal = run.controller.signal): Promise<ApprovalResult> {
     return new Promise(resolve => {
-      const signal = run.controller.signal;
       let settled = false;
       const pending: PendingApproval = {
         tool, args,
@@ -2435,6 +2504,8 @@ export class GlossaView extends ItemView {
           this.unmountApproval(pending);
           pending.notice?.hide();
           if (run.approval === pending) run.approval = null;
+          appendRunEvent(run.journal, 'resumed');
+          this.persistSession(run.session);
           this.notifyRuns();
           resolve(result);
         },
@@ -2443,6 +2514,8 @@ export class GlossaView extends ItemView {
       if (signal.aborted) { abort(); return; }
       signal.addEventListener('abort', abort, { once: true });
       run.approval = pending;
+      appendRunEvent(run.journal, 'waiting');
+      this.persistSession(run.session);
       this.notifyRuns();
       const screen = this.hub.screenFor(run.session);
       if (screen) void screen.mountApproval(run, pending);
@@ -2797,6 +2870,7 @@ export class GlossaView extends ItemView {
     });
 
     this.inputEl.addEventListener('input', () => {
+      this.hub.idleCompactor.cancel(this.session.id);
       this.handleTrigger();
       this.historyCursor = -1;
       this.recomputeInputHeight();
@@ -3594,10 +3668,41 @@ export class GlossaView extends ItemView {
     return filterPrunedToolContext(out, new Set(session.prunedToolCallIds ?? []));
   }
 
+  private scheduleIdleCompact(session: ChatSession, endpointId: string, prefix: ChatRequest, requestedAt: number, inputTokens: number) {
+    const configured = this.plugin.settings.endpoints.find(item => item.id === endpointId);
+    if (!configured) return;
+    const delay = idleCompactDelay({ enabled: this.plugin.settings.idleCompactEnabled, api: configured.kind === 'custom-api', cacheSeconds: configured.cacheWindowSeconds, inputTokens, finishedAt: requestedAt, now: Date.now() });
+    if (delay === null || session.messages.length < 4) return;
+    const endpointSnapshot = JSON.stringify(configured);
+    const snapshot = JSON.stringify(session.messages);
+    const proxy = this.plugin.settings.globalProxy;
+    const expiresAt = requestedAt + (configured.cacheWindowSeconds ?? 0) * 1000;
+    const eligible = () =>
+      !this.hub.stopped && this.plugin.settings.idleCompactEnabled
+      // Locking the keys also stops a request that was already scheduled.
+      && (!this.plugin.settings.encryptionEnabled || this.plugin.isUnlocked())
+      && !this.hub.runs.has(session.id) && !this.hub.submitting.has(session.id)
+      && !session.inbox?.length && session.goal?.phase !== 'active'
+      && this.plugin.store.loadedSession(session.id) === session
+      && JSON.stringify(session.messages) === snapshot
+      && JSON.stringify(this.plugin.settings.endpoints.find(item => item.id === endpointId)) === endpointSnapshot
+      && this.plugin.settings.globalProxy === proxy
+      && session.endpointId === endpointId
+      && ![...this.hub.views].some(view => view.isShowing(session) && view.canSubmitComposer());
+    this.hub.idleCompactor.schedule(session.id, delay, () => eligible() && Date.now() < expiresAt,
+      async signal => {
+        // Decrypted only now, so no plaintext key is kept while waiting.
+        const ep = await this.plugin.getDecryptedEndpoint(configured);
+        if (ep && !signal.aborted && eligible()) await this.runAutoCompact(session, ep, 'idle', signal, prefix, eligible);
+      },
+      error => console.warn('[Glossa] idle compaction failed', error));
+  }
+
   /** Run a one-shot summarisation request, replace the older messages in this session
    *  with the resulting summary, and rerender. Called both pre-submit (auto trigger)
    *  and from the `/compact` slash command (manual trigger). */
-  private async runAutoCompact(session: ChatSession, ep: Endpoint, reason: 'auto' | 'manual', signal?: AbortSignal) {
+  private async runAutoCompact(session: ChatSession, ep: Endpoint, reason: 'auto' | 'manual' | 'idle', signal?: AbortSignal, cachePrefix?: ChatRequest, eligible?: () => boolean) {
+    if (reason !== 'idle') this.hub.idleCompactor.cancel(session.id);
     if (session.messages.length < 4) { if (reason === 'manual') quickNotice(bi('Not enough history to compact.', '对话太短，无需压缩。')); return; }
     const vaultRoot = this.app.vault.adapter instanceof FileSystemAdapter ? this.app.vault.adapter.getBasePath() : undefined;
     const provider = buildProvider(ep, this.plugin.settings.globalProxy, vaultRoot);
@@ -3618,12 +3723,14 @@ export class GlossaView extends ItemView {
     try {
       const result = await compactSession(session, {
         provider,
+        cachePrefix,
         model: ep.model,
         keepRecent,
         signal,
       });
       loading?.remove();
       if (!result) { if (reason === 'manual') quickNotice(bi('Nothing to compact.', '没有可以压缩的内容。')); return; }
+      if (signal?.aborted || this.hub.stopped || (eligible && !eligible())) return;
       applyCompact(session, result, keepRecent);
       const view = this.hub.screenFor(session);
       if (view) {
@@ -3634,6 +3741,9 @@ export class GlossaView extends ItemView {
       quickNotice(bi(`Compacted ${result.summarisedCount} msgs → 1 summary (~${formatTokenCount(result.tokensSaved)} tok saved)`, `已把 ${result.summarisedCount} 条消息压缩成 1 条摘要（约省 ${formatTokenCount(result.tokensSaved)} tok）`));
     } catch (e) {
       loading?.remove();
+      if (signal?.aborted) return;
+      // Nobody asked for an idle summary, so its failures are logged rather than announced.
+      if (reason === 'idle') throw e;
       quickNotice(bi(`Compact failed: ${e.message ?? e}`, `压缩失败：${e.message ?? e}`));
     }
   }
@@ -3644,6 +3754,7 @@ export class GlossaView extends ItemView {
       quickNotice(bi('Wait for this chat to finish before restoring messages.', '请等这个对话本轮结束后再恢复消息。'));
       return;
     }
+    this.hub.idleCompactor.cancel(this.session.id);
     const ok = undoCompactInSession(this.session, summaryId);
     if (!ok) { quickNotice(bi('No snapshot for this summary.', '这条摘要没有可恢复的原始消息。')); return; }
     this.historyWindow = latestHistoryWindow(this.session.messages);
@@ -3662,6 +3773,7 @@ export class GlossaView extends ItemView {
     const target = options.target ?? this.session;
     if (this.runs.has(target.id)) { if (!queuedText && target === this.session) this.queueComposer(); return; }
     if (this.submitting.has(target.id)) return;
+    this.hub.idleCompactor.cancel(target.id);
     this.submitting.add(target.id);
     let autoContinue = false;
     try {
@@ -3863,6 +3975,8 @@ export class GlossaView extends ItemView {
     target.messages.push(asst);
     target.updatedAt = Date.now();
     const run: ChatRun = {
+      journal: beginRun(target, turnIdForThisRun),
+      subtasks: new SubtaskRegistry(target.subtasks = [], () => { this.hub.persist(target); this.hub.screenFor(target)?.refreshSubtasks(); }),
       session: target,
       endpoint: JSON.parse(JSON.stringify(epReady)) as Endpoint,
       controller: new AbortController(),
@@ -3898,8 +4012,12 @@ export class GlossaView extends ItemView {
     let finishedNormally = false;
     try {
 
+    // Persist ownership before starting any model or tool side effects.
+    await this.flushPersistNow(target);
+
     const vaultRoot = this.app.vault.adapter instanceof FileSystemAdapter ? this.app.vault.adapter.getBasePath() : undefined;
     const provider = buildProvider(runEp, this.plugin.settings.globalProxy, vaultRoot);
+    let cachePrefix: ChatRequest | undefined, cacheAt = 0, cacheInput = 0;
     // Hard cap = a hair below the effective model window so we leave room for
     // the system prompt + assistant response. The previous code displayed the
     // model window in the footer but still budgeted attachments against the
@@ -3983,6 +4101,17 @@ export class GlossaView extends ItemView {
     }
 
     await runAgentLoop({
+      onCacheContext: (request, answer, at, usage) => {
+        if (this.plugin.settings.idleCompactEnabled && runEp.kind === 'custom-api') { cachePrefix = cacheablePrefix(request, answer); cacheAt = at; cacheInput = requestPromptTokens(usage, runEp.apiStyle); }
+      },
+      subtasks: run.subtasks,
+      nativeSession: runEp.kind === 'codex-cli' && runEp.codexNativeSession ? {
+        ownerId: target.id,
+        clientVersion: this.plugin.manifest.version,
+        historyKey: await conversationKey(target.messages.filter(m => m.id !== userMsg.id && m.turnId !== turnIdForThisRun)),
+        binding: target.nativeSession,
+        onBinding: async binding => { target.nativeSession = binding; await this.flushPersistNow(target); },
+      } : undefined,
       app: this.app,
       provider,
       systemPrompt: sysPrompt,
@@ -4028,7 +4157,7 @@ export class GlossaView extends ItemView {
       sessionId: target.id,
       turnId: turnIdForThisRun,
       mcp: this.plugin.mcp,
-      approver: (tool, args) => this.askInlineApproval(run, tool, args),
+      approver: (tool, args, approvalSignal) => this.askInlineApproval(run, tool, args, approvalSignal),
       contextBudget: this.plugin.settings.autoCompactEnabled ? Math.max(1, effectiveWindow.maxCtx * (this.plugin.settings.autoCompactThresholdPct / 100) - estimateTokens(sysPrompt) - responseReserve) : undefined,
       initialPrunedIds: target.prunedToolCallIds,
       onPruned: ids => this.recordPruning(target, ids),
@@ -4089,6 +4218,7 @@ export class GlossaView extends ItemView {
         return this.buildModelHistory(target, runEp, '', run.asst?.id);
       },
       onText: (delta) => {
+        if (signal.aborted || !isRunOpen(run.journal.state)) return;
         if (run.lastChunkWasTool) this.flushAndStartNewAsstSegment(run);
         run.lastChunkWasTool = false;
         run.buf += delta;
@@ -4096,12 +4226,16 @@ export class GlossaView extends ItemView {
         if (run.ui) screen()?.scheduleStreamingRender();
       },
       onReasoning: (delta) => {
+        if (signal.aborted || !isRunOpen(run.journal.state)) return;
         if (!run.asst) return;
         run.asst.reasoningContent = (run.asst.reasoningContent ?? '') + delta;
         this.setRunActivity(run, thinkingLabel(), 'thinking');
         if (run.ui) screen()?.scheduleReasoningRender();
       },
       onToolStart: (ev) => {
+        if (!isRunOpen(run.journal.state)) return;
+        appendRunEvent(run.journal, 'tool-started', ev.id);
+        this.persistSession(target);
         if (!run.asst) return;
         run.asst.toolEvents = run.asst.toolEvents ?? [];
         if (!run.asst.toolEvents.find(t => t.id === ev.id)) run.asst.toolEvents.push(ev);
@@ -4113,6 +4247,9 @@ export class GlossaView extends ItemView {
         run.lastChunkWasTool = true;
       },
       onToolEnd: (ev) => {
+        if (!isRunOpen(run.journal.state)) return;
+        if (ev.status !== 'pending' && ev.status !== 'running') appendRunEvent(run.journal, 'tool-finished', ev.id);
+        this.persistSession(target);
         if (ev.status !== 'pending' && ev.status !== 'running') recordDiagnostic(target, { at: Date.now(), kind: 'tool', tool: ev.name, status: ev.status, code: ev.errorCode, durationMs: Math.max(0, (ev.endedAt ?? Date.now()) - ev.startedAt), skillVersion: ev.skillVersion });
         if (!run.asst) return;
         const list = run.asst.toolEvents ?? [];
@@ -4131,6 +4268,8 @@ export class GlossaView extends ItemView {
         run.lastChunkWasTool = true;
       },
       onStepBoundary: async () => {
+        if (!isRunOpen(run.journal.state)) return;
+        appendRunEvent(run.journal, 'step');
         recordDiagnostic(target, { at: Date.now(), kind: 'step' });
         const previous = run.asst, previousUi = run.ui;
         if (previous) {
@@ -4144,6 +4283,7 @@ export class GlossaView extends ItemView {
           }
         }
         if (signal.aborted) return;
+        this.persistSession(target);
         this.beginSegment(run);
       },
       onError: (err) => {
@@ -4164,6 +4304,8 @@ export class GlossaView extends ItemView {
         }
       },
     });
+
+    appendRunEvent(run.journal, signal.aborted ? 'cancelled' : loopHadError ? 'failed' : 'completed');
 
     // Flush + finalize — runs for ALL termination paths (success / error / abort / max-steps).
     // Strip streaming class + reasoning "streaming…" label from EVERY assistant message
@@ -4208,6 +4350,9 @@ export class GlossaView extends ItemView {
     }
     const cancelled = signal.aborted;
     finishedNormally = !loopHadError && !cancelled;
+    if (finishedNormally && runEp.codexNativeSession && target.nativeSession?.endpointId === runEp.id) {
+      target.nativeSession.historyKey = await conversationKey(target.messages);
+    }
     if (target.goal?.phase === 'active' && (!finishedNormally || target.goal.rounds >= target.goal.maxRounds)) {
       disarmGoal(target); this.goalArmedIds.delete(target.id);
     }
@@ -4215,6 +4360,7 @@ export class GlossaView extends ItemView {
     this.closeOpenPlanItems(target, loopHadError || cancelled ? 'stopped' : 'completed');
     screen()?.compactProcessForTurn(turnIdForThisRun);
 
+    if (finishedNormally && cachePrefix) this.scheduleIdleCompact(target, runEp.id, cachePrefix, cacheAt, cacheInput);
     target.updatedAt = Date.now();
     await this.flushPersistNow(target);
     if (!cancelled) this.hub.notice(target, loopHadError ? 'error' : 'done');
@@ -4234,12 +4380,21 @@ export class GlossaView extends ItemView {
       try { this.dropEmptySegment(run); } catch (e) { console.warn('[Glossa] empty-assistant cleanup failed', e); }
       this.persistSession(target);
     } finally {
+      if (isRunOpen(run.journal.state)) appendRunEvent(run.journal, signal.aborted ? 'cancelled' : 'failed');
+      for (const message of target.messages) {
+        if (message.turnId !== run.turnId) continue;
+        for (const tool of message.toolEvents ?? []) {
+          if (tool.status !== 'pending' && tool.status !== 'running') continue;
+          tool.status = 'cancelled'; tool.errorCode = 'RUN_INTERRUPTED'; tool.endedAt = Date.now();
+        }
+      }
       if (run.approval) run.approval.settle({ ok: false });
       if (run.ui) this.setTurnActivity(run.ui, '', 'idle');
       run.ui = null;
       run.asst = null;
       if (this.runs.get(target.id) === run) this.runs.delete(target.id);
       this.notifyRuns();
+      await this.flushPersistNow(target);
       const view = screen();
       if (view) {
         view.syncRunChrome();
@@ -4510,6 +4665,9 @@ export class GlossaView extends ItemView {
     this.rootEl?.classList.toggle('has-task', !!this.session.goal);
     renderSessionControls(this.sessionControlsEl, this.session, {
       busy: this.streaming || this.submitInFlight,
+      subtasks: this.hub.runs.get(this.session.id)?.subtasks,
+      app: this.app,
+      resetNativeSession: () => { delete this.session.nativeSession; this.renderSessionControls(); this.persistSession(); },
       pause: () => this.cancelStream(),
       resume: () => {
         const ep = this.activeEndpoint();
@@ -4528,6 +4686,14 @@ export class GlossaView extends ItemView {
       editMessage: (id, text) => { const item = this.session.inbox?.find(m => m.id === id); if (item) item.text = text; this.renderSessionControls(); this.persistSession(); },
       sendMessage: item => { this.queueArmed = true; void this.submit(item.text, item.id); },
     });
+  }
+
+  /** Subtask progress redraws only its own list; a full render would rebuild an open pending-message editor. */
+  private refreshSubtasks() {
+    const list = this.sessionControlsEl?.querySelector<HTMLElement>('.nc-subtasks');
+    // Only the full render decides whether the controls are shown at all.
+    if (!list || this.sessionControlsEl.hidden) { this.renderSessionControls(); return; }
+    renderSubtasks(list, this.session, { app: this.app, subtasks: this.hub.runs.get(this.session.id)?.subtasks });
   }
 
   private recordPruning(session: ChatSession, ids: string[]) {

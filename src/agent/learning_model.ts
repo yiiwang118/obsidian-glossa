@@ -1,6 +1,6 @@
 import type { LLMProvider, MessageInput } from '../providers/types';
 import {
-  parseJsonReply, parseLearningContent, learningMarkdown, learningSignature, scoreExample,
+  objectValue, parseJsonReply, parseLearningContent, learningMarkdown, learningSignature, scoreExample,
   type LearningContent, type LearningEvaluation, type ExampleOutcome, type LearningVersion,
 } from './learning_contract';
 
@@ -39,7 +39,7 @@ name (lowercase kebab-case, keep the existing name when provided), title, descri
 examples must be 3 items: two different positive tasks and one nearby negative task that must not trigger this skill. Each: {name,request,input,shouldTrigger,includes,excludes}. input is sample text, not a file path. includes/excludes are arrays of exact, case-sensitive output fragments for deterministic checks; includes must be nonempty. Positive cases must verify the correction's actual effect on the output, not merely repeat advice. For preserving YAML or a section, require the exact original block in the output. Every required fragment must follow unambiguously from the task and input or the skill's explicit workflow; never invent one particular paraphrase as the expected answer to an open-ended summary or translation. Use short, uniquely determined extraction or formatting tasks for the nearby negative case, so it has a concrete expected answer without the skill. Do not include the expected answer itself in the request or ask the model to repeat it. These are text-only examples, not live tool tests. Do not claim this verifies tool execution or general capability.` },
     { role: 'user', content: JSON.stringify({ correction, conversation: context, existingSkill: previous ? learningMarkdown(previous) : null }) },
   ], signal, 6000);
-  const content = parseLearningContent(result.value);
+  const content = parseLearningContent({ ...objectValue(result.value), fileExamples: previous?.fileExamples });
   if (previous && content.name !== previous.name) throw new Error('The model renamed the selected skill. Try again.');
   return content;
 }

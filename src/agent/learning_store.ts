@@ -35,12 +35,13 @@ function parseLedger(raw: string): LearningLedger {
       // Version metadata is local audit data, never interpreted as instructions.
       return { ...content, id: value.id, createdAt: Number(value.createdAt), correction: value.correction,
         source: value.source === undefined ? undefined : parseLearningSource(value.source),
+        fileEvaluation: value.fileEvaluation === undefined ? undefined : parseLearningEvaluation(value.fileEvaluation, 1),
         evaluation: value.evaluation === undefined ? undefined : parseLearningEvaluation(value.evaluation) };
     });
     if (new Set(versions.map(version => version.id)).size !== versions.length
       || (record.activeId !== null && !versions.some(version => version.id === record.activeId))) throw new Error('Invalid active skill version.');
     const active = versions.find(version => version.id === record.activeId);
-    if (active && !canActivate(active, active.evaluation, active.evaluation?.baselineId ?? null)) throw new Error('Active skill content does not match its verification.');
+    if (active && !canActivate(active, active.evaluation, active.evaluation?.baselineId ?? null, active.fileEvaluation)) throw new Error('Active skill content does not match its verification.');
     return { name: record.name, activeId: record.activeId as string | null, versions };
   });
   if (new Set(skills.map(record => record.name)).size !== skills.length) throw new Error('Duplicate skill history.');
@@ -83,7 +84,7 @@ export function saveLearningVersion(adapter: DataAdapter, revision: number, vers
   return updateLedger(adapter, revision, ledger => {
     let record = ledger.skills.find(item => item.name === version.name);
     if ((record?.activeId ?? null) !== baselineId) throw new Error('The active skill changed. Run the examples again.');
-    if (activate && !canActivate(version, version.evaluation, baselineId)) throw new Error('Run and pass every example on the current draft before enabling it.');
+    if (activate && !canActivate(version, version.evaluation, baselineId, version.fileEvaluation)) throw new Error('Run and pass every example on the current draft before enabling it.');
     if (!record) {
       record = { name: version.name, activeId: null, versions: [] };
       ledger.skills.push(record);
@@ -106,7 +107,7 @@ export function setLearningActive(adapter: DataAdapter, revision: number, name: 
     if (!record) throw new Error('Skill no longer exists.');
     if (id !== null) {
       const version = record.versions.find(item => item.id === id);
-      if (!version || !canActivate(version, version.evaluation, version.evaluation?.baselineId ?? null)) throw new Error('This version has no passing example results.');
+      if (!version || !canActivate(version, version.evaluation, version.evaluation?.baselineId ?? null, version.fileEvaluation)) throw new Error('This version has no passing example results.');
     }
     record.activeId = id;
   });

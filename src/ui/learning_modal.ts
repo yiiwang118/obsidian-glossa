@@ -8,6 +8,8 @@ import {
 } from '../agent/learning_contract';
 import { readLearningLedger, saveLearningVersion, setLearningActive, type LearningLedger } from '../agent/learning_store';
 import { proposeLearning, evaluateLearning } from '../agent/learning_model';
+import { evaluateLearningFiles } from '../agent/file_evaluation';
+import { parseFileExamples } from '../agent/file_evaluation_contract';
 import { renderDiffInto } from '../utils/diff';
 import { uid } from '../utils/dom';
 import { bi } from '../utils/i18n';
@@ -36,6 +38,8 @@ export class LearningModal extends Modal {
   private ledger: LearningLedger = { schema: 1, revision: 0, skills: [] };
   private draft: LearningContent | null = null;
   private evaluation?: LearningEvaluation;
+  private fileEvaluation?: LearningEvaluation;
+  private fileExamplesError = '';
   private baseline: LearningVersion | null = null;
   private correction = '';
   private context = '';
@@ -68,6 +72,7 @@ export class LearningModal extends Modal {
     this.ledger = { schema: 1, revision: 0, skills: [] };
     this.draft = null;
     this.evaluation = undefined;
+    this.fileEvaluation = undefined;
     this.contentEl.empty();
   }
 
@@ -119,7 +124,7 @@ export class LearningModal extends Modal {
     this.shell(bi('Learned skills', '学习记录'));
     this.form.createEl('p', { cls: 'nc-learning-muted', text: bi('Enabled skills join the skill list on future turns. Up to 12 versions per skill are kept, including the active version.', '启用的技能会加入后续对话的技能列表。每个技能保留最近 12 个版本，当前启用版本始终保留。') });
     this.button(this.form, bi('New correction', '记录新纠正'), () => {
-      this.draft = null; this.evaluation = undefined; this.baseline = null; this.targetName = ''; this.correction = ''; this.context = ''; this.source = undefined; this.editor();
+      this.draft = null; this.evaluation = undefined; this.fileEvaluation = undefined; this.baseline = null; this.targetName = ''; this.correction = ''; this.context = ''; this.source = undefined; this.editor();
     }, true);
     if (!this.ledger.skills.length) this.form.createEl('p', { text: bi('No learned skills yet. Start from a correction in chat.', '还没有学习记录。可以从聊天回复旁的“记住这次纠正”开始。') });
     for (const record of this.ledger.skills) {
@@ -131,7 +136,7 @@ export class LearningModal extends Modal {
       this.button(actions, bi('Improve', '继续改进'), () => {
         this.targetName = record.name; this.baseline = active ?? null;
         this.draft = structuredContent(active ?? record.versions[record.versions.length - 1]);
-        this.evaluation = undefined; this.correction = ''; this.context = ''; this.source = undefined; this.editor();
+        this.evaluation = undefined; this.fileEvaluation = undefined; this.correction = ''; this.context = ''; this.source = undefined; this.editor();
       });
       if (active) this.button(actions, bi('Disable', '停用'), async () => {
         this.ledger = await setLearningActive(this.app.vault.adapter, this.ledger.revision, record.name, null);
@@ -147,12 +152,13 @@ export class LearningModal extends Modal {
         detail.createEl('summary', { text: bi('View workflow and results', '查看技能与验证结果') });
         detail.createEl('pre', { text: learningMarkdown(version), cls: 'nc-learning-output' });
         if (version.evaluation) this.renderResults(detail, version.evaluation);
+        if (version.fileEvaluation) { detail.createEl('p', { text: bi('File operation results', '文件操作结果') }); this.renderResults(detail, version.fileEvaluation); }
         if (version.source) detail.createEl('p', { cls: 'nc-learning-muted', text: bi('Source: ', '来源：') + `${version.source.sessionId} / ${version.source.turnId} · ${version.source.model ?? bi('Model not recorded', '未记录模型')}` });
         this.button(row, bi('Edit as draft', '作为草稿编辑'), () => {
           this.targetName = record.name; this.baseline = active ?? null; this.draft = structuredContent(version);
-          this.evaluation = undefined; this.correction = version.correction; this.source = version.source; this.context = ''; this.editor();
+          this.evaluation = undefined; this.fileEvaluation = undefined; this.correction = version.correction; this.source = version.source; this.context = ''; this.editor();
         });
-        if (version.id !== record.activeId && canActivate(version, version.evaluation, version.evaluation?.baselineId ?? null)) {
+        if (version.id !== record.activeId && canActivate(version, version.evaluation, version.evaluation?.baselineId ?? null, version.fileEvaluation)) {
           this.button(row, bi('Restore this version', '恢复此版本'), async () => {
             const ok = await confirmModal(this.app, { title: bi('Restore skill version', '恢复技能版本'), body: bi('Use this saved version on future turns? Its example results were recorded with the model shown above.', '后续对话将使用这个历史版本。其验证结果来自上方记录的模型与时间。'), confirmText: bi('Restore', '恢复') });
             if (!ok || this.closed) return;
@@ -177,12 +183,14 @@ export class LearningModal extends Modal {
 
   private invalidate(): void {
     this.evaluation = undefined;
+    this.fileEvaluation = undefined;
     if (this.enableButton) this.enableButton.disabled = true;
     if (this.result) this.result.empty();
     this.status.setText(bi('Draft changed. Run the examples before enabling.', '草稿已变更，启用前需要重新验证。'));
   }
 
   private editor(): void {
+    this.fileExamplesError = '';
     this.shell(bi('Remember this correction', '记住这次纠正'));
     const nav = this.form.createDiv({ cls: 'nc-learning-actions' });
     this.button(nav, bi('Learning history', '学习记录'), () => this.library());
@@ -213,7 +221,7 @@ export class LearningModal extends Modal {
       if (this.closed) return;
       if (!this.targetName && this.ledger.skills.some(item => item.name === draft.name)) throw new Error(bi('A learned skill already has this name. Select it as the target first.', '已有同名学习技能，请先将它选为目标技能。'));
       await this.checkName(draft.name);
-      this.draft = draft; this.evaluation = undefined; if (!this.closed) this.editor();
+      this.draft = draft; this.evaluation = undefined; this.fileEvaluation = undefined; if (!this.closed) this.editor();
     }, !this.draft);
     if (!this.draft) return;
     const draft = this.draft;
@@ -261,11 +269,28 @@ export class LearningModal extends Modal {
       draft.examples.push({ name: bi('My example', '我的样例') + ` ${draft.examples.length + 1}`, request: '', input: '', shouldTrigger: true, includes: [''], excludes: [] });
       this.invalidate(); this.editor();
     });
+    const fileSection = this.form.createEl('details', { cls: 'nc-learning-card' });
+    fileSection.createEl('summary', { text: bi('File operation tests (optional)', '文件操作测试（可选）') });
+    fileSection.createEl('p', { text: bi('Uses isolated temporary Markdown files and the Glossa text edit engine. Each side has fresh files; repeat checks run the same task twice. Expected contents stay local. No shell, network tools, or existing notes are accessible. This does not test Obsidian link automation or other plugins. Each side uses up to 8 model calls per pass.', '使用独立的临时 Markdown 文件和 Glossa 文本编辑引擎。基线与候选各用全新文件；重复检查会执行同一任务两次。预期内容只在本地检查，无法访问现有笔记、Shell 或联网工具。此测试不覆盖 Obsidian 自动链接维护及其他插件。每组每次执行最多调用模型 8 轮。') });
+    if (draft.fileExamples?.length) {
+      const error = fileSection.createEl('p', { cls: 'nc-learning-error' });
+      this.field(fileSection, bi('Fixtures and exact expected files (JSON)', '样例文件和预期完整内容（JSON）'), JSON.stringify(draft.fileExamples, null, 2), value => {
+        try { draft.fileExamples = parseFileExamples(JSON.parse(value) as unknown); this.fileExamplesError = ''; error.setText(''); }
+        catch (e) { this.fileExamplesError = String(e instanceof Error ? e.message : e); error.setText(this.fileExamplesError); }
+      }, 12);
+      this.button(fileSection, bi('Remove file tests', '移除文件测试'), () => { delete draft.fileExamples; this.invalidate(); this.editor(); });
+    } else this.button(fileSection, bi('Add a file test', '添加文件测试'), () => {
+      draft.fileExamples = [{ name: bi('Preserve surrounding content', '保留周边内容'), request: 'Change the heading Old to New in sample.md. Preserve all other text.',
+        files: { 'sample.md': '---\ntags: [demo]\n---\n# Old\n[[Link]]\n' }, expectedFiles: { 'sample.md': '---\ntags: [demo]\n---\n# New\n[[Link]]\n' }, repeat: true }];
+      this.invalidate(); this.editor();
+    });
     this.result = this.form.createDiv({ cls: 'nc-learning-results' });
     if (this.evaluation) this.renderResults(this.result, this.evaluation);
+    if (this.fileEvaluation) { this.result.createEl('p', { text: bi('File operation results', '文件操作结果') }); this.renderResults(this.result, this.fileEvaluation); }
     const actions = this.form.createDiv({ cls: 'nc-learning-actions' });
     this.button(actions, bi('Save draft', '保存草稿'), () => this.save(false));
     this.button(actions, bi(`Run examples (${draft.examples.length * 2} calls)`, `验证样例（${draft.examples.length * 2} 次调用）`), async () => {
+      if (this.fileExamplesError) throw new Error(this.fileExamplesError);
       const content = parseLearningContent(draft);
       const { provider, endpointId, model } = await this.provider();
       this.evaluation = undefined; this.enableButton.disabled = true; this.result.empty();
@@ -273,11 +298,22 @@ export class LearningModal extends Modal {
         (done, total) => { if (!this.closed) this.status.setText(bi(`Checking examples: ${done}/${total}`, `正在验证：${done}/${total}`)); });
       if (this.closed) return;
       this.draft = content; this.evaluation = evaluation; this.editor();
-      this.enableButton.disabled = !canActivate(content, evaluation, this.baseline?.id ?? null);
-      this.status.setText(this.enableButton.disabled ? bi('Some checks failed. Adjust the draft or examples and run again.', '部分检查未通过，请调整草稿或样例后重新验证。') : bi('Examples passed. Review the results, then enable the skill.', '样例已通过。检查结果后可以启用技能。'));
+      this.enableButton.disabled = !canActivate(content, evaluation, this.baseline?.id ?? null, this.fileEvaluation);
+      this.status.setText(this.enableButton.disabled ? (evaluation.rows.every(row => !row.candidate.failures.length) && content.fileExamples?.length ? bi('Text checks passed. Complete the file tests before enabling.', '文本检查已通过，请完成文件测试后再启用。') : bi('Some checks failed. Adjust the draft or examples and run again.', '部分检查未通过，请调整草稿或样例后重新验证。')) : bi('Examples passed. Review the results, then enable the skill.', '样例已通过。检查结果后可以启用技能。'));
+    });
+    if (draft.fileExamples?.length) this.button(actions, bi('Run file tests', '运行文件测试'), async () => {
+      if (this.fileExamplesError) throw new Error(this.fileExamplesError);
+      const content = parseLearningContent(draft);
+      const { provider, endpointId, model, supportsFileEvaluation } = await this.provider();
+      if (!supportsFileEvaluation) throw new Error(bi('File tests require an API endpoint with tool calling.', '文件测试需要支持工具调用的 API 接入。'));
+      this.fileEvaluation = undefined; this.enableButton.disabled = true;
+      const result = await evaluateLearningFiles(this.app.vault.adapter, provider, content, this.baseline, endpointId, model, this.abort.signal,
+        (done, total) => { if (!this.closed) this.status.setText(bi(`File tests: ${done}/${total}`, `文件测试：${done}/${total}`)); });
+      if (this.closed) return;
+      this.fileEvaluation = result; this.editor();
     });
     this.enableButton = this.button(actions, bi('Enable this version', '启用此版本'), () => this.save(true), true);
-    this.enableButton.disabled = !canActivate(draft, this.evaluation, this.baseline?.id ?? null);
+    this.enableButton.disabled = !canActivate(draft, this.evaluation, this.baseline?.id ?? null, this.fileEvaluation);
   }
 
   private async provider() {
@@ -287,7 +323,7 @@ export class LearningModal extends Modal {
     const ready = await this.plugin.getDecryptedEndpoint(endpoint);
     if (!ready) throw new Error(bi('Unlock the endpoint key first.', '请先解锁模型密钥。'));
     if (this.closed || this.abort?.signal.aborted) throw new Error('Cancelled.');
-    return { provider: buildProvider(ready, this.plugin.settings.globalProxy), endpointId: ready.id, model: ready.model ?? '' };
+    return { provider: buildProvider(ready, this.plugin.settings.globalProxy), endpointId: ready.id, model: ready.model ?? '', supportsFileEvaluation: ready.kind === 'custom-api' && !ready.useObsidianFetch };
   }
 
   private async checkName(name: string): Promise<void> {
@@ -297,12 +333,13 @@ export class LearningModal extends Modal {
   }
 
   private async save(activate: boolean): Promise<void> {
+    if (this.fileExamplesError) throw new Error(this.fileExamplesError);
     const content = parseLearningContent(this.draft);
     if (!this.correction.trim() || this.correction.length > 6000) throw new Error(bi('Enter a correction (up to 6000 characters).', '请填写纠正（最多 6000 字符）。'));
     if (!this.targetName && this.ledger.skills.some(item => item.name === content.name)) throw new Error(bi('This name already exists. Open it from learning history.', '此名称已存在，请从学习记录中打开对应技能。'));
     await this.checkName(content.name);
     if (this.closed) return;
-    const version: LearningVersion = { ...content, id: uid(), createdAt: Date.now(), correction: this.correction, source: this.source, evaluation: this.evaluation };
+    const version: LearningVersion = { ...content, id: uid(), createdAt: Date.now(), correction: this.correction, source: this.source, evaluation: this.evaluation, fileEvaluation: this.fileEvaluation };
     this.ledger = await saveLearningVersion(this.app.vault.adapter, this.ledger.revision, version, activate, this.baseline?.id ?? null);
     invalidateDiscoverCache();
     if (!this.closed) { this.library(); this.status.setText(activate ? bi('Skill enabled for future turns.', '技能已启用，将用于后续对话。') : bi('Draft saved. It is not active.', '草稿已保存，尚未启用。')); }
