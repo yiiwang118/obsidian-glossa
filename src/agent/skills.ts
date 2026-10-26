@@ -1,3 +1,4 @@
+import { scalarText } from '../utils/unknown_data';
 /**
  * Skills system — vault-stored prompt skills the model can discover and invoke.
  * Mirrors upstream Claude Code's SkillTool. Each skill lives at
@@ -107,7 +108,7 @@ function parseInlineArray(raw: string): string[] {
  *  - quoted strings `"x"` / `'x'`
  *  - booleans `true` / `false` / `yes` / `no`
  *  - bare strings (returned as-is). */
-function parseScalar(raw: string): AnyValue {
+function parseScalar(raw: string): string | boolean | string[] {
   const val = raw.trim();
   if (val.startsWith('[') && val.endsWith(']')) return parseInlineArray(val);
   if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
@@ -149,7 +150,7 @@ function asBoolean(v: unknown): boolean | undefined {
  *  saved files) and Windows CRLF line endings — both would otherwise cause
  *  the opening `---` not to match, and the entire SKILL.md would be treated
  *  as having no frontmatter. */
-function parseFrontmatter(text: string): { meta: Record<string,AnyValue>; body: string } {
+function parseFrontmatter(text: string): { meta: Record<string, unknown>; body: string } {
   // Strip BOM if present, then normalise CRLF → LF for the regex test.
   // We keep the original line endings inside `body` because that's what the
   // skill body cares about for code-block fidelity; only the frontmatter
@@ -157,7 +158,7 @@ function parseFrontmatter(text: string): { meta: Record<string,AnyValue>; body: 
   const stripped = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
   const m = stripped.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!m) return { meta: {}, body: stripped };
-  const meta: Record<string,AnyValue> = {};
+  const meta: Record<string, unknown> = {};
   const lines = m[1].replace(/\r\n/g, '\n').split('\n');
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -185,7 +186,7 @@ function parseFrontmatter(text: string): { meta: Record<string,AnyValue>; body: 
 }
 
 /** Parse the extended fields out of a metadata object. Shared between disk + bundled. */
-export function parseSkillFrontmatter(meta: Record<string,AnyValue>, fallbackName: string): {
+export function parseSkillFrontmatter(meta: Record<string, unknown>, fallbackName: string): {
   title: string;
   description: string;
   triggers?: string[];
@@ -203,8 +204,8 @@ export function parseSkillFrontmatter(meta: Record<string,AnyValue>, fallbackNam
   const ctxRaw = meta.context;
   const context = ctxRaw === 'fork' ? 'fork' : ctxRaw === 'inline' ? 'inline' : undefined;
   return {
-    title: String(meta.title ?? fallbackName).trim().slice(0, 120),
-    description: String(meta.description ?? '(no description)').trim().replace(/\s+/g, ' ').slice(0, 280),
+    title: scalarText(meta.title ?? fallbackName).trim().slice(0, 120),
+    description: scalarText(meta.description ?? '(no description)').trim().replace(/\s+/g, ' ').slice(0, 280),
     triggers: asStringArray(meta.triggers),
     whenToUse: typeof meta.when_to_use === 'string' ? meta.when_to_use
               : typeof meta.whenToUse === 'string' ? meta.whenToUse
@@ -301,7 +302,7 @@ async function loadDiskSkill(
       path: skillFile.path,
       source,
     };
-  } catch (e) {
+  } catch (e: unknown) {
     console.warn(`[skills] failed to load ${skillFolder.path}/SKILL.md`, e);
     return null;
   }
@@ -373,7 +374,7 @@ export async function loadPersistedNestedSkillDirs(app: App): Promise<void> {
       const folder = app.vault.getAbstractFileByPath(path);
       if (folder instanceof TFolder) nestedSkillDirs.add(path);
     }
-  } catch (e) {
+  } catch (e: unknown) {
     console.warn('[skills] failed to load persisted nested dirs', e);
   }
 }
@@ -410,7 +411,7 @@ async function persistNow(app: App): Promise<void> {
     // re-discovery on every plugin restart, defeating the cache purpose.
     const { safeWriteJson } = await import('../utils/safe_write');
     await safeWriteJson(adapter, NESTED_DIRS_PATH, data, { pretty: true });
-  } catch (e) {
+  } catch (e: unknown) {
     console.warn('[skills] persist nested dirs failed', e);
   }
 }
@@ -510,7 +511,7 @@ export async function discoverSkills(app: App): Promise<Skill[]> {
     loadSkillsFromRoot(app, PROJECT_SKILL_ROOTS[0].root, 'project'),
     loadSkillsFromRoot(app, PROJECT_SKILL_ROOTS[1].root, 'legacy'),
     loadNestedSkills(app, nestedSkillDirs),
-    loadLearnedSkills(app.vault.adapter).catch(error => {
+    loadLearnedSkills(app.vault.adapter).catch((error: unknown): Skill[] => {
       console.warn('[Glossa] learned skills unavailable', error);
       return [];
     }),

@@ -35,14 +35,14 @@ async function tryRemove(adapter: DataAdapter, path: string): Promise<void> {
  *  better than the naive truncate (the rename target either has old content
  *  or new content, never half-written). */
 async function renameOrCopy(adapter: DataAdapter, src: string, dst: string): Promise<void> {
-  const a = adapter as AnyValue;
+  const a = adapter;
   if (typeof a.rename === 'function') {
     try {
       // remove dst first — some adapters fail if dst exists.
       await tryRemove(adapter, dst);
       await a.rename(src, dst);
       return;
-    } catch (e) {
+    } catch (e: unknown) {
       // Fall through to copy path.
       console.warn('[safe-write] rename failed, falling back to copy', e);
     }
@@ -72,14 +72,14 @@ export async function safeWrite(
       if (await adapter.exists(path)) {
         await renameOrCopy(adapter, path, bakPath);
       }
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn('[safe-write] backup roll failed (continuing)', e);
     }
   }
   // Promote tmp → target.
   try {
     await renameOrCopy(adapter, tmpPath, path);
-  } catch (e) {
+  } catch (e: unknown) {
     // Rename failed — try to restore from .bak if we made one.
     if (opts.keepBackup !== false) {
       try {
@@ -118,7 +118,7 @@ export async function safeReadJson<T = unknown>(
       const raw = await adapter.read(p);
       if (!raw) return null;
       return JSON.parse(raw) as T;
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn(`[safe-write] parse failed for ${p}`, e);
       return null;
     }

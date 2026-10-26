@@ -32,7 +32,7 @@ async function ensureLoaded(app: App): Promise<void> {
     const { safeReadJson } = await import('../utils/safe_write');
     const parsed = await safeReadJson<Partial<UsageFile>>(app.vault.adapter, USAGE_PATH);
     if (parsed && parsed.entries) { cache = { ...parsed.entries }; return; }
-  } catch (e) {
+  } catch (e: unknown) {
     console.warn('[skill_usage] failed to load, starting fresh', e);
   }
   cache = {};
@@ -51,7 +51,7 @@ async function flush(app: App): Promise<void> {
     // file would reset the frequency ranking silently.
     const { safeWriteJson } = await import('../utils/safe_write');
     await safeWriteJson(adapter, USAGE_PATH, data, { pretty: true });
-  } catch (e) {
+  } catch (e: unknown) {
     console.warn('[skill_usage] flush failed', e);
   }
 }

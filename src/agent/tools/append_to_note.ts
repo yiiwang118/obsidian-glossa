@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, vaultFolderOf, type ToolImpl } from './_shared';
 
@@ -12,7 +13,7 @@ export const appendToNote: ToolImpl = buildTool({
   searchHint: 'append text to end of note (prefer patch_note)',
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => `append ${a.path}`,
-  preview: async (a) => `Append to\n\n${a.path}\n\n+ ${(a.text ?? '').length} chars at end`,
+  preview: async (a: import('../tool_arguments').ToolArguments) => `Append to\n\n${a.path}\n\n+ ${(a.text ?? '').length} chars at end`,
   spec: {
     name: 'append_to_note',
     description: 'Append text to the end of a note (creates note if missing). REQUIRES USER APPROVAL.',
@@ -29,7 +30,7 @@ export const appendToNote: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const text = typeof args.text === 'string' ? args.text : '';
     let f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) {

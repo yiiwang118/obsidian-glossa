@@ -1,3 +1,6 @@
+import type { ToolRunResult } from './tools';
+import type { ToolArguments } from './tool_arguments';
+import { errorMessage } from '../utils/unknown_data';
 /** Isolated skill execution with inherited permissions and per-task controls. */
 import type { App } from 'obsidian';
 import type { LLMProvider, ToolSpec } from '../providers/types';
@@ -13,7 +16,7 @@ const MAX_FORK_DEPTH = 5;
 
 interface McpHubLike {
   asToolSpecs(): ToolSpec[];
-  findClient(name: string): { client: { callTool(name: string, args: AnyValue): Promise<AnyValue> }; originalName: string } | null;
+  findClient(name: string): { client: { callTool(name: string, args: ToolArguments): Promise<string | ToolRunResult> }; originalName: string } | null;
 }
 
 export interface ForkOptions extends Pick<AgentLoopOptions, 'workspaceFolders' | 'approver' | 'onPermissionRulePersist' | 'onPermissionDecision' | 'sessionId' | 'turnId' | 'model' | 'runMode' | 'runtimeTools' | 'contextBudget'> {
@@ -108,8 +111,8 @@ export async function forkSkill(opts: ForkOptions): Promise<ForkResult> {
       onFinal: (usage) => { collectedUsage = usage; },
       onError: (err) => { collectedError = err; },
     });
-  } catch (e) {
-    collectedError = e?.message ?? String(e);
+  } catch (e: unknown) {
+    collectedError = errorMessage(e);
   } finally {
     if (task.signal.aborted) collectedError = 'Subtask cancelled. Completed file changes are kept; check them before retrying.';
     registry.finish(task.record, collectedError);

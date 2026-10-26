@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 import { TFile } from 'obsidian';
 import { setStyle } from '../../utils/dom';
 import { formatPdfDiagnosticMarkdown, type PdfExtractionResult, type PdfReadTask } from '../../utils/pdf';
@@ -97,7 +98,7 @@ export const readPdf: ToolImpl = buildTool({
   run: async (app, args, ctx) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
 
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: PDF file not found: ${path}`;
@@ -123,8 +124,8 @@ export const readPdf: ToolImpl = buildTool({
           const raw = await app.vault.readBinary(f);
           const sliced = await slicePdfPages(raw, args.pages, maxPages);
           return nativePdfToolResult(path, sliced);
-        } catch (error) {
-          nativeFallback = `\n\nNative PDF fallback: ${error instanceof Error ? error.message : String(error)}`;
+        } catch (error: unknown) {
+          nativeFallback = `\n\nNative PDF fallback: ${errorMessage(error)}`;
         }
       }
       const { value: res } = await extractVaultPdfCached(app, f, {
@@ -151,8 +152,8 @@ export const readPdf: ToolImpl = buildTool({
         text: `${text}\n\nRendered visual evidence: page(s) ${rendered.pageLabel}.`,
         contentBlocks: renderedPdfBlocks(rendered),
       };
-    } catch (e) {
-      return `Error extracting PDF text from ${path}: ${e?.message ?? e}`;
+    } catch (e: unknown) {
+      return `Error extracting PDF text from ${path}: ${errorMessage(e)}`;
     }
   },
 });

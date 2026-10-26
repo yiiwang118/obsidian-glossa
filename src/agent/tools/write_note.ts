@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
@@ -10,7 +11,7 @@ export const writeNote: ToolImpl = buildTool({
   searchTags: ['replace whole file', 'full rewrite', '覆盖全文', '重写笔记'],
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => `write ${a.path}`,
-  preview: async (a) => `Replace entire content of\n\n${a.path}\n\n→ ${(a.content ?? '').length} chars`,
+  preview: async (a: import('../tool_arguments').ToolArguments) => `Replace entire content of\n\n${a.path}\n\n→ ${(a.content ?? '').length} chars`,
   spec: {
     name: 'write_note',
     description: 'Replace every character of one existing note. Use only for an intentional full rewrite; use file_edit, patch_note, or apply_patch for partial changes. The file must already exist. Requires user approval.',
@@ -27,7 +28,7 @@ export const writeNote: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const content = typeof args.content === 'string' ? args.content : '';
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: file does not exist: ${path}. Use create_note to make a new one.`;

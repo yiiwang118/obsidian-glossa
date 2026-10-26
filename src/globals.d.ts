@@ -1,5 +1,3 @@
-type AnyValue = ReturnType<typeof JSON.parse>;
-
 interface Window {
   require?: (moduleId: string) => unknown;
   createEl<K extends keyof HTMLElementTagNameMap>(

@@ -111,5 +111,5 @@ export function applySlashTemplate(opts: {
     .replace(/\$\{filename\}/g, opts.fileName || '')
     .replace(/\$\{selection-or-file\}/g, selectionOrFile || '')
     .replace(/\$\{vault\}/g, opts.vaultName)
-    .replace(/\$\{args(?::([^}]+))?\}/g, (_, def) => opts.args || def || '');
+    .replace(/\$\{args(?::([^}]+))?\}/g, (_: string, def: string) => opts.args || def || '');
 }

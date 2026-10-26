@@ -1,4 +1,5 @@
-import { FileView, TFile } from 'obsidian';
+import { errorName, errorMessage } from '../utils/unknown_data';
+import { FileView, TFile, type WorkspaceLeaf } from 'obsidian';
 import type GlossaPlugin from '../main';
 import { el, clear, setStyle } from '../utils/dom';
 import {
@@ -133,9 +134,9 @@ export class CitationHoverController {
     const delay = Math.max(250, Math.min(2000, this.plugin.settings.citationHoverDelayMs ?? 700));
     this.hoverTimer = window.setTimeout(() => {
       this.hoverTimer = null;
-      this.resolveCandidate(candidate, seq).catch((e) => {
+      this.resolveCandidate(candidate, seq).catch((e: unknown) => {
         if (seq !== this.seq) return;
-        const msg = e?.name === 'AbortError' ? '' : (e?.message ?? String(e));
+        const msg = errorName(e) === 'AbortError' ? '' : errorMessage(e);
         if (msg) this.showMessage(candidate, 'Reference preview failed', msg);
       });
     }, delay);
@@ -168,13 +169,13 @@ export class CitationHoverController {
 
   private pdfContextForTarget(target: HTMLElement): { file: TFile; root: HTMLElement } | null {
     const directRoot = target.closest(PDF_ROOT_SELECTOR);
-    const leaves: AnyValue[] = [];
+    const leaves: WorkspaceLeaf[] = [];
     this.plugin.app.workspace.iterateAllLeaves(leaf => leaves.push(leaf));
     for (const leaf of leaves) {
       const view = leaf?.view;
-      const container = (view)?.containerEl as HTMLElement | undefined;
+      const container = (view)?.containerEl;
       if (!view || !container || !container.contains(target)) continue;
-      const file = view instanceof FileView ? view.file : (view).file;
+      const file = view instanceof FileView ? view.file : (view as typeof view & { file?: TFile }).file;
       if (!(file instanceof TFile) || file.extension.toLowerCase() !== 'pdf') continue;
       const root = directRoot && container.contains(directRoot)
         ? directRoot as HTMLElement
@@ -357,7 +358,8 @@ function cleanInlineText(text: string): string {
 }
 
 function textAroundPoint(x: number, y: number): string {
-  const doc: AnyValue = activeDocument;
+  // The Chromium range fallback remains necessary on older supported hosts.
+  const doc = activeDocument as unknown as { caretRangeFromPoint?: (x: number, y: number) => Range | null; caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null };
   let node: Node | null = null;
   let offset = 0;
   const range = typeof doc.caretRangeFromPoint === 'function' ? doc.caretRangeFromPoint(x, y) : null;

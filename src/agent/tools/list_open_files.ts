@@ -1,3 +1,4 @@
+import type { Editor, TFile, View, WorkspaceLeaf } from 'obsidian';
 /**
  * list_open_files — enumerate every currently-open editor tab + its cursor.
  *
@@ -5,7 +6,7 @@
  * for distinguishing "the user mentioned 'this note' which probably means the
  * file in the active tab" from "they referred to one of the 3 split panes".
  */
-import { MarkdownView, type WorkspaceLeaf } from 'obsidian';
+import { MarkdownView } from 'obsidian';
 import { buildTool, type ToolImpl } from './_shared';
 
 interface OpenFile {
@@ -42,14 +43,14 @@ export const listOpenFiles: ToolImpl = buildTool({
     const out: OpenFile[] = [];
     // Iterate ALL leaves; filter to those with a file open. Includes splits + sidebar.
     app.workspace.iterateAllLeaves((leaf: WorkspaceLeaf) => {
-      const view = leaf.view as AnyValue;
+      const view = leaf.view as View & { file?: TFile; editor?: Editor };
       const file = view?.file;
       if (!file?.path) return;
       const isMd = leaf.view instanceof MarkdownView;
       let cursor: OpenFile['cursor'] | undefined;
       let selection: OpenFile['selection'] | undefined;
       if (isMd) {
-        const editor = (leaf.view as AnyValue).editor;
+        const editor = (leaf.view as View & { file?: TFile; editor?: Editor }).editor;
         if (editor) {
           try {
             const c = editor.getCursor();
@@ -66,11 +67,11 @@ export const listOpenFiles: ToolImpl = buildTool({
       }
       out.push({
         path: file.path,
-        leaf_id: (leaf as AnyValue).id ?? '(no-id)',
+        leaf_id: (leaf as WorkspaceLeaf & { id?: string }).id ?? '(no-id)',
         is_active: leaf === activeLeaf,
         cursor,
         selection,
-        view_type: (leaf.view as AnyValue).getViewType?.() ?? 'unknown',
+        view_type: (leaf.view as View & { file?: TFile; editor?: Editor }).getViewType?.() ?? 'unknown',
       });
     });
     if (out.length === 0) return '(no files open)';

@@ -1,3 +1,4 @@
+import { errorMessage } from '../utils/unknown_data';
 import { TFile, type App } from 'obsidian';
 import { applyUpdateDetailed, type FileOp } from './patch_envelope';
 import { describeTextMatches, textFingerprint } from './text_edit_engine';
@@ -112,16 +113,16 @@ async function restoreSnapshots(plan: PatchTransactionPlan, store: PatchFileStor
     try {
       const current = await store.read(snapshot.path);
       if (current !== null) await store.remove(snapshot.path);
-    } catch (error) {
-      errors.push(`remove ${snapshot.path}: ${error instanceof Error ? error.message : String(error)}`);
+    } catch (error: unknown) {
+      errors.push(`remove ${snapshot.path}: ${errorMessage(error)}`);
     }
   }
   for (const snapshot of plan.snapshots) {
     if (snapshot.content === null) continue;
     try {
       await store.write(snapshot.path, snapshot.content);
-    } catch (error) {
-      errors.push(`restore ${snapshot.path}: ${error instanceof Error ? error.message : String(error)}`);
+    } catch (error: unknown) {
+      errors.push(`restore ${snapshot.path}: ${errorMessage(error)}`);
     }
   }
   return errors;
@@ -131,8 +132,8 @@ async function restoreSnapshots(plan: PatchTransactionPlan, store: PatchFileStor
 export async function commitPatchTransaction(plan: PatchTransactionPlan, store: PatchFileStore): Promise<PatchCommitResult> {
   try {
     await verifySnapshots(plan, store);
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error), rolledBack: false, rollbackErrors: [] };
+  } catch (error: unknown) {
+    return { ok: false, error: errorMessage(error), rolledBack: false, rollbackErrors: [] };
   }
 
   const touched: string[] = [];
@@ -153,11 +154,11 @@ export async function commitPatchTransaction(plan: PatchTransactionPlan, store: 
       }
     }
     return { ok: true, touched };
-  } catch (error) {
+  } catch (error: unknown) {
     const rollbackErrors = await restoreSnapshots(plan, store);
     return {
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage(error),
       rolledBack: rollbackErrors.length === 0,
       rollbackErrors,
     };

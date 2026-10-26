@@ -1,3 +1,4 @@
+import { errorMessage } from './unknown_data';
 export type ImageInspectMode = 'auto' | 'describe' | 'ocr' | 'ui' | 'chart' | 'detail' | 'color';
 
 export interface ImageRegion {
@@ -215,8 +216,8 @@ export async function inspectImageArrayBuffer(data: ArrayBuffer | Uint8Array, mi
     if (safeMime === 'image/gif' && region) {
       warnings.push('GIF crop uses the browser-decoded frame, not the full animation.');
     }
-  } catch (e) {
-    warnings.push(`Could not decode image dimensions locally: ${e?.message ?? e}`);
+  } catch (e: unknown) {
+    warnings.push(`Could not decode image dimensions locally: ${errorMessage(e)}`);
     region = normalizeImageRegion(opts.region);
   }
 

@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 /**
  * manage_tags — add/remove/list tags on a note.
  *
@@ -101,18 +102,18 @@ export const manageTags: ToolImpl = buildTool({
       additionalProperties: false,
     },
   },
-  preview: async (a) => `${a.op} ${(a.tags ?? []).join(', ')} on ${a.path}`,
+  preview: async (a: import('../tool_arguments').ToolArguments) => `${a.op} ${(a.tags ?? []).join(', ')} on ${a.path}`,
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const op = args.op as 'add' | 'remove' | 'list';
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;
 
     if (op === 'list') {
       const cache = app.metadataCache.getFileCache(f);
-      const all = getAllTags(cache ?? ({} as AnyValue)) ?? [];
+      const all = getAllTags(cache ?? {}) ?? [];
       const uniq = [...new Set(all.map(normalizeTag))].sort();
       return uniq.length === 0 ? '(no tags)' : uniq.join('\n');
     }
@@ -125,7 +126,7 @@ export const manageTags: ToolImpl = buildTool({
     if (op === 'add') {
       let added: string[] = [];
       try {
-        await app.fileManager.processFrontMatter(f, (fm: Record<string,AnyValue>) => {
+        await app.fileManager.processFrontMatter(f, (fm: Record<string, unknown>) => {
           // Reconcile: frontmatter accepts `tags:` (array) or `tag:` (string).
           // We normalise to `tags:` array.
           const existing = Array.isArray(fm.tags) ? fm.tags.map(String)
@@ -141,14 +142,14 @@ export const manageTags: ToolImpl = buildTool({
           // Drop legacy `tag:` field if we just wrote `tags:`.
           if ('tag' in fm) delete fm.tag;
         });
-      } catch (e) { return `Error: ${e.message}`; }
+      } catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
       return added.length === 0 ? '(all tags already present)' : `Added: ${added.join(', ')}`;
     }
 
     // remove — both frontmatter AND inline.
     let removed = new Set<string>();
     try {
-      await app.fileManager.processFrontMatter(f, (fm: Record<string,AnyValue>) => {
+      await app.fileManager.processFrontMatter(f, (fm: Record<string, unknown>) => {
         const before = Array.isArray(fm.tags) ? fm.tags.map(String) : typeof fm.tags === 'string' ? [fm.tags] : [];
         const targetSet = new Set(inputTags);
         const kept = before.filter(t => !targetSet.has(normalizeTag(t)));
@@ -163,7 +164,7 @@ export const manageTags: ToolImpl = buildTool({
           delete fm.tag;
         }
       });
-    } catch (e) { return `Error: ${e.message}`; }
+    } catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
 
     // Strip inline #tag occurrences.
     const text = await app.vault.read(f);

@@ -1,3 +1,5 @@
+import type { ToolArguments } from './tool_arguments';
+import { errorMessage } from '../utils/unknown_data';
 import { TFile, TFolder, type App } from 'obsidian';
 import type GlossaPlugin from '../main';
 import { filesInFolder } from './tools/_shared';
@@ -61,14 +63,14 @@ export class CheckpointManager {
       if (await this.plugin.app.vault.adapter.exists(this.path)) {
         const raw = await this.plugin.app.vault.adapter.read(this.path);
         const dec = await this.plugin.decryptBlob(raw);
-        const parsed = JSON.parse(dec);
+        const parsed = JSON.parse(dec) as { entries?: SessionCheckpoint[] };
         const entries: SessionCheckpoint[] = Array.isArray(parsed?.entries) ? parsed.entries : [];
         // Drop checkpoints older than 7 days.
         const cutoff = Date.now() - 7 * 24 * 3600_000;
         const kept = entries.filter(e => e.takenAt > cutoff);
         return kept;
       }
-    } catch (e) {
+    } catch (e: unknown) {
       // Don't fall back silently — without a log the "rollback button isn't
       // working" bug report has no breadcrumb.
       console.warn('[Glossa] checkpoint read failed; rollback unavailable for this turn', e);
@@ -85,7 +87,7 @@ export class CheckpointManager {
       // encrypted; safeWrite treats it as opaque string.
       const { safeWrite } = await import('../utils/safe_write');
       await safeWrite(this.plugin.app.vault.adapter, this.path, payload);
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn('[Glossa] checkpoint write failed', e);
     }
   }
@@ -97,7 +99,7 @@ export class CheckpointManager {
         const payload = await this.plugin.encryptBlob(JSON.stringify({ entries: [] }));
         const { safeWrite } = await import('../utils/safe_write');
         await safeWrite(this.plugin.app.vault.adapter, this.path, payload);
-      } catch (e) { console.warn('[Glossa] checkpoint purge failed', e); }
+      } catch (e: unknown) { console.warn('[Glossa] checkpoint purge failed', e); }
     });
   }
 
@@ -206,8 +208,8 @@ export class CheckpointManager {
           return { restored: 0, failed: [`${s.path}: changed since this turn; kept current content`] };
         }
         current.set(s.path, content);
-      } catch (error) {
-        return { restored: 0, failed: [`${s.path}: ${error instanceof Error ? error.message : String(error)}`] };
+      } catch (error: unknown) {
+        return { restored: 0, failed: [`${s.path}: ${errorMessage(error)}`] };
       }
     }
     let restored = 0; const failed: string[] = [];
@@ -233,7 +235,7 @@ export class CheckpointManager {
         }
         s.restoredAt = Date.now();
         restored++;
-      } catch (e) { failed.push(`${s.path}: ${e.message}`); }
+      } catch (e: unknown) { failed.push(`${s.path}: ${errorMessage(e)}`); }
     }
     await this.write(entries);
     return { restored, failed };
@@ -244,7 +246,7 @@ export class CheckpointManager {
 /** pathsTouchedByTool with folders opened up: deleting or moving a folder
  *  touches every file in it, and moved files reappear under the new path.
  *  Call before the tool runs, while the folder still exists. */
-export function filesTouchedByTool(app: App, name: string, args: AnyValue): string[] {
+export function filesTouchedByTool(app: App, name: string, args: ToolArguments): string[] {
   const paths = pathsTouchedByTool(name, args);
   const clean = (value: unknown) => typeof value === 'string' ? value.replace(/^\.\//, '').trim().replace(/\/+$/, '') : '';
   const source = clean(name === 'delete_note' ? args?.path : name === 'rename_note' ? args?.from : undefined);
@@ -257,7 +259,7 @@ export function filesTouchedByTool(app: App, name: string, args: AnyValue): stri
 }
 
 /** Returns the file paths a dangerous tool would touch — used to know what to snapshot. */
-export function pathsTouchedByTool(name: string, args: AnyValue): string[] {
+export function pathsTouchedByTool(name: string, args: ToolArguments): string[] {
   switch (name) {
     // Single-file operations with a `path` arg, including phase 1 surgical
     // tools.
@@ -273,7 +275,7 @@ export function pathsTouchedByTool(name: string, args: AnyValue): string[] {
       return args.path ? [args.path] : [];
     case 'rename_note':
       // Both source and destination are touched (source disappears, dest appears).
-      return [args.from, args.to].filter(Boolean);
+      return [args.from, args.to].filter((path): path is string => typeof path === 'string' && !!path);
     case 'templater_render':
       // Only writes the target. The template itself is read-only.
       return args.target_path ? [args.target_path] : [];

@@ -1,3 +1,4 @@
+import type { PdfJsLibrary, PdfJsTextItem } from '../utils/pdfjs_types';
 import { App, TFile, loadPdfJs } from 'obsidian';
 import { textItemsToString } from '../utils/pdf';
 
@@ -41,7 +42,7 @@ interface CachedIndex {
 }
 
 interface PdfJsTextContent {
-  items?: AnyValue[];
+  items?: PdfJsTextItem[];
 }
 
 interface PdfJsViewport {
@@ -155,7 +156,7 @@ async function buildPdfReferenceIndex(app: App, file: TFile, signal?: AbortSigna
   throwIfAborted(signal);
   const data = await app.vault.readBinary(file);
   throwIfAborted(signal);
-  const pdfjs = await loadPdfJs();
+  const pdfjs = await loadPdfJs() as PdfJsLibrary;
   const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(data).slice(),
     useWorkerFetch: false,
@@ -164,7 +165,7 @@ async function buildPdfReferenceIndex(app: App, file: TFile, signal?: AbortSigna
 
   let doc: PdfJsDocument | null = null;
   try {
-    doc = await loadingTask.promise as PdfJsDocument;
+    doc = await loadingTask.promise;
     throwIfAborted(signal);
     const pageCount = Math.max(0, Number(doc?.numPages) || 0);
     const start = Math.max(1, pageCount - MAX_TAIL_PAGES + 1);
@@ -466,7 +467,7 @@ interface TextLine {
   y: number;
 }
 
-function textItemsToReferenceLines(items: AnyValue[], pageWidth: number): string[] {
+function textItemsToReferenceLines(items: PdfJsTextItem[], pageWidth: number): string[] {
   const runs: TextRun[] = [];
   for (const item of items ?? []) {
     const text = typeof item?.str === 'string' ? item.str.replace(/\s+/g, ' ').trim() : '';

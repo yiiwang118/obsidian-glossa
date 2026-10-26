@@ -1,3 +1,4 @@
+interface MathJaxApi { typesetPromise?(nodes: HTMLElement[]): Promise<void> }
 import { App, Component, MarkdownRenderer } from 'obsidian';
 import { ICON } from '../ui/icons';
 import { setTrustedSvg } from './dom';
@@ -32,7 +33,7 @@ export async function renderInto(
   if (!hasMarkdownMath(raw)) return;
   try {
     const ownerWindow = target.ownerDocument.defaultView ?? window;
-    const mj = (ownerWindow as AnyValue).MathJax ?? (window as AnyValue).MathJax;
+    const mj = (ownerWindow as Window & { MathJax?: MathJaxApi }).MathJax ?? (window as Window & { MathJax?: MathJaxApi }).MathJax;
     if (mj?.typesetPromise) await mj.typesetPromise([target]);
   } catch { /* ignore */ }
 }
@@ -49,13 +50,13 @@ const BLOCKED_RESOURCE_SCHEME_IN_TEXT = /\b(?:upload):\/\//i;
  */
 export function sanitizeMarkdownResourceUrls(src: string): string {
   if (!hasBlockedResourceScheme(src)) return src;
-  let out = src.replace(/!\[([^\]]*)\]\(\s*(upload:\/\/[^)\s]+)(?:\s+["'][^"']*["'])?\s*\)/gi, (_m, alt, url) => {
+  let out = src.replace(/!\[([^\]]*)\]\(\s*(upload:\/\/[^)\s]+)(?:\s+["'][^"']*["'])?\s*\)/gi, (_m: string, alt: string, url: string) => {
     return omittedImageText(alt || basenameFromUrl(url));
   });
-  out = out.replace(/<img\b[^>]*\bsrc\s*=\s*(["'])(upload:\/\/[^"']+)\1[^>]*>/gi, (_m, _q, url) => {
+  out = out.replace(/<img\b[^>]*\bsrc\s*=\s*(["'])(upload:\/\/[^"']+)\1[^>]*>/gi, (_m: string, _q: string, url: string) => {
     return omittedImageText(basenameFromUrl(url));
   });
-  out = out.replace(/<img\b[^>]*\bsrc\s*=\s*(upload:\/\/[^\s>]+)[^>]*>/gi, (_m, url) => {
+  out = out.replace(/<img\b[^>]*\bsrc\s*=\s*(upload:\/\/[^\s>]+)[^>]*>/gi, (_m: string, url: string) => {
     return omittedImageText(basenameFromUrl(url));
   });
   return out;

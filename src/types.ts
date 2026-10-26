@@ -1,3 +1,4 @@
+import type { ToolArguments } from './agent/tool_arguments';
 import type { SourceLanguage } from './utils/translation_target';
 // Mode type kept for backwards-compat with persisted sessions, but the active
 // runtime now uses RunMode ('plan' / 'act') everywhere. MODE_LABELS /
@@ -18,9 +19,10 @@ export interface TokenUsage {
 }
 
 export interface ToolEvent {
+  _modelBoundResult?: string;
   id: string;
   name: string;
-  args: AnyValue;
+  args: ToolArguments;
   result?: string;
   /** Rich result content (e.g. image blocks from view_image). Sent back to the model
    *  on subsequent turns so it can re-reference the image / resource. */
@@ -45,6 +47,7 @@ export interface ContextItemRef {
 }
 
 export interface ChatMessage {
+  _mergedInlineThinking?: boolean;
   id: string;
   role: 'user' | 'assistant' | 'tool';
   /** Canonical content sent to the model. For slash-triggered user messages
@@ -315,7 +318,7 @@ const PERMISSION_PATH_KEYS = new Set([
   'to',
 ]);
 
-function permissionRulePaths(args: AnyValue): string[] {
+function permissionRulePaths(args: ToolArguments): string[] {
   if (!args || typeof args !== 'object') return [];
   const out: string[] = [];
   const add = (v: unknown) => {
@@ -343,7 +346,7 @@ function mcpRuleMatches(rule: PermissionRule, toolName: string): boolean {
 }
 
 /** Check whether a rule matches a (tool, args) pair. */
-export function matchPermissionRule(rule: PermissionRule, toolName: string, args: AnyValue, currentSessionId?: string): boolean {
+export function matchPermissionRule(rule: PermissionRule, toolName: string, args: ToolArguments, currentSessionId?: string): boolean {
   if (rule.scopedToSessionId && rule.scopedToSessionId !== currentSessionId) return false;
   if (rule.tool.startsWith('mcp:')) {
     if (!mcpRuleMatches(rule, toolName)) return false;

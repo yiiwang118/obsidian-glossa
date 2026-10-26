@@ -1,3 +1,4 @@
+import { installedPlugin } from '../../utils/obsidian_host';
 import type { App } from 'obsidian';
 import type { GlossaSettings, WebSearchProvider } from '../../types';
 import type { PermissionResult } from './_shared';
@@ -22,7 +23,7 @@ export function normalizeDomains(value: unknown): string[] {
 }
 
 export function readWebSettings(app: App): Partial<GlossaSettings> {
-  return (app as AnyValue)?.plugins?.plugins?.glossa?.settings ?? {};
+  return (installedPlugin(app, 'glossa').settings ?? {});
 }
 
 export function normalizeSearchProvider(value: unknown): WebSearchProvider {

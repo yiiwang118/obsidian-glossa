@@ -13,8 +13,8 @@ export function buildProvider(ep: Endpoint, globalProxy: string, fallbackCwd?: s
     case 'grok-cli':        p = new LocalCliProvider(ep, fallbackCwd, proxy); break;
     case 'custom-api':      p = new CustomApiProvider(ep); break;
   }
-  (p as AnyValue).__proxy = proxy;
-  (p as AnyValue).__fallbackCwd = fallbackCwd;
+  p.__proxy = proxy;
+  p.__fallbackCwd = fallbackCwd;
   return p;
 }
 

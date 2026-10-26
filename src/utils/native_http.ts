@@ -33,7 +33,7 @@ interface NodeHttpModule {
 export async function nativeStreamingHttpRequest(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   try {
     return await window.fetch(input, init);
-  } catch (error) {
+  } catch (error: unknown) {
     if (init?.signal?.aborted || errorName(error) === 'AbortError') throw asError(error);
   }
   return nodeStreamingHttpRequest(input, init);

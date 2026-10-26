@@ -1,3 +1,5 @@
+import type { ToolArguments } from '../tool_arguments';
+import { errorMessage } from '../../utils/unknown_data';
 import { TFile } from 'obsidian';
 import { parseEnvelope, looksLikeEnvelope, summarizeOps, type FileOp } from '../patch_envelope';
 import { commitPatchTransaction, materializePatchTransaction, obsidianPatchFileStore } from '../patch_transaction';
@@ -16,7 +18,7 @@ export const applyPatch: ToolImpl = buildTool({
         if (ops.length === 1) {
           const op = ops[0];
           const p = op.kind === 'update' && op.movePath ? `${op.path} → ${op.movePath}`
-                  : (op as AnyValue).path;
+                  : op.path;
           return `patch ${p} (${op.kind === 'update' ? `${op.chunks.length}h` : op.kind})`;
         }
         return `patch envelope (${ops.length} files)`;
@@ -24,7 +26,7 @@ export const applyPatch: ToolImpl = buildTool({
     }
     return `patch ${a.path} (${(a.edits ?? []).length} edits)`;
   },
-  preview: async (app, a: AnyValue) => {
+  preview: async (app: import('obsidian').App, a: ToolArguments) => {
     if (typeof a.patch === 'string' && looksLikeEnvelope(a.patch)) {
       try {
         const ops = parseEnvelope(a.patch);
@@ -36,15 +38,15 @@ export const applyPatch: ToolImpl = buildTool({
           if (operation.matchSummary) lines.push(`  ${operation.matchSummary}`);
         }
         return lines.join('\n');
-      } catch (e) {
-        return `Envelope parse error: ${e.message}`;
+      } catch (e: unknown) {
+        return `Envelope parse error: ${errorMessage(e)}`;
       }
     }
     const f = app.vault.getAbstractFileByPath(a.path);
     if (!(f instanceof TFile)) return `(file not found: ${a.path})`;
     const text = await app.vault.read(f);
     const edits = a.edits ?? [];
-    const result = applyTextEdits(text, edits.map((edit: AnyValue) => ({ oldText: edit.search, newText: edit.replace })));
+    const result = applyTextEdits(text, edits.map((edit) => ({ oldText: edit.search, newText: edit.replace })));
     if (result.ok === false) return `File: ${a.path}\n\n✗ Edit ${(result.operationIndex ?? 0) + 1}: ${result.error}`;
     a.__expectedFingerprint = result.fingerprint;
     const lines: string[] = [`File: ${a.path}`, `Match: ${describeTextMatches(result.edits)}`, ''];
@@ -82,22 +84,22 @@ export const applyPatch: ToolImpl = buildTool({
     if (typeof args.patch === 'string' && looksLikeEnvelope(args.patch)) {
       let ops: FileOp[];
       try { ops = parseEnvelope(args.patch); }
-      catch (e) { return `Error: ${e.message}`; }
+      catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
       // Pre-validate every path in the envelope before applying anything.
       // Bail before the first write so we don't half-apply a patch when one
       // hunk references a hostile path.
       for (const op of ops) {
-        try { assertVaultPath((op as AnyValue).path); }
-        catch (e) { return `Error: ${op.kind} has invalid path — ${e.message}`; }
+        try { assertVaultPath(op.path); }
+        catch (e: unknown) { return `Error: ${op.kind} has invalid path — ${errorMessage(e)}`; }
         if (op.kind === 'update' && op.movePath) {
           try { assertVaultPath(op.movePath, 'move target'); }
-          catch (e) { return `Error: ${op.kind} → move target invalid — ${e.message}`; }
+          catch (e: unknown) { return `Error: ${op.kind} → move target invalid — ${errorMessage(e)}`; }
         }
       }
       const store = obsidianPatchFileStore(app);
-      let plan;
+      let plan: Awaited<ReturnType<typeof materializePatchTransaction>>;
       try { plan = await materializePatchTransaction(ops, store); }
-      catch (e) { return `Error: patch preflight failed: ${e.message}`; }
+      catch (e: unknown) { return `Error: patch preflight failed: ${errorMessage(e)}`; }
       const expected = args.__expectedFingerprints;
       if (expected && typeof expected === 'object') {
         for (const snapshot of plan.snapshots) {
@@ -119,7 +121,7 @@ export const applyPatch: ToolImpl = buildTool({
 
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const { edits } = args;
     if (!Array.isArray(edits) || edits.length === 0) return 'Error: provide either `patch` (envelope) or `edits` array.';
     const f = app.vault.getAbstractFileByPath(path);

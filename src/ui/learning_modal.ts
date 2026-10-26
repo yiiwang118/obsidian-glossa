@@ -1,3 +1,4 @@
+import { errorMessage } from '../utils/unknown_data';
 import { Modal } from 'obsidian';
 import type GlossaPlugin from '../main';
 import { buildProvider } from '../providers/registry';
@@ -80,10 +81,10 @@ export class LearningModal extends Modal {
     try {
       this.ledger = await readLearningLedger(this.app.vault.adapter);
       if (!this.closed) { if (this.source) this.editor(); else this.library(); }
-    } catch (error) {
+    } catch (error: unknown) {
       if (!this.closed) {
         this.contentEl.empty();
-        this.contentEl.createEl('p', { text: bi('Could not open learning history: ', '无法读取学习记录：') + String(error), cls: 'nc-learning-error' });
+        this.contentEl.createEl('p', { text: bi('Could not open learning history: ', '无法读取学习记录：') + errorMessage(error), cls: 'nc-learning-error' });
       }
     }
   }
@@ -112,8 +113,8 @@ export class LearningModal extends Modal {
     this.status.removeClass('nc-learning-error');
     this.abort = new AbortController();
     try { await action(); }
-    catch (error) {
-      if (!this.closed) { this.status.addClass('nc-learning-error'); this.status.setText(String(error instanceof Error ? error.message : error)); }
+    catch (error: unknown) {
+      if (!this.closed) { this.status.addClass('nc-learning-error'); this.status.setText(errorMessage(error)); }
     } finally {
       this.busy = false;
       if (!this.closed) this.form.disabled = false;
@@ -276,7 +277,7 @@ export class LearningModal extends Modal {
       const error = fileSection.createEl('p', { cls: 'nc-learning-error' });
       this.field(fileSection, bi('Fixtures and exact expected files (JSON)', '样例文件和预期完整内容（JSON）'), JSON.stringify(draft.fileExamples, null, 2), value => {
         try { draft.fileExamples = parseFileExamples(JSON.parse(value) as unknown); this.fileExamplesError = ''; error.setText(''); }
-        catch (e) { this.fileExamplesError = String(e instanceof Error ? e.message : e); error.setText(this.fileExamplesError); }
+        catch (e: unknown) { this.fileExamplesError = errorMessage(e); error.setText(this.fileExamplesError); }
       }, 12);
       this.button(fileSection, bi('Remove file tests', '移除文件测试'), () => { delete draft.fileExamples; this.invalidate(); this.editor(); });
     } else this.button(fileSection, bi('Add a file test', '添加文件测试'), () => {

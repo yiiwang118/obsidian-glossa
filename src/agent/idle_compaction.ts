@@ -42,7 +42,7 @@ export class IdleCompactor {
       entry.timer = undefined;
       void (async () => {
         try { if (!entry.controller.signal.aborted && ready()) await run(entry.controller.signal); }
-        catch (error) { if (!entry.controller.signal.aborted) failed(error); }
+        catch (error: unknown) { if (!entry.controller.signal.aborted) failed(error); }
         finally { if (this.pending.get(id) === entry) this.pending.delete(id); }
       })();
     }, delay);

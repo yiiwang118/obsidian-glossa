@@ -1,3 +1,4 @@
+import type { PdfJsLibrary, PdfJsDocument, PdfJsTextItem } from './pdfjs_types';
 import { loadPdfJs } from 'obsidian';
 
 export interface PdfExtractionOptions {
@@ -63,22 +64,6 @@ export interface PdfExtractionResult {
   warnings: string[];
 }
 
-interface PdfJsTextContent {
-  items?: AnyValue[];
-}
-
-interface PdfJsPage {
-  getTextContent: () => Promise<PdfJsTextContent>;
-  cleanup?: () => unknown;
-}
-
-interface PdfJsDocument {
-  numPages?: number;
-  getPage: (pageNumber: number) => Promise<PdfJsPage>;
-  getMetadata?: () => Promise<{ info?: { Title?: unknown; title?: unknown } }> | { info?: { Title?: unknown; title?: unknown } };
-  destroy?: () => void | Promise<void>;
-}
-
 const DEFAULT_MAX_PAGES = 80;
 const DEFAULT_MAX_CHARS = 100_000;
 const HARD_MAX_CHARS = 1_000_000;
@@ -141,11 +126,11 @@ export function parsePdfPageSelection(input: unknown, pageCount: number, maxPage
 }
 
 export async function extractPdfTextFromArrayBuffer(data: ArrayBuffer | Uint8Array, opts: PdfExtractionOptions = {}): Promise<PdfExtractionResult> {
-  const pdfjs = await loadPdfJs();
+  const pdfjs = await loadPdfJs() as PdfJsLibrary;
   return extractPdfTextWithPdfJs(pdfjs, data, opts);
 }
 
-export async function extractPdfTextWithPdfJs(pdfjs: AnyValue, data: ArrayBuffer | Uint8Array, opts: PdfExtractionOptions = {}): Promise<PdfExtractionResult> {
+export async function extractPdfTextWithPdfJs(pdfjs: PdfJsLibrary, data: ArrayBuffer | Uint8Array, opts: PdfExtractionOptions = {}): Promise<PdfExtractionResult> {
   if (!pdfjs?.getDocument) throw new Error('PDF.js is not available.');
   throwIfAborted(opts.signal);
 
@@ -158,7 +143,7 @@ export async function extractPdfTextWithPdfJs(pdfjs: AnyValue, data: ArrayBuffer
 
   let doc: PdfJsDocument | null = null;
   try {
-    doc = await loadingTask.promise as PdfJsDocument;
+    doc = await loadingTask.promise;
     throwIfAborted(opts.signal);
 
     const pageCount = Math.max(0, Number(doc?.numPages) || 0);
@@ -289,7 +274,7 @@ export function formatPdfDiagnosticMarkdown(result: PdfExtractionResult): string
   return lines.join('\n');
 }
 
-export function textItemsToString(items: AnyValue[]): string {
+export function textItemsToString(items: PdfJsTextItem[]): string {
   const lines: string[] = [];
   let line = '';
   let lineY: number | null = null;

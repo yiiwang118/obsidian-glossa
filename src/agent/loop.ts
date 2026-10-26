@@ -1,3 +1,6 @@
+import type { WireBlock } from '../providers/wire_types';
+import type { ToolArguments } from './tool_arguments';
+import { errorName, errorMessage } from '../utils/unknown_data';
 import { App } from 'obsidian';
 import { TOOLS, getTool, listToolSpecs, isConcurrencySafeTool, isReadOnlyTool, normalizeToolResult, validateToolInput, type ToolImpl, type ToolRunResult } from './tools';
 import { acquireFileLocks } from './file_locks';
@@ -44,16 +47,16 @@ const CODEX_ENVELOPE_EXCLUDED_TOOLS = new Set([
  *  objects with the same content but different key order produce the same
  *  string. Used for repetition-detection signatures so the model can't bypass
  *  the 3-strike refusal by shuffling keys. */
-function stableStringify(v: AnyValue): string {
+function stableStringify(v: unknown): string {
   if (v === null || typeof v !== 'object') return JSON.stringify(v);
   if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
   const keys = Object.keys(v).sort();
-  return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify((v as Record<string, unknown>)[k])).join(',') + '}';
 }
 
 interface McpHubLike {
   asToolSpecs(): ToolSpec[];
-  findClient(name: string): { client: { callTool(name: string, args: AnyValue): Promise<AnyValue> }; originalName: string } | null;
+  findClient(name: string): { client: { callTool(name: string, args: ToolArguments): Promise<string | ToolRunResult> }; originalName: string } | null;
 }
 
 export interface AgentLoopOptions {
@@ -104,7 +107,7 @@ export interface AgentLoopOptions {
   mcp?: McpHubLike;
   /** Approval handler. If not provided, falls back to the floating Modal. The view
    *  passes one that renders an inline ✓/✗ card next to the current assistant message. */
-  approver?: (tool: ToolImpl, args: AnyValue, signal?: AbortSignal) => Promise<ApprovalResult>;
+  approver?: (tool: ToolImpl, args: ToolArguments, signal?: AbortSignal) => Promise<ApprovalResult>;
 
   /** Server reported a context overflow (HTTP 413 / context_length_exceeded). The
    *  caller is expected to compact the conversation and return a fresh message array
@@ -269,7 +272,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       const cw = modelContextWindow(opts.model) ?? undefined;
       const skillBlock = await buildSkillSystemBlock(opts.app, cw);
       if (skillBlock) sysPrompt += skillBlock;
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn('[agent-loop] failed to build skill listing', e);
     }
   }
@@ -382,9 +385,9 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
 
     let assistantText = '';
     let assistantReasoning = '';
-    let assistantThinkingBlocks: AnyValue[] | undefined;
+    let assistantThinkingBlocks: WireBlock[] | undefined;
     let contextOverflowSeen = false;
-    const toolCalls: { id: string; name: string; args: AnyValue }[] = [];
+    const toolCalls: { id: string; name: string; args: ToolArguments }[] = [];
     const passthroughCardsById = new Map<string, ToolEvent>();
 
     let aborted = false, providerCompleted = false;
@@ -460,9 +463,9 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           return;
         }
       }
-    } catch (e) {
-      if (e.name === 'AbortError') { aborted = true; }
-      else { opts.onError(e.message ?? String(e)); opts.onFinal(totalUsage); return; }
+    } catch (e: unknown) {
+      if (errorName(e) === 'AbortError') { aborted = true; }
+      else { opts.onError(errorMessage(e)); opts.onFinal(totalUsage); return; }
     }
     if (aborted) { opts.onFinal(totalUsage); return; }
     if (!opts.signal?.aborted && !providerCompleted && !contextOverflowSeen) {
@@ -552,11 +555,11 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
            Approvals can't run in parallel (they're modal). Approval order matches
            the order the model issued the calls so the user sees a predictable flow. */
     interface Prepared {
-      call: { id: string; name: string; args: AnyValue };
+      call: { id: string; name: string; args: ToolArguments };
       ev: ToolEvent;
       tool?: ToolImpl;
-      mcpEntry?: { client: AnyValue; originalName: string } | null;
-      effectiveArgs: AnyValue;
+      mcpEntry?: { client: { callTool(name: string, args: ToolArguments): Promise<string | ToolRunResult> }; originalName: string } | null;
+      effectiveArgs: ToolArguments;
       rewriteToWriteNote: boolean;
       /** If set, the call is already resolved (denied, grouped, unknown, etc.) — skip execution. */
       resolved?: { status: 'success' | 'error' | 'denied'; result: string };
@@ -576,12 +579,12 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       // `backfillObservableInput` pattern: e.g. `expandPath()` on file_path
       // so a deny-rule of `path:Notes/foo.md` can't be bypassed by passing
       // `~/Notes/foo.md` or `./Notes/foo.md`.
-      let observableArgs: AnyValue = effectiveArgs;
+      let observableArgs: ToolArguments = effectiveArgs;
       if (tool?.backfillObservableInput && effectiveArgs && typeof effectiveArgs === 'object') {
         try {
           observableArgs = { ...effectiveArgs };
           tool.backfillObservableInput(observableArgs);
-        } catch (e) {
+        } catch (e: unknown) {
           console.warn(`[tool] backfillObservableInput threw for ${call.name}`, e);
           observableArgs = effectiveArgs;
         }
@@ -615,7 +618,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
         call.name,
         effectiveArgs,
         opts.workspaceFolders ?? [],
-        (opts.app.workspace as AnyValue).getActiveFile?.()?.path,
+        opts.app.workspace.getActiveFile?.()?.path,
       );
       if (scopeError) {
         prepared.push({
@@ -666,7 +669,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
               try {
                 observableArgs = { ...effectiveArgs };
                 tool.backfillObservableInput(observableArgs);
-              } catch (e) {
+              } catch (e: unknown) {
                 console.warn(`[tool] backfillObservableInput threw for ${call.name}`, e);
                 observableArgs = effectiveArgs;
               }
@@ -687,9 +690,9 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           }
           forceApproval = perm.behavior === 'ask';
           toolPermissionAllows = perm.behavior === 'allow';
-        } catch (e) {
+        } catch (e: unknown) {
           prepared.push({ call, ev, tool, mcpEntry, effectiveArgs, rewriteToWriteNote: false,
-            resolved: { status: 'error', result: `Permission check failed for ${call.name}: ${e?.message ?? e}` } });
+            resolved: { status: 'error', result: `Permission check failed for ${call.name}: ${errorMessage(e)}` } });
           continue;
         }
       }
@@ -751,7 +754,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           spec: { name: call.name, description: 'MCP tool', parameters: {} },
           run: async () => '',
         });
-        const askFn = opts.approver ?? ((t: ToolImpl, a: AnyValue) => askApproval(opts.app, t, a));
+        const askFn = opts.approver ?? ((t: ToolImpl, a: ToolArguments) => askApproval(opts.app, t, a));
         const res = await askFn(previewTool, effectiveArgs, opts.signal);
         if (!res.ok) {
           opts.onPermissionDecision?.({
@@ -974,7 +977,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
                   skillAllows.push(skillName, skill.allowedTools);
                 }
               }
-            } catch (e) { console.warn('[loop] failed to push skill frame', e); }
+            } catch (e: unknown) { console.warn('[loop] failed to push skill frame', e); }
           }
           // Large-result persistence: when the model-bound text exceeds the
           // tool's declared `maxResultSizeChars`, save the full text to
@@ -997,24 +1000,24 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
           }
           ev.status = outcome;
           ev.result = norm.text;                        // UI gets the full text
-          (ev as AnyValue)._modelBoundResult = modelBoundText; // model gets preview
+          ev._modelBoundResult = modelBoundText; // model gets preview
           modelContentBlocks = norm.contentBlocks;
           // PDF payloads can be many megabytes. Keep them in this live run so the
           // next model step can inspect them, but do not persist them in chats.json.
           // A later turn can call read_pdf again from the compact path/page result.
           const persistentBlocks = norm.contentBlocks?.filter(block => block.type !== 'document');
           ev.contentBlocks = persistentBlocks?.length ? persistentBlocks : undefined;
-        } catch (e) {
-          ev.status = opts.signal?.aborted || e.name === 'AbortError' ? 'cancelled' : 'error';
+        } catch (e: unknown) {
+          ev.status = opts.signal?.aborted || errorName(e) === 'AbortError' ? 'cancelled' : 'error';
           ev.errorCode = ev.status === 'cancelled' ? 'CANCELLED' : 'TOOL_EXCEPTION';
-          ev.result = e.message ?? String(e);
+          ev.result = errorMessage(e);
         }
         if (tool && opts.checkpoint && opts.sessionId && opts.turnId && touchedFiles.length) {
           try {
             const movesFiles = call.name === 'rename_note'
               || (call.name === 'apply_patch' && typeof effectiveArgs.patch === 'string' && /^\*\*\* Move to:/m.test(effectiveArgs.patch));
             await opts.checkpoint.recordAfter(opts.sessionId, opts.turnId, touchedFiles, movesFiles);
-          } catch (error) { console.warn('[Glossa] could not record edit summary', error); }
+          } catch (error: unknown) { console.warn('[Glossa] could not record edit summary', error); }
         }
       } finally {
         releaseFileLocks();
@@ -1023,7 +1026,7 @@ export async function runAgentLoop(opts: AgentLoopOptions) {
       opts.onToolEnd(ev);
       // Prefer the redacted (size-capped) text for the model when present;
       // fall back to the full result otherwise.
-      let modelBound = (ev as AnyValue)._modelBoundResult ?? String(ev.result ?? '');
+      let modelBound = ev._modelBoundResult ?? String(ev.result ?? '');
       const failureReminder = failureGuard.record(call.name, ev.status === 'error');
       if (failureReminder) {
         modelBound += `\n\n<system-reminder>${failureReminder}</system-reminder>`;

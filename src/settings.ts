@@ -1,5 +1,7 @@
-import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
-import type { ButtonComponent, SettingDefinitionItem } from 'obsidian';
+import type { LLMProvider } from './providers/types';
+import { errorMessage } from './utils/unknown_data';
+import { App, PluginSettingTab, Setting, Notice, Modal, FileSystemAdapter } from 'obsidian';
+import type { ButtonComponent, SettingDefinitionItem, TextComponent } from 'obsidian';
 import type GlossaPlugin from './main';
 import type { Endpoint, CustomPrompt, SlashCommand, SelectionTranslateMode } from './types';
 import { reasoningProfile, selectedReasoningEntry } from './providers/reasoning_catalog';
@@ -647,7 +649,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         // Debounce: Obsidian's slider fires 'input' on every drag pixel, which
         // would re-run iterateAllLeaves+applyCssVars per pixel — heavy. Wait
         // 150ms after the user stops moving before applying.
-        let timer: AnyValue = null;
+        let timer: number | null = null;
         s.onChange(v => {
           this.plugin.settings.reasoningFontSize = v;
           if (timer) window.clearTimeout(timer);
@@ -656,7 +658,7 @@ export class GlossaSettingTab extends PluginSettingTab {
             void (async () => {
               await this.plugin.saveSettings();
               this.plugin.app.workspace.iterateAllLeaves(l => {
-                const view: AnyValue = (l.view as AnyValue);
+                const view = l.view as typeof l.view & { applyCssVars?: () => void };
                 if (typeof view.applyCssVars === 'function') view.applyCssVars();
               });
             })();
@@ -1316,8 +1318,8 @@ export class GlossaSettingTab extends PluginSettingTab {
   /* ============================================================
      Endpoint card (existing endpoints)
      ============================================================ */
-  private async buildProviderFor(ep: Endpoint): Promise<AnyValue> {
-    const vaultRoot = (this.app.vault.adapter as AnyValue).basePath as string | undefined;
+  private async buildProviderFor(ep: Endpoint): Promise<LLMProvider> {
+    const vaultRoot = this.app.vault.adapter instanceof FileSystemAdapter ? this.app.vault.adapter.getBasePath() : undefined;
     return buildProvider(ep, this.plugin.settings.globalProxy, vaultRoot);
   }
 
@@ -1343,15 +1345,15 @@ export class GlossaSettingTab extends PluginSettingTab {
         return;
       }
       try {
-        const provider: AnyValue = await this.buildProviderFor(epDec);
+        const provider: LLMProvider = await this.buildProviderFor(epDec);
         if (!provider?.testConnect) { testStatus.setText(bi('Unsupported', '不支持测试')); return; }
         const r = await provider.testConnect();
         testStatus.setText(r.message);
         testStatus.addClass(r.ok ? 'ok' : 'fail');
         if (r.ok) new Notice(`${ep.label}: ${r.message}`);
         else new Notice(bi(`${ep.label} failed: ${r.message}`, `${ep.label} 测试失败：${r.message}`), 8000);
-      } catch (e) {
-        testStatus.setText(e.message ?? String(e));
+      } catch (e: unknown) {
+        testStatus.setText(errorMessage(e));
         testStatus.addClass('fail');
       } finally {
         testBtn.removeAttribute('disabled');
@@ -1407,7 +1409,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       //    in opened chats and in chat files alike.
       try {
         await this.plugin.store?.detachEndpoint(ep.id);
-      } catch (e) { console.warn('[Glossa] endpoint deletion: session ref cleanup failed', e); }
+      } catch (e: unknown) { console.warn('[Glossa] endpoint deletion: session ref cleanup failed', e); }
 
       await this.plugin.saveSettings();
       this.refresh();
@@ -1516,7 +1518,7 @@ export class GlossaSettingTab extends PluginSettingTab {
       new Setting(advanced).setName(bi('Headers', '请求头')).setDesc(bi('Optional JSON. e.g. {"x-org-id":"abc"}', '可选 JSON。例：{"x-org-id":"abc"}'))
         .addTextArea(t => t.setValue(ep.headers ? JSON.stringify(ep.headers, null, 2) : '')
           .onChange(async v => {
-            try { ep.headers = v.trim() ? JSON.parse(v) : undefined; await this.plugin.saveSettings(); } catch { /* ignore */ }
+            try { ep.headers = v.trim() ? JSON.parse(v) as Record<string, string> : undefined; await this.plugin.saveSettings(); } catch { /* ignore */ }
           }));
       const extraBodySetting = new Setting(advanced)
         .setName(bi('Extra JSON body', '额外 JSON 请求体'))
@@ -1532,9 +1534,9 @@ export class GlossaSettingTab extends PluginSettingTab {
           .onChange(async value => {
             let parsed: Record<string, unknown>;
             try { parsed = parseExtraBody(value); }
-            catch (error) {
+            catch (error: unknown) {
               tx.inputEl.setAttribute('aria-invalid', 'true');
-              extraBodyError.setText(bi('Not saved: ', '未保存：') + (error instanceof Error ? error.message : String(error)));
+              extraBodyError.setText(bi('Not saved: ', '未保存：') + (errorMessage(error)));
               return;
             }
             tx.inputEl.removeAttribute('aria-invalid');
@@ -1643,7 +1645,7 @@ export class GlossaSettingTab extends PluginSettingTab {
   }
 
   private renderModelRow(card: HTMLElement, ep: Endpoint) {
-    let inputComp: AnyValue;
+    let inputComp: TextComponent;
 
     const setting = new Setting(card).setName(bi('Model', '模型')).setDesc(bi('Enter a model ID, or detect the list exposed by the endpoint.', '输入模型 ID，或探测该端点公开的模型列表。'));
     setting.addText(t => { inputComp = t; t.setValue(ep.model ?? '').onChange(async v => { ep.model = v; await this.plugin.saveSettings(); }); });
@@ -1656,7 +1658,7 @@ export class GlossaSettingTab extends PluginSettingTab {
         const list = normalizeModelList(await new CustomApiProvider(epDec).listModels());
         if (list.length === 0) { new Notice(bi('No models returned.', '未返回模型列表。')); }
         else { ep.availableModels = list; await this.plugin.saveSettings(); new Notice(bi(`Found ${list.length} models.`, `找到 ${list.length} 个模型。`)); this.refresh(); }
-      } catch (e) { new Notice(bi(`Failed: ${e.message}`, `失败：${e.message}`)); }
+      } catch (e: unknown) { new Notice(bi(`Failed: ${errorMessage(e)}`, `失败：${errorMessage(e)}`)); }
       finally { b.setButtonText(bi('↻ Detect', '↻ 探测')).setDisabled(false); }
     }));
 
@@ -1957,9 +1959,9 @@ class AddEndpointModal extends Modal {
           bi('Detected model', '已探测模型'),
         );
       }
-    } catch (e) {
+    } catch (e: unknown) {
       btn.textContent = bi('Detect', '探测');
-      this.detectStatusEl.setText(bi(`Detection failed: ${e.message}`, `探测失败：${e.message}`));
+      this.detectStatusEl.setText(bi(`Detection failed: ${errorMessage(e)}`, `探测失败：${errorMessage(e)}`));
     } finally {
       btn.disabled = false;
       btn.removeAttribute('aria-busy');

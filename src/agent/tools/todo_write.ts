@@ -39,12 +39,12 @@ export const todoWrite: ToolImpl = buildTool({
   },
   run: async (_app, { items }) => {
     if (!Array.isArray(items)) return 'Error: items must be an array.';
-    const inProg = items.filter((i: AnyValue) => i.status === 'in_progress').length;
+    const inProg = items.filter((i) => i.status === 'in_progress').length;
     if (inProg > 1) return `Error: ${inProg} items marked in_progress — exactly one allowed at a time.`;
-    if (items.some((i: AnyValue) => i.status !== 'completed') && inProg !== 1) {
+    if (items.some((i) => i.status !== 'completed') && inProg !== 1) {
       return 'Error: exactly one item must be in_progress while unfinished items remain.';
     }
-    const lines = items.map((it: AnyValue, idx: number) => {
+    const lines = items.map((it, idx: number) => {
       const mark = it.status === 'completed' ? '[x]'
                 : it.status === 'in_progress' ? '[→]'
                 : '[ ]';

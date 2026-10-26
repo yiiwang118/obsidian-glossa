@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 /**
  * open_in_editor — open a vault file in the editor, optionally jumping to a
  * line / heading / block, and optionally selecting it.
@@ -63,9 +64,10 @@ export const openInEditor: ToolImpl = buildTool({
   searchTags: ['navigate tab', 'jump to line', '打开文件', '跳转标题'],
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => {
-    const tail = a.to?.line ? ` :${a.to.line}`
-               : a.to?.heading ? ` # ${a.to.heading}`
-               : a.to?.block ? ` ^${a.to.block}`
+    const to = typeof a.to === 'object' && a.to !== null ? a.to : {};
+    const tail = to.line ? ` :${to.line}`
+               : to.heading ? ` # ${to.heading}`
+               : to.block ? ` ^${to.block}`
                : '';
     return `open ${a.path}${tail}${a.leaf && a.leaf !== 'active' ? ` [${a.leaf}]` : ''}`;
   },
@@ -96,12 +98,12 @@ export const openInEditor: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;
 
     const mode = (args.leaf ?? 'active') as LeafMode;
-    let leaf;
+    let leaf: import('obsidian').WorkspaceLeaf;
     if (mode === 'split-right') leaf = app.workspace.getLeaf('split', 'vertical');
     else if (mode === 'split-down') leaf = app.workspace.getLeaf('split', 'horizontal');
     else if (mode === 'new-tab') leaf = app.workspace.getLeaf('tab');
@@ -121,7 +123,7 @@ export const openInEditor: ToolImpl = buildTool({
     }
     if (targetLine !== null) {
       const view = leaf.view as MarkdownView | undefined;
-      const editor = (view as AnyValue)?.editor;
+      const editor = view?.editor;
       if (editor) {
         const lineIdx = targetLine - 1;
         const lineText: string = editor.getLine(lineIdx) ?? '';

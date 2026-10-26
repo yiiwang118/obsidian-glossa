@@ -35,7 +35,7 @@ export function onActivationChange(cb: () => void): () => void {
 
 function notify() {
   for (const cb of listeners) {
-    try { cb(); } catch (e) { console.warn('[skill_activation] listener threw', e); }
+    try { cb(); } catch (e: unknown) { console.warn('[skill_activation] listener threw', e); }
   }
 }
 

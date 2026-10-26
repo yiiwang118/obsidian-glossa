@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 import { TFile } from 'obsidian';
 import { setStyle } from '../../utils/dom';
 import { formatNoteRead } from '../../utils/note_read';
@@ -125,7 +126,7 @@ export const readNote: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return toolFailure('INVALID_PATH', `Error: ${e.message}`); }
+    catch (e: unknown) { return toolFailure('INVALID_PATH', `Error: ${errorMessage(e)}`); }
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return toolFailure('FILE_NOT_FOUND', `Error: file not found: ${path}`);
     const text = await app.vault.read(f);
@@ -144,8 +145,8 @@ export const readNote: ToolImpl = buildTool({
         link => app.metadataCache.getFirstLinkpathDest(link, path)?.path ?? null,
         limit,
       ));
-    } catch (error) {
-      return toolFailure('READ_FAILED', `Error: ${error instanceof Error ? error.message : String(error)}`);
+    } catch (error: unknown) {
+      return toolFailure('READ_FAILED', `Error: ${errorMessage(error)}`);
     }
   },
 });

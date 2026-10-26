@@ -21,7 +21,7 @@ export const setSelection: ToolImpl = buildTool({
   searchHint: 'select text in editor cursor placement',
   searchTags: ['editor selection', 'cursor range', '选中文本', '定位光标'],
   describe: a => {
-    if (a.from && a.to) return `select ${a.from.line}:${a.from.ch}-${a.to.line}:${a.to.ch}`;
+    if (a.from && typeof a.from === 'object' && a.to && typeof a.to === 'object') return `select ${a.from.line}:${a.from.ch}-${a.to.line}:${a.to.ch}`;
     if (a.heading) return `select heading "${a.heading}"`;
     if (a.block) return `select block ^${a.block}`;
     return 'set selection';
@@ -43,10 +43,10 @@ export const setSelection: ToolImpl = buildTool({
   run: async (app, args) => {
     const view = app.workspace.getActiveViewOfType(MarkdownView);
     if (!view) return 'Error: no active markdown editor.';
-    const editor = (view as AnyValue).editor;
+    const editor = view.editor;
     if (!editor) return 'Error: active view has no editor (PDF / canvas?).';
 
-    if (args.from && args.to && typeof args.from.line === 'number') {
+    if (args.from && typeof args.from === 'object' && args.to && typeof args.to === 'object' && typeof args.from.line === 'number') {
       editor.setSelection(
         { line: Math.max(0, args.from.line | 0), ch: Math.max(0, args.from.ch | 0) },
         { line: Math.max(0, args.to.line | 0),   ch: Math.max(0, args.to.ch | 0)   },

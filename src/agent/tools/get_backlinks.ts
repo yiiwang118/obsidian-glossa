@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 /**
  * get_backlinks — list every note that links INTO the given path.
  *
@@ -121,7 +122,7 @@ export const getBacklinks: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const max = Math.max(1, Math.min(500, args.max_results ?? 50));
     const withContext = !!args.with_context;
     const resolved = app.metadataCache.resolvedLinks;

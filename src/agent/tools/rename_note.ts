@@ -1,3 +1,5 @@
+import type { ToolArguments } from '../tool_arguments';
+import { errorMessage, scalarText } from '../../utils/unknown_data';
 /**
  * rename_note — move or rename a note or a folder, preserving all wikilinks to it.
  *
@@ -25,7 +27,7 @@ export const renameNote: ToolImpl = buildTool({
   searchHint: 'rename or move a note or folder preserving wikilinks',
   searchTags: ['move file', 'rename file', 'move folder', 'rename folder', '重命名笔记', '移动文件', '移动文件夹', '重命名文件夹'],
   backfillObservableInput: normalizePathFields(['from', 'to']),
-  describe: a => `rename ${a.from} → ${a.to}`,
+  describe: a => `rename ${scalarText(a.from)} → ${scalarText(a.to)}`,
   spec: {
     name: 'rename_note',
     description: 'Move or rename one vault file or folder through the file manager so resolvable internal links can be updated. The destination must not exist. Requires user approval.',
@@ -39,11 +41,11 @@ export const renameNote: ToolImpl = buildTool({
       additionalProperties: false,
     },
   },
-  preview: async (app: App, a: AnyValue) => {
+  preview: async (app: App, a: ToolArguments) => {
     const from: unknown = a.from;
     const source = app.vault.getAbstractFileByPath(typeof from === 'string' ? from : '');
     const what = source instanceof TFolder ? `Move folder (${filesInFolder(source).length} files)` : 'Rename';
-    return `${what}:\n  ${a.from}\n→ ${a.to}\n\n(wikilinks pointing at the old path will be auto-updated)`;
+    return `${what}:\n  ${scalarText(a.from)}\n→ ${scalarText(a.to)}\n\n(wikilinks pointing at the old path will be auto-updated)`;
   },
   // Refused before an approval card is shown.
   checkPermissions: async (app, args) => {
@@ -59,7 +61,7 @@ export const renameNote: ToolImpl = buildTool({
     try {
       from = assertVaultPath(args.from, 'from');
       to = assertVaultPath(args.to, 'to');
-    } catch (e) { return `Error: ${e.message}`; }
+    } catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     if (from === to) return 'Error: from and to are identical — nothing to rename.';
     const blocked = protectedMove(app, from, to);
     if (blocked) return `Error: ${blocked}`;
@@ -72,8 +74,8 @@ export const renameNote: ToolImpl = buildTool({
       if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
       await app.fileManager.renameFile(f, to);
       return `Renamed ${from} → ${to} (backlinks auto-updated).`;
-    } catch (e) {
-      return `Error: ${e.message}`;
+    } catch (e: unknown) {
+      return `Error: ${errorMessage(e)}`;
     }
   },
 });

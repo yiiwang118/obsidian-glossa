@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 /**
  * dataview_query — bridge to the Dataview plugin's DQL engine.
  *
@@ -10,26 +11,26 @@
  */
 import { buildTool, type ToolImpl } from './_shared';
 
-type DataviewApi = Record<string, AnyValue> & {
+type DataviewApi = Record<string, unknown> & {
   queryMarkdown?: (query: string) => Promise<{ successful?: boolean; value?: unknown; error?: unknown }>;
   pages?: (source: string) => unknown;
 };
 
-function objectRecord(value: unknown): Record<string, AnyValue> | null {
-  return value && typeof value === 'object' ? value as Record<string, AnyValue> : null;
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null;
 }
 
-function isIterableValue(value: unknown): value is Iterable<AnyValue> {
+function isIterableValue(value: unknown): value is Iterable<unknown> {
   if (!value || (typeof value !== 'object' && typeof value !== 'function')) return false;
   return typeof (value as { [Symbol.iterator]?: unknown })[Symbol.iterator] === 'function';
 }
 
-function getDvApi(app: AnyValue): DataviewApi | null {
+function getDvApi(app: unknown): DataviewApi | null {
   const appRecord = objectRecord(app);
   const plugins = objectRecord(objectRecord(appRecord?.plugins)?.plugins);
   const dataview = objectRecord(plugins?.['dataview']);
   const api = objectRecord(dataview?.api);
-  return api as DataviewApi | null;
+  return api;
 }
 
 export const dataviewQuery: ToolImpl = buildTool({
@@ -95,21 +96,22 @@ function unknownMessage(value: unknown, fallback: string): string {
       const source = String(args.source ?? '').trim();
       if (typeof dv.pages !== 'function') return 'Error: Dataview API pages is unavailable.';
       const pages = dv.pages(source);
-      const pagesRecord = objectRecord(pages);
+      const pagesRecord = objectRecord(pages) as { array?: () => unknown[] } | null;
       const arr = typeof pagesRecord?.array === 'function'
         ? pagesRecord.array()
         : isIterableValue(pages) ? Array.from(pages) : [];
       const cap = arr.slice(0, limit);
       if (cap.length === 0) return `No pages match source: ${source || '(empty)'}.`;
-      const lines = cap.map((p: AnyValue) => {
+      const lines = cap.map((value: unknown) => {
+        const p = objectRecord(value) as { path?: string; file?: { path?: string; tags?: string[] } };
         const path = p.file?.path ?? p.path ?? '(no path)';
         const tags = (p.file?.tags ?? []).slice(0, 5).join(' ');
         return `- ${path}${tags ? `  ${tags}` : ''}`;
       });
       const tail = arr.length > cap.length ? `\n[+${arr.length - cap.length} more, truncated at limit ${limit}]` : '';
       return `${cap.length} of ${arr.length} pages:\n${lines.join('\n')}${tail}`;
-    } catch (e) {
-      return `Dataview error: ${e?.message ?? e}`;
+    } catch (e: unknown) {
+      return `Dataview error: ${errorMessage(e)}`;
     }
   },
 });

@@ -47,7 +47,7 @@ async function rotate(app: App): Promise<void> {
     for (const f of toDelete) {
       try { await adapter.remove(f); } catch { /* ignore */ }
     }
-  } catch (e) {
+  } catch (e: unknown) {
     console.warn('[tool_result_store] rotation failed', e);
   }
 }
@@ -88,7 +88,7 @@ export async function persistLargeResult(
       `\n[end preview — read ${path} for the full result]`;
 
     return { path, preview };
-  } catch (e) {
+  } catch (e: unknown) {
     console.warn('[tool_result_store] persist failed', e);
     return null;
   }

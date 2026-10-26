@@ -1,3 +1,5 @@
+import type { SearchEnvelope, SearchHitData } from './search_wire';
+import { dataRecord, errorName, errorMessage } from '../../utils/unknown_data';
 import { requestUrl } from 'obsidian';
 import { buildTool, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects } from '../../utils/safe_web';
@@ -25,7 +27,7 @@ export const webSearch: ToolImpl = buildTool({
   searchHint: 'search public web current sources',
   searchTags: ['raw search results', 'source candidates', '网页搜索', '查找来源'],
   describe: a => `search web "${String(a.query ?? '').slice(0, 80)}"`,
-  preview: async (a) => {
+  preview: async (a: import('../tool_arguments').ToolArguments) => {
     const provider = typeof a.provider === 'string' && a.provider.trim() ? a.provider.trim() : 'settings default';
     const allowed = Array.isArray(a.allowed_domains) ? a.allowed_domains.join(', ') : '';
     const blocked = Array.isArray(a.blocked_domains) ? a.blocked_domains.join(', ') : '';
@@ -88,12 +90,12 @@ export const webSearch: ToolImpl = buildTool({
         typeof r.score === 'number' ? `Score: ${r.score}${r.rank_reason ? ` (${r.rank_reason})` : ''}` : '',
         r.snippet ? `Snippet: ${r.snippet}` : '',
       ].filter(Boolean).join('\n')).join('\n\n')}`;
-    } catch (e) {
-      if (e?.name === 'AbortError') {
+    } catch (e: unknown) {
+      if (errorName(e) === 'AbortError') {
         if (ctx?.signal?.aborted) return 'Error: cancelled by user.';
         return 'Error: timeout after 20s';
       }
-      return `Error searching web: ${e?.message ?? e}`;
+      return `Error searching web: ${errorMessage(e)}`;
     }
   },
 });
@@ -111,7 +113,7 @@ export async function runWebSearchProvider(provider: WebSearchProvider, query: s
     const results = await duckDuckGoSearch(query, signal);
     if (results.length || !looksAcademicQuery(query)) return results;
     return academicFallbackSearch(query, maxResults, signal);
-  } catch (e) {
+  } catch (e: unknown) {
     const fallback = looksAcademicQuery(query) ? await academicFallbackSearch(query, maxResults, signal) : [];
     if (fallback.length) return fallback;
     throw e;
@@ -128,7 +130,7 @@ async function autoSearch(query: string, maxResults: number, signal?: AbortSigna
   // A vertical index can miss author-hosted PDFs and niche project pages.
   // Academic fallback already includes one exact-title SERP pass; avoid issuing
   // duplicate DuckDuckGo requests that can trigger throttling.
-  if (!academic) tasks.push(duckDuckGoSearch(query, signal).catch(() => []));
+  if (!academic) tasks.push(duckDuckGoSearch(query, signal).catch((): SearchResult[] => []));
 
   const settled = await Promise.allSettled(tasks);
   const merged = settled.flatMap(r => r.status === 'fulfilled' ? r.value : []);
@@ -157,7 +159,7 @@ export function rankSearchResults(
 }
 
 async function duckDuckGoSearch(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
-  const htmlResults = await duckDuckGoHtmlSearch(query, signal).catch(() => []);
+  const htmlResults = await duckDuckGoHtmlSearch(query, signal).catch((): SearchResult[] => []);
   if (htmlResults.length) return htmlResults;
   const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
   const json = await fetchJson(url, { method: 'GET' }, signal, true, 8_000);
@@ -167,10 +169,10 @@ async function duckDuckGoSearch(query: string, signal?: AbortSignal): Promise<Se
 async function academicFallbackSearch(query: string, maxResults: number, signal?: AbortSignal): Promise<SearchResult[]> {
   const academicQuery = cleanAcademicQuery(query);
   const [openAlex, arxiv, duckDuckGo, yahoo] = await Promise.all([
-    openAlexSearch(academicQuery, maxResults, signal).catch(() => []),
-    arxivSearch(academicQuery, maxResults, signal).catch(() => []),
-    duckDuckGoHtmlSearch(`"${academicQuery}" filetype:pdf`, signal).catch(() => []),
-    yahooHtmlSearch(`"${academicQuery}" filetype:pdf`, signal).catch(() => []),
+    openAlexSearch(academicQuery, maxResults, signal).catch((): SearchResult[] => []),
+    arxivSearch(academicQuery, maxResults, signal).catch((): SearchResult[] => []),
+    duckDuckGoHtmlSearch(`"${academicQuery}" filetype:pdf`, signal).catch((): SearchResult[] => []),
+    yahooHtmlSearch(`"${academicQuery}" filetype:pdf`, signal).catch((): SearchResult[] => []),
   ]);
   return rankSearchResults(academicQuery, [...openAlex, ...arxiv, ...duckDuckGo, ...yahoo], { preferDownloads: true }).slice(0, maxResults);
 }
@@ -204,8 +206,8 @@ export async function findDownloadCandidates(
 ): Promise<SearchResult[]> {
   const cleaned = cleanAcademicQuery(query);
   const merged = looksAcademicQuery(query)
-    ? await academicFallbackSearch(query, maxResults * 2, signal).catch(() => [])
-    : await autoSearch(query, maxResults * 2, signal).catch(() => []);
+    ? await academicFallbackSearch(query, maxResults * 2, signal).catch((): SearchResult[] => [])
+    : await autoSearch(query, maxResults * 2, signal).catch((): SearchResult[] => []);
   const ranked = rankSearchResults(cleaned, merged, { preferDownloads: true });
   const titleTerms = normalizedTitleTerms(cleaned);
   if (looksAcademicQuery(query) && titleTerms.length >= 4 && !/10\.\d{4,9}\//.test(query)) {
@@ -331,7 +333,7 @@ async function braveSearch(query: string, maxResults: number, apiKey: string, si
     method: 'GET',
     headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey },
   }, signal);
-  return (json?.web?.results ?? []).map((r: AnyValue) => makeResult(r?.title, r?.url, r?.description, 'brave')).filter(Boolean);
+  return (json?.web?.results ?? []).map((r) => makeResult(r?.title, r?.url, r?.description, 'brave')).filter(Boolean);
 }
 
 async function tavilySearch(query: string, maxResults: number, apiKey: string, signal?: AbortSignal): Promise<SearchResult[]> {
@@ -340,7 +342,7 @@ async function tavilySearch(query: string, maxResults: number, apiKey: string, s
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ api_key: apiKey, query, max_results: maxResults, search_depth: 'basic', include_answer: false }),
   }, signal);
-  return (json?.results ?? []).map((r: AnyValue) => makeResult(r?.title, r?.url, r?.content, 'tavily')).filter(Boolean);
+  return (json?.results ?? []).map((r) => makeResult(r?.title, r?.url, r?.content, 'tavily')).filter(Boolean);
 }
 
 async function exaSearch(query: string, maxResults: number, apiKey: string, signal?: AbortSignal): Promise<SearchResult[]> {
@@ -349,16 +351,16 @@ async function exaSearch(query: string, maxResults: number, apiKey: string, sign
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
     body: JSON.stringify({ query, numResults: maxResults, type: 'auto' }),
   }, signal);
-  return (json?.results ?? []).map((r: AnyValue) => makeResult(r?.title, r?.url, r?.text ?? r?.snippet, 'exa')).filter(Boolean);
+  return (json?.results ?? []).map((r) => makeResult(r?.title, r?.url, r?.text ?? r?.snippet, 'exa')).filter(Boolean);
 }
 
 async function serpApiSearch(query: string, maxResults: number, apiKey: string, signal?: AbortSignal): Promise<SearchResult[]> {
   const url = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(query)}&api_key=${encodeURIComponent(apiKey)}&num=${maxResults}`;
   const json = await fetchJson(url, { method: 'GET' }, signal);
-  return (json?.organic_results ?? []).map((r: AnyValue) => makeResult(r?.title, r?.link, r?.snippet, 'serpapi')).filter(Boolean);
+  return (json?.organic_results ?? []).map((r) => makeResult(r?.title, r?.link, r?.snippet, 'serpapi')).filter(Boolean);
 }
 
-async function fetchJson(url: string, init: RequestInit, parentSignal?: AbortSignal, safeGet = false, timeoutMs = 20_000): Promise<AnyValue> {
+async function fetchJson(url: string, init: RequestInit, parentSignal?: AbortSignal, safeGet = false, timeoutMs = 20_000): Promise<SearchEnvelope> {
   const ctl = new AbortController();
   const timer = window.setTimeout(() => ctl.abort(), timeoutMs);
   const onAbort = () => { try { ctl.abort(); } catch { /* noop */ } };
@@ -370,11 +372,11 @@ async function fetchJson(url: string, init: RequestInit, parentSignal?: AbortSig
     if (safeGet) {
       const response = await fetchWithSafeRedirects(url, ctl.signal);
       if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-      return await response.json();
+      return dataRecord(await response.json() as unknown);
     }
     const response = await requestUrlWithTimeout(url, init, ctl.signal, timeoutMs);
     if (response.status >= 400) throw new Error(`HTTP ${response.status}`);
-    return response.json ?? JSON.parse(response.text || 'null');
+    return dataRecord((response.json as unknown) ?? (JSON.parse(response.text || 'null') as unknown));
   } finally {
     window.clearTimeout(timer);
     if (parentSignal) parentSignal.removeEventListener('abort', onAbort);
@@ -439,7 +441,7 @@ function requestBodyToString(body: BodyInit | null | undefined): string | ArrayB
   throw new Error('Unsupported request body type.');
 }
 
-function parseDuckDuckGoResults(json: AnyValue): SearchResult[] {
+function parseDuckDuckGoResults(json: SearchEnvelope): SearchResult[] {
   const out: SearchResult[] = [];
   const add = (title: unknown, url: unknown, snippet: unknown) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return;
@@ -566,7 +568,7 @@ function cleanText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-function openAlexLocationCandidates(row: AnyValue): Array<{ url: string; label: string; source: string }> {
+function openAlexLocationCandidates(row: SearchHitData): Array<{ url: string; label: string; source: string }> {
   const out: Array<{ url: string; label: string; source: string }> = [];
   const seen = new Set<string>();
   const add = (value: unknown, label: string, source: string) => {
@@ -628,8 +630,8 @@ function stripHtml(value: string): string {
 function decodeHtmlAttribute(value: string): string {
   return value
     .replace(/&amp;/g, '&')
-    .replace(/&#x([0-9a-f]+);/gi, (_match, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_match, decimal) => String.fromCodePoint(Number.parseInt(decimal, 10)));
+    .replace(/&#x([0-9a-f]+);/gi, (_match: string, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_match: string, decimal: string) => String.fromCodePoint(Number.parseInt(decimal, 10)));
 }
 
 function looksAcademicQuery(query: string): boolean {

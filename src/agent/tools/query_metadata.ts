@@ -25,7 +25,7 @@ export const queryMetadata: ToolImpl = buildTool({
     return JSON.stringify({
       frontmatter: c?.frontmatter ?? null,
       headings: (c?.headings ?? []).map(h => ({ text: h.heading, level: h.level })),
-      tags: getAllTags(c ?? {} as AnyValue) ?? [],
+      tags: getAllTags(c ?? {}) ?? [],
       links: (c?.links ?? []).map(l => l.link),
     }, null, 2);
   },

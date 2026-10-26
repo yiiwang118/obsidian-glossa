@@ -48,9 +48,9 @@ Ask a side question about part of an answer without adding it to the main conver
 
 The question rail now follows the turn being read, including the bottom of a long final answer. Positions are recalculated after Markdown rendering, folding and window resizing.
 
-## Agent improvements in the development build
+## Agent improvements in 1.2.0
 
-These changes are available when building this branch; the latest published release remains 1.1.0.
+[**1.2.0 — October 26, 2026**](https://github.com/yiiwang118/obsidian-glossa/releases/tag/1.2.0) adds the temporary discussions above and the following Agent improvements. Existing API/CLI workflows are retained; native Codex sessions and idle compaction are opt-in. Source type checks now run without unsafe-value exemptions.
 
 - **Recover interrupted runs clearly.** Each turn records ordered, bounded status events. Reopening a chat preserves completed results and marks unfinished operations as interrupted; it never automatically repeats a file write.
 - **Resume native Codex threads.** Enable **Native Codex sessions** in the Codex endpoint’s advanced settings. This optional App Server mode keeps a thread across messages and restarts, and adds Glossa’s instructions to Codex’s own. Changed history, forked chats, working directories, permission modes or Glossa instructions (for example a new day or edited project instructions) start a fresh thread. Use **Reset connection** in chat to detach it. Failed turns are not replayed automatically; turning the setting off keeps the existing CLI workflow.
@@ -60,7 +60,7 @@ These changes are available when building this branch; the latest published rele
 
 Native Codex conversations are also stored by Codex itself. File evaluation uses private `.glossa/evaluations/` directories and removes each run’s directory on normal completion, failure or cancellation; a host crash may leave a fixture directory. See [Privacy & data flow](PRIVACY.md) for storage and request details.
 
-## New in 1.1.0
+## Previous release: 1.1.0
 
 [**1.1.0 — October 20, 2026**](https://github.com/yiiwang118/obsidian-glossa/releases/tag/1.1.0) adds background conversations, per-chat history files, folder operations and model-aware reasoning controls.
 
@@ -73,7 +73,7 @@ Native Codex conversations are also stored by Codex itself. File evaluation uses
 
 ![Composer layout with file references left and runtime, provider and model controls right; screenshot from 1.0.0](docs/screenshots/1.0.0/composer.png)
 
-**Requirements:** desktop Obsidian **1.12.0 or newer**. Existing API endpoints and model choices are retained. See [Upgrading and local history](#upgrading-and-local-history) before upgrading, and the [full changelog](CHANGELOG.md#110--2026-10-20) for details.
+**Requirements:** desktop Obsidian **1.12.0 or newer**. Existing API endpoints and model choices are retained. See [Upgrading and local history](#upgrading-and-local-history) before upgrading, and the [full changelog](CHANGELOG.md#120--2026-10-26) for details.
 
 ## Install
 
@@ -194,7 +194,7 @@ These files live under the configured plugin directory, normally `.obsidian/plug
 
 **Learn from a correction.** Use **Remember this correction** beside an assistant reply to turn feedback into an editable skill draft. Choose an existing learned skill to improve it, or create a new one. Review the conversation excerpt and workflow diff, then inspect the generated examples or add your own. Each example runs with fresh context against both the candidate and the currently enabled version (or no skill), checking exact output fragments and whether the skill should apply. Editing the draft or examples invalidates the results; every candidate example must pass before you can enable it. Tied scores are shown as no measured gain.
 
-This first version validates **text behavior**, not live tool execution or changes to real notes. Generation uses the selected chat model; validation makes two model calls per example (3–5 examples). The model does not receive the expected output checks. Review the excerpt before sending it; tool result bodies and automatic attachment contents are not collected by the learning feature. There is no background training or model-weight update.
+Text validation checks **text behavior** using 3–5 examples, with two model calls per example. Optional file validation executes tools only against isolated sample Markdown files, using fresh baseline and candidate fixtures; existing notes are not modified. Generation uses the selected chat model. The model does not receive the expected output checks. Review the excerpt before sending it; tool result bodies and automatic attachment contents are not collected by the learning feature. There is no background training or model-weight update.
 
 Use **Glossa: Manage learned skills** or **Learning history** in the dialog to inspect results, disable a skill, edit a draft, or restore a previously tested version. Enabled skills join normal skill discovery for future turns and keep the existing tool approval rules. Built-in and manually authored skills are not overwritten. Drafts, workflow versions, feedback references, model identity and validation outputs are stored locally in `.glossa/learning.json`, with up to 12 versions per skill and 60 learned skills. Learning history is plain text and can be included in vault sync; API-key encryption does not encrypt this file. Simultaneous edits are checked before saving. Historical validation results describe the model and examples used at that time.
 

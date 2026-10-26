@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file. Format adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-10-26
+
+### Added
+- Temporary API discussions in a separate window, with selected text and its original question attached to each turn. Side discussions stay outside main history and saved workspace state; users can explicitly save a note or place a reply in the main composer.
+- Opt-in native Codex sessions through App Server, with durable thread associations, history and instruction checks, interruption handling and an explicit reset action.
+- Ordered, bounded run-state journals that mark interrupted operations after restart without automatically repeating writes.
+- Optional learned-skill file evaluations using isolated Markdown fixtures, paired baseline/candidate runs and repeat-execution checks. Skills with file cases must pass both text and file validation.
+- Forked skill progress, individual stop controls and next-step instructions, with inherited permissions and workspace boundaries.
+- Opt-in idle compaction for large API conversations with a configured cache lifetime, preserving the request prefix where possible and cancelling on user activity.
+
+### Changed
+- Enable all five TypeScript unsafe-value rules in local and community checks, remove whole-file type-safety exemptions and replace the untyped global alias with explicit tool, provider, PDF and host-interface contracts.
+- Bound temporary-discussion context by model size, mark omitted older turns, show streamed reasoning separately and support retry, regeneration and note export.
+- Keep existing API and CLI paths; native Codex sessions and idle compaction remain disabled by default.
+
+### Fixed
+- Keep the question rail aligned with the reading position at the bottom of long replies and after layout changes.
+- Prevent duplicate paragraphs when a streamed reply is finalized.
+- Preserve a completed side-chat answer if regeneration fails or is stopped, retain first-line indentation in quoted code, snapshot note exports before asynchronous writes and retain output-limit warnings.
+- Reject late insertions into a closed or switched main composer, and stop pending side-chat requests on window/plugin shutdown.
+- Preserve malformed Canvas files instead of treating them as empty documents, and keep strict node validation at the typed boundary.
+
+### Review notes
+- Source type and community checks pass with no errors or warnings, alongside 1,913 automated assertions and production build checks.
+- Local CLI integration still requires process execution. Grok's current adapter also requires private temporary prompt files outside the vault API; these capability warnings remain documented in the privacy guide.
+
 ## [1.1.0] — 2026-10-20
 
 ### Added
@@ -530,3 +556,5 @@ Last pre-open-source version. Internal-only. Not published.
 [0.4.1]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.4.1
 [0.4.0]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.4.0
 [0.3.0]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/0.3.0
+
+[1.2.0]: https://github.com/yiiwang118/obsidian-glossa/releases/tag/1.2.0

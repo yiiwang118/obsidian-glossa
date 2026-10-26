@@ -1,3 +1,4 @@
+import { errorMessage } from '../utils/unknown_data';
 import { App, Editor, MarkdownView, Modal, Notice } from 'obsidian';
 import type GlossaPlugin from '../main';
 import { buildProvider } from '../providers/registry';
@@ -27,7 +28,7 @@ export async function runInlineEdit(plugin: GlossaPlugin) {
   const sysPrompt = `You are an inline editor. The user has selected a passage and asked for a transformation. Reply with ONLY the rewritten passage — no commentary, no quotes, no preamble. Preserve markdown / formulas / code exactly.`;
   const userMsg = `Instruction: ${instruction}\n\n---\n${original}\n---`;
 
-  const vaultRoot = (plugin.app.vault.adapter as AnyValue).basePath as string | undefined;
+  const vaultRoot = (plugin.app.vault.adapter as typeof plugin.app.vault.adapter & { basePath?: string }).basePath;
   const provider = buildProvider(epDec, plugin.settings.globalProxy, vaultRoot);
 
   // Stream into a holding buffer; show progress indicator
@@ -43,7 +44,7 @@ export async function runInlineEdit(plugin: GlossaPlugin) {
       if (ch.type === 'text') { buf += ch.text; notice.setMessage(bi(`Editing… (${buf.length} chars)`, `正在编辑…（${buf.length} 字符）`)); }
       else if (ch.type === 'error') { notice.hide(); new Notice(bi(`Edit failed: ${ch.error}`, `编辑失败：${ch.error}`)); return; }
     }
-  } catch (e) { notice.hide(); new Notice(bi(`Edit failed: ${e.message}`, `编辑失败：${e.message}`)); return; }
+  } catch (e: unknown) { notice.hide(); new Notice(bi(`Edit failed: ${errorMessage(e)}`, `编辑失败：${errorMessage(e)}`)); return; }
   notice.hide();
   const newText = buf.trim();
   if (!newText) { new Notice(bi('Empty response.', '模型没有返回内容。')); return; }

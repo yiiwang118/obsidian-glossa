@@ -1,3 +1,4 @@
+import { errorMessage } from '../utils/unknown_data';
 import type { App, Component } from 'obsidian';
 import { Popup, type PopupItem } from '../ui/popup';
 import { modelPickerItems, modelPickerOptions } from '../ui/model_picker';
@@ -1040,8 +1041,8 @@ export class SelectionTranslationController {
       endpoint.availableModels = models;
       await this.host.saveSettings();
       quickNotice(bi(`Found ${models.length} models.`, `找到 ${models.length} 个模型。`));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+    } catch (error: unknown) {
+      const message = errorMessage(error);
       quickNotice(bi(`Model detection failed: ${message}`, `模型检测失败：${message}`), 6000);
     }
   }
@@ -1319,9 +1320,9 @@ export class SelectionTranslationController {
       this.popup.root.classList.add('is-complete');
       const elapsedSeconds = Math.max(0.1, (performance.now() - startedAt) / 1000).toFixed(1);
       this.popup.status.textContent = bi(`Translated · ${elapsedSeconds}s`, `翻译完成 · ${elapsedSeconds} 秒`);
-    } catch (error) {
+    } catch (error: unknown) {
       if (controller.signal.aborted || sequence !== this.requestSequence) return;
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       this.showError(message);
     } finally {
       if (this.abortController === controller) this.abortController = null;

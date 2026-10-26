@@ -1,3 +1,5 @@
+import type { WireBlock } from './wire_types';
+import type { ToolArguments } from '../agent/tool_arguments';
 
 import type { TokenUsage } from '../types';
 
@@ -7,16 +9,16 @@ export type ChatChunk =
    *  must be sent back next turn. */
   | { type: 'reasoning'; text: string }
   /** LLM is requesting that we execute this tool. Plugin's agent loop does it. */
-  | { type: 'tool_call'; id: string; name: string; args: AnyValue }
+  | { type: 'tool_call'; id: string; name: string; args: ToolArguments }
   /** Tool was executed by the provider itself (e.g. CLI in full-agent mode). For display only. */
-  | { type: 'tool_event'; id: string; name: string; args: AnyValue; status: 'running' | 'success' | 'error' | 'denied'; result?: string }
+  | { type: 'tool_event'; id: string; name: string; args: ToolArguments; status: 'running' | 'success' | 'error' | 'denied'; result?: string }
   | {
     type: 'final'; text: string; usage?: TokenUsage; reasoningContent?: string;
     /** Provider completion metadata for detecting truncated or thinking-only answers. */
     stopReason?: string;
     hasReasoning?: boolean;
     /** Anthropic thinking blocks (with signatures) to pass back unchanged within the turn. */
-    thinkingBlocks?: AnyValue[];
+    thinkingBlocks?: WireBlock[];
   }
   /** Server rejected the prompt because it exceeded the model's context window.
    *  The agent loop should react by compacting the conversation and retrying. */
@@ -47,20 +49,20 @@ export interface MessageInput {
   /** For role='assistant' — preserves the structured tool_use blocks so the
    * provider can re-emit them in the API's required format (OpenAI tool_calls /
    * Anthropic content blocks). Required for multi-step agent loops. */
-  toolCalls?: { id: string; name: string; args: AnyValue }[];
+  toolCalls?: { id: string; name: string; args: ToolArguments }[];
   /** For role='assistant' — DeepSeek-reasoner / Anthropic-thinking style models
    * require their chain-of-thought blob to be sent back as `reasoning_content`
    * on the next request. Without this the API rejects the call. */
   reasoningContent?: string;
   /** For role='assistant' — Anthropic thinking blocks from the same turn, replayed
    *  before the tool_use blocks they preceded. Never persisted. */
-  thinkingBlocks?: AnyValue[];
+  thinkingBlocks?: WireBlock[];
 }
 
 export interface ToolSpec {
   name: string;
   description: string;
-  parameters: AnyValue;     // JSON schema
+  parameters: Record<string, unknown>;     // JSON schema
 }
 
 export interface ChatRequest {
@@ -78,6 +80,9 @@ export interface ChatRequest {
 }
 
 export interface LLMProvider {
+  __proxy?: string;
+  __fallbackCwd?: string;
+  testConnect?(): Promise<{ ok: boolean; message: string }>;
   id: string;
   displayName: string;
   isAvailable(): Promise<boolean>;

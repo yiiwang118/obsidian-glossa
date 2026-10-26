@@ -1,8 +1,10 @@
+import type { ToolArguments } from '../tool_arguments';
+import { errorMessage } from '../../utils/unknown_data';
 import { TFile, TFolder, type App } from 'obsidian';
 import { assertVaultPath, buildTool, filesInFolder, normalizePathFields, protectedVaultPath, type ToolImpl } from './_shared';
 import { bi } from '../../utils/i18n';
 
-function targetPath(args: AnyValue): string | null {
+function targetPath(args: ToolArguments): string | null {
   try { return assertVaultPath(args?.path); } catch { return null; }
 }
 
@@ -15,7 +17,7 @@ export const deleteNote: ToolImpl = buildTool({
   searchTags: ['delete file', 'delete folder', 'remove note', '删除笔记', '删除文件', '删除文件夹', '移到废纸篓'],
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => bi(`DELETE ${a.path}`, `删除 ${a.path}`),
-  preview: async (app: App, a: AnyValue) => {
+  preview: async (app: App, a: ToolArguments) => {
     const target = app.vault.getAbstractFileByPath(targetPath(a) ?? '');
     if (target instanceof TFolder) {
       const count = filesInFolder(target).length;
@@ -42,7 +44,7 @@ export const deleteNote: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const reason = protectedVaultPath(app, path);
     if (reason) return `Error: refusing to delete ${reason}.`;
     const target = app.vault.getAbstractFileByPath(path);

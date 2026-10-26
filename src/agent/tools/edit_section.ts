@@ -1,3 +1,5 @@
+import type { ToolArguments } from '../tool_arguments';
+import { errorMessage } from '../../utils/unknown_data';
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
@@ -11,7 +13,7 @@ export const editSection: ToolImpl = buildTool({
   searchHint: 'legacy find-replace edit (use file_edit instead)',
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => `edit ${a.path}`,
-  preview: async (app, a: AnyValue) => {
+  preview: async (app: import('obsidian').App, a: ToolArguments) => {
     const f = app.vault.getAbstractFileByPath(a.path);
     if (!(f instanceof TFile)) return `(file not found: ${a.path})`;
     const text = await app.vault.read(f);
@@ -36,7 +38,7 @@ export const editSection: ToolImpl = buildTool({
     const { find, replace } = args;
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     if (typeof find !== 'string' || find.length === 0) return 'Error: "find" must be a non-empty string.';
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;

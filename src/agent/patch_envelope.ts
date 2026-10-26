@@ -1,3 +1,4 @@
+import { errorMessage } from '../utils/unknown_data';
 import { applyTextEdits, type AppliedTextEdit } from './text_edit_engine';
 /**
  * Codex-style `apply_patch` envelope parser + applier.
@@ -227,7 +228,7 @@ export async function previewEnvelope(
 ): Promise<{ ops: FileOp[]; files: EnvelopeFilePreview[]; parseError?: string }> {
   let ops: FileOp[];
   try { ops = parseEnvelope(envelope); }
-  catch (e) { return { ops: [], files: [], parseError: e.message }; }
+  catch (e: unknown) { return { ops: [], files: [], parseError: errorMessage(e) }; }
 
   const files: EnvelopeFilePreview[] = [];
   for (const op of ops) {
@@ -256,8 +257,8 @@ export async function previewEnvelope(
       try {
         const next = applyUpdate(cur, op.chunks);
         files.push({ kind: 'update', path: op.path, movePath: op.movePath, oldText: cur, newText: next });
-      } catch (e) {
-        files.push({ kind: 'update', path: op.path, movePath: op.movePath, oldText: cur, newText: cur, warning: `hunk did not match — ${e.message}` });
+      } catch (e: unknown) {
+        files.push({ kind: 'update', path: op.path, movePath: op.movePath, oldText: cur, newText: cur, warning: `hunk did not match — ${errorMessage(e)}` });
       }
     }
   }

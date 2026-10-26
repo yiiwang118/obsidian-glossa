@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 import { TFile } from 'obsidian';
 import { formatImageInspectionMarkdown } from '../../utils/image';
 import { inspectVaultImageCached } from '../../utils/media_cache';
@@ -62,7 +63,7 @@ export const viewImage: ToolImpl = buildTool({
     // refuse `..`-bearing paths on its own.
     let safe: string;
     try { safe = assertVaultPath(path, 'path'); }
-    catch (e) { return { text: `Error: ${e.message}` }; }
+    catch (e: unknown) { return { text: `Error: ${errorMessage(e)}` }; }
     const f = app.vault.getAbstractFileByPath(safe);
     if (!(f instanceof TFile)) return { text: `Error: image not found: ${safe}` };
     const extToMime: Record<string, string> = {
@@ -90,8 +91,8 @@ export const viewImage: ToolImpl = buildTool({
         text: formatImageInspectionMarkdown(path, inspection),
         contentBlocks: [{ type: 'image', source: { type: 'base64', media_type: inspection.image.mime, data: inspection.image.data } }],
       };
-    } catch (e) {
-      return { text: `Error reading image: ${e.message ?? e}` };
+    } catch (e: unknown) {
+      return { text: `Error reading image: ${errorMessage(e)}` };
     }
   },
 });

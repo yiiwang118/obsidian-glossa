@@ -1,3 +1,4 @@
+import { legacyKeyCode } from '../utils/obsidian_host';
 import { el, clear, setStyle, setTrustedSvg } from '../utils/dom';
 import { bi } from '../utils/i18n';
 
@@ -220,7 +221,7 @@ export class Popup {
       if (it) {
         const res = it.onSelect();
         this.hide();
-        if (res && typeof (res as AnyValue).then === 'function') (res as AnyValue).catch(() => {});
+        if (res) void Promise.resolve(res).catch(() => {});
       }
       return true;
     }
@@ -243,7 +244,7 @@ export class Popup {
     this.keyHandler = (e: KeyboardEvent) => {
       if (!this.isOpen()) return;
       // IME composition — let the input method handle Enter / arrows.
-      if ((e as AnyValue).isComposing || (e as AnyValue).keyCode === 229) return;
+      if (e.isComposing || legacyKeyCode(e) === 229) return;
       if (this.onKey(e)) {
         e.preventDefault();
         e.stopPropagation();
@@ -327,7 +328,7 @@ export class Popup {
         const res = it.onSelect();
         this.hide();
         // If async, swallow so a thrown rejection doesn't surface as an unhandled promise.
-        if (res && typeof (res as AnyValue).then === 'function') (res as AnyValue).catch(() => {});
+        if (res) void Promise.resolve(res).catch(() => {});
       });
 
       // Leading column: ✓ when checked, else icon (if provided), else spacer.

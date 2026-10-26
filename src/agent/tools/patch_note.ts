@@ -1,3 +1,5 @@
+import type { ToolArguments } from '../tool_arguments';
+import { errorMessage, scalarText } from '../../utils/unknown_data';
 /**
  * patch_note — section / block / frontmatter-anchored append-prepend-replace.
  *
@@ -26,11 +28,7 @@ import { setStyle } from '../../utils/dom';
 
 type Op = 'append' | 'prepend' | 'replace';
 
-interface PatchTarget {
-  heading?: string;
-  block_ref?: string;
-  frontmatter_key?: string;
-}
+
 
 /** Find a heading section's body line range (inclusive, exclusive).
  *  Returns null if not found. Heading match is exact (level + text), but if
@@ -89,7 +87,7 @@ export const patchNote: ToolImpl = buildTool({
   searchHint: 'append prepend replace heading block frontmatter',
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => {
-    const t = (a.target ?? {}) as PatchTarget;
+    const t = (a.target ?? {});
     const where = t.heading ? `heading "${t.heading}"`
                 : t.block_ref ? `block ^${t.block_ref}`
                 : t.frontmatter_key ? `frontmatter.${t.frontmatter_key}`
@@ -120,8 +118,8 @@ export const patchNote: ToolImpl = buildTool({
       additionalProperties: false,
     },
   },
-  preview: async (app, a: AnyValue) => {
-    const t = (a.target ?? {}) as PatchTarget;
+  preview: async (app: import('obsidian').App, a: ToolArguments) => {
+    const t = (a.target ?? {});
     const where = t.heading ? `heading "${t.heading}"`
                 : t.block_ref ? `block ^${t.block_ref}`
                 : t.frontmatter_key ? `frontmatter.${t.frontmatter_key}`
@@ -132,7 +130,7 @@ export const patchNote: ToolImpl = buildTool({
   // delta indicator. Mirrors the kind of UX upstream Claude Code provides on
   // FileEdit result cards.
   renderToolResultMessage(result, args) {
-    const t = (args?.target ?? {}) as PatchTarget;
+    const t = (args?.target ?? {});
     const where = t.heading ? `## ${t.heading.replace(/^#+\s*/, '')}`
                 : t.block_ref ? `^${t.block_ref}`
                 : t.frontmatter_key ? `props.${t.frontmatter_key}`
@@ -159,20 +157,20 @@ export const patchNote: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const op = args.op as Op;
     if (op !== 'append' && op !== 'prepend' && op !== 'replace') {
       return `Error: op must be append / prepend / replace, got "${args.op}"`;
     }
     const content = typeof args.content === 'string' ? args.content : '';
-    const target = (args.target ?? {}) as PatchTarget;
+    const target = (args.target ?? {});
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;
 
     // ── Frontmatter mode: use Obsidian's atomic API so other keys / formatting stay intact.
     if (target.frontmatter_key) {
       try {
-        await app.fileManager.processFrontMatter(f, (fm: Record<string,AnyValue>) => {
+        await app.fileManager.processFrontMatter(f, (fm: Record<string, unknown>) => {
           const cur = fm[target.frontmatter_key];
           if (op === 'replace') {
             // Try to parse content as JSON for arrays/objects/booleans/numbers;
@@ -181,18 +179,18 @@ export const patchNote: ToolImpl = buildTool({
             catch { fm[target.frontmatter_key] = content; }
           } else if (Array.isArray(cur)) {
             // We're in the !replace branch (replace handled above), so op is append/prepend.
-            const parsed = (() => { try { return JSON.parse(content); } catch { return content; } })();
-            if (op === 'append')  fm[target.frontmatter_key] = [...cur, parsed];
-            else                  fm[target.frontmatter_key] = [parsed, ...cur];
+            const parsed = ((): unknown => { try { return JSON.parse(content); } catch { return content; } })();
+            if (op === 'append')  fm[target.frontmatter_key] = [...(cur as unknown[]), parsed];
+            else                  fm[target.frontmatter_key] = [parsed, ...(cur as unknown[])];
           } else {
             // String concat for scalar values; op is append/prepend here.
-            const curStr = String(cur ?? '');
+            const curStr = scalarText(cur ?? '');
             fm[target.frontmatter_key] = op === 'append' ? (curStr + content) : (content + curStr);
           }
         });
         return `Patched ${path}.frontmatter.${target.frontmatter_key} (${op}).`;
-      } catch (e) {
-        return `Error processing frontmatter: ${e.message}`;
+      } catch (e: unknown) {
+        return `Error processing frontmatter: ${errorMessage(e)}`;
       }
     }
 

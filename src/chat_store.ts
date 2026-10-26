@@ -126,7 +126,7 @@ function prepareLoaded(session: ChatSession): boolean {
   changed = purgeTransientChatPayloads(session.messages ?? []) > 0 || changed;
   for (const m of session.messages ?? []) {
     for (const item of Array.isArray(m.contextSnapshot) ? m.contextSnapshot : []) {
-      if (item && typeof (item as AnyValue).content === 'string') { delete (item as AnyValue).content; changed = true; }
+      if (item && typeof (item as { content?: string }).content === 'string') { delete (item as { content?: string }).content; changed = true; }
     }
   }
   return changed;
@@ -248,7 +248,7 @@ export class ChatStore {
       if (!(await this.adapter.exists(this.deletedPath))) return;
       const parsed = JSON.parse(await this.adapter.read(this.deletedPath)) as { deletedSessionIds?: Record<string, number> };
       if (parsed?.deletedSessionIds) this.applyDeletedSessionIds(parsed.deletedSessionIds, true);
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn('[Glossa] deleted chat journal load failed', e);
     }
   }
@@ -262,7 +262,7 @@ export class ChatStore {
         { pretty: true },
       );
       this.journalDirty = false;
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn('[Glossa] deleted chat journal save failed', e);
     }
   }
@@ -272,7 +272,7 @@ export class ChatStore {
       if (!(await this.adapter.exists(path))) return null;
       const raw = await this.adapter.read(path);
       return { store: parseStore(raw), raw };
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn(`[Glossa] chat recovery skipped unreadable file ${path}`, e);
       return null;
     }
@@ -292,7 +292,7 @@ export class ChatStore {
           return bNum - aNum;
         });
       candidates.push(...conflictFiles);
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn('[Glossa] chat recovery could not list plugin directory', e);
     }
     // The copy kept when upgrading comes last: it is the oldest.
@@ -346,7 +346,7 @@ export class ChatStore {
           `Glossa 已从 ${recoveredFrom.split('/').pop()} 恢复 ${this.summaries.size} 个历史会话。`,
         ), 8000);
       }
-    } catch (e) { console.warn('[Glossa] chat load failed', e); }
+    } catch (e: unknown) { console.warn('[Glossa] chat load failed', e); }
     if (changed) await this.persist();
     else if (this.journalDirty) await this.persistDeletedJournal();
   }
@@ -360,7 +360,7 @@ export class ChatStore {
         await this.adapter.write(this.backupPath, raw);
         this.backupAt = Date.now();
       }
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn('[Glossa] could not keep a copy of the old chat store', e);
     }
     let failed = 0;
@@ -379,7 +379,7 @@ export class ChatStore {
       this.summaries.set(session.id, summarize(session));
       try {
         await this.writeChat(session);
-      } catch (e) {
+      } catch (e: unknown) {
         // Kept in memory and written again before the next index write.
         this.loaded.set(session.id, session);
         failed++;
@@ -403,7 +403,7 @@ export class ChatStore {
       restored.add(session.id);
       try {
         await this.writeChat(session);
-      } catch (e) {
+      } catch (e: unknown) {
         this.loaded.set(session.id, session);
         console.warn(`[Glossa] could not restore chat ${session.id} from the upgrade copy`, e);
       }
@@ -419,7 +419,7 @@ export class ChatStore {
     let listed: string[] | null = null;
     try {
       listed = (await this.adapter.exists(this.dir)) ? (await this.adapter.list(this.dir)).files ?? [] : [];
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn('[Glossa] could not list chat files', e);
     }
     const present = new Map<string, string>();
@@ -470,7 +470,7 @@ export class ChatStore {
       await this.adapter.remove(this.backupPath);
       this.backupAt = null;
       return true;
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn('[Glossa] could not check the old chat store copy', e);
       return false;
     }
@@ -498,7 +498,7 @@ export class ChatStore {
           return;
         }
         await safeWriteJson(this.adapter, this.backupPath, Array.isArray(parsed) ? kept : { ...(parsed as object), sessions: kept }, { keepBackup: false });
-      } catch (e) {
+      } catch (e: unknown) {
         console.warn('[Glossa] could not remove a deleted chat from the old chat store copy', e);
       }
     });
@@ -510,7 +510,7 @@ export class ChatStore {
       const session = parsed && typeof parsed === 'object' && 'session' in parsed ? parsed.session : parsed as ChatSession | null;
       if (!session || typeof session.id !== 'string' || !session.id || !Array.isArray(session.messages)) return null;
       return session;
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn(`[Glossa] could not read chat file ${path}`, e);
       return null;
     }
@@ -528,7 +528,7 @@ export class ChatStore {
         session: { ...session, messages: chatMessagesForStorage(session.messages ?? []) },
       }, { keepBackup: false });
       this.unwritten.delete(session);
-    } catch (e) {
+    } catch (e: unknown) {
       this.unwritten.add(session);
       throw e;
     }
@@ -537,7 +537,7 @@ export class ChatStore {
   private async removeChatFile(id: string) {
     try {
       if (await this.adapter.exists(this.chatPath(id))) await this.adapter.remove(this.chatPath(id));
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn(`[Glossa] could not remove chat file for ${id}`, e);
     }
   }
@@ -585,7 +585,7 @@ export class ChatStore {
     this.backupListsDeleted = false;
     try {
       await this.enqueue(() => this.writeIndex(dropDeleted));
-    } catch (e) {
+    } catch (e: unknown) {
       if (dropDeleted) this.backupListsDeleted = true;
       console.warn('[Glossa] chat index save failed', e);
     }
@@ -604,7 +604,7 @@ export class ChatStore {
       let stripped = 0;
       for (const m of session.messages ?? []) {
         for (const item of Array.isArray(m.contextSnapshot) ? m.contextSnapshot : []) {
-          if (item && typeof (item as AnyValue).content === 'string') { delete (item as AnyValue).content; stripped++; }
+          if (item && typeof (item as { content?: string }).content === 'string') { delete (item as { content?: string }).content; stripped++; }
         }
       }
       count += stripped;
@@ -636,7 +636,7 @@ export class ChatStore {
       changed++;
       this.summaries.set(id, summarize(session));
       const target = session;
-      try { await this.enqueue(() => this.writeChat(target)); } catch (e) { console.warn('[Glossa] chat save failed', e); }
+      try { await this.enqueue(() => this.writeChat(target)); } catch (e: unknown) { console.warn('[Glossa] chat save failed', e); }
     }
     if (changed) await this.persist();
     return changed;
@@ -717,7 +717,7 @@ export class ChatStore {
     if (writes.length) {
       try {
         await this.enqueue(async () => { for (const s of writes) await this.writeChat(s); });
-      } catch (e) {
+      } catch (e: unknown) {
         console.warn('[Glossa] chat save failed', e);
       }
     }
@@ -731,7 +731,7 @@ export class ChatStore {
     this.summaries.set(session.id, summarize(session));
     try {
       await this.enqueue(() => this.writeChat(session));
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn('[Glossa] chat save failed', e);
     }
     await this.persist();
@@ -830,7 +830,7 @@ export class ChatStore {
           for (const file of (await this.adapter.list(this.dir)).files ?? []) await this.adapter.remove(file);
         }
         if (await this.adapter.exists(this.backupPath)) await this.adapter.remove(this.backupPath);
-      } catch (e) {
+      } catch (e: unknown) {
         console.warn('[Glossa] could not remove every chat file', e);
       }
       this.backupAt = null;

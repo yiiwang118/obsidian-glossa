@@ -1,3 +1,4 @@
+import { errorMessage } from './utils/unknown_data';
 import type { ChatMessage, ChatSession } from './types';
 import { modelContextWindow } from './types';
 import type { LLMProvider, MessageInput } from './providers/types';
@@ -234,11 +235,11 @@ export class TemporaryChat {
           ? bi('The model returned reasoning but no answer. Try again, or lower this endpoint\'s reasoning effort.', '模型只返回了推理过程，没有给出回答。可以重试，或调低这个端点的思考强度。')
           : bi('The model returned an empty reply.', '模型返回了空回复。'));
       } else answer.status = 'complete';
-    } catch (error) {
+    } catch (error: unknown) {
       if (controller.signal.aborted && !timedOut) answer.status = 'cancelled';
       else {
         answer.status = 'error';
-        answer.error = timedOut ? bi('No complete reply after 10 minutes. The request was stopped.', '10 分钟内没有完成回复，请求已停止。') : error instanceof Error ? error.message : String(error);
+        answer.error = timedOut ? bi('No complete reply after 10 minutes. The request was stopped.', '10 分钟内没有完成回复，请求已停止。') : errorMessage(error);
       }
     } finally {
       window.clearTimeout(timeout);

@@ -116,13 +116,13 @@ export function extractWebMarkdown(raw: string, baseUrl: string): WebMarkdownRes
   const links = extractLinks(withoutNoise, baseUrl).slice(0, 80);
 
   const markdown = decodeHtml(withoutNoise
-    .replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, level, text) => `\n\n${'#'.repeat(Number(level))} ${stripTags(text).trim()}\n\n`)
+    .replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_m: string, level: string, text: string) => `\n\n${'#'.repeat(Number(level))} ${stripTags(text).trim()}\n\n`)
     .replace(/<p\b[^>]*>/gi, '\n\n')
     .replace(/<\/p>/gi, '\n\n')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<li\b[^>]*>/gi, '\n- ')
     .replace(/<\/(?:li|ul|ol|div|section|article|main|header|footer)>/gi, '\n')
-    .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_m, href, text) => {
+    .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_m: string, href: string, text: string) => {
       const label = stripTags(text).replace(/\s+/g, ' ').trim();
       if (!label) return '';
       const u = safeResolveUrl(href, baseUrl);

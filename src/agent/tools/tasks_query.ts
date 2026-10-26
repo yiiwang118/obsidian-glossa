@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 /**
  * tasks_query — bridge to the Tasks plugin\'s query DSL.
  *
@@ -29,23 +30,23 @@ interface TasksApi {
   queryTasks?: (request: { query: string }) => Promise<unknown>;
 }
 
-function objectRecord(value: unknown): Record<string, AnyValue> | null {
-  return value && typeof value === 'object' ? value as Record<string, AnyValue> : null;
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null;
 }
 
-function getTasksApi(app: AnyValue): TasksApi | null {
+function getTasksApi(app: unknown): TasksApi | null {
   const appRecord = objectRecord(app);
   const plugins = objectRecord(objectRecord(appRecord?.plugins)?.plugins);
   const plugin = objectRecord(plugins?.['obsidian-tasks-plugin']);
   const api = objectRecord(plugin?.apiV1) ?? objectRecord(plugin?.api);
-  return api as TasksApi | null;
+  return api;
 }
 
 function fmtDate(d: unknown): string {
   if (!d) return '';
   if (typeof d === 'string') return d;
   // Tasks uses moment objects — call format if available, else toString.
-  const record = objectRecord(d);
+  const record = objectRecord(d) as { format?: (pattern: string) => string } | null;
   if (typeof record?.format === 'function') return String(record.format('YYYY-MM-DD'));
   if (d instanceof Date) return d.toISOString();
   if (typeof d === 'number' || typeof d === 'boolean' || typeof d === 'bigint') return String(d);
@@ -101,8 +102,8 @@ export const tasksQuery: ToolImpl = buildTool({
       });
       const tail = tasks.length > cap.length ? `\n\n[+${tasks.length - cap.length} more truncated]` : '';
       return `${cap.length} of ${tasks.length} task${tasks.length === 1 ? '' : 's'}:\n\n${lines.join('\n')}${tail}`;
-    } catch (e) {
-      return `Tasks plugin error: ${e?.message ?? e}`;
+    } catch (e: unknown) {
+      return `Tasks plugin error: ${errorMessage(e)}`;
     }
   },
 });

@@ -21,7 +21,7 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   if (opts.className) e.className = opts.className;
   if (opts.text != null) e.textContent = opts.text;
   if (opts.title) e.title = opts.title;
-  if (opts.type) (e as AnyValue).type = opts.type;
+  if (opts.type) e.setAttribute('type', opts.type);
   if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) e.setAttribute(k, v);
   if (opts.style) setStyle(e, opts.style);
   if (opts.onClick) e.addEventListener('click', opts.onClick);
@@ -100,9 +100,9 @@ function cloneSvgNode(source: ChildNode, ownerDocument: Document, ids: Map<strin
   return cloneSvgElement(source as Element, ownerDocument, ids);
 }
 
-export function debounce<F extends (...a: AnyValue[]) =>AnyValue>(fn: F, ms: number): F {
-  let t: AnyValue;
-  return ((...a: AnyValue[]) => { window.clearTimeout(t); t = window.setTimeout(() => fn(...a), ms); }) as F;
+export function debounce<Args extends unknown[]>(fn: (...args: Args) => unknown, ms: number): (...args: Args) => void {
+  let timer: number | undefined;
+  return (...args: Args) => { window.clearTimeout(timer); timer = window.setTimeout(() => { void fn(...args); }, ms); };
 }
 
 export function uid(): string {

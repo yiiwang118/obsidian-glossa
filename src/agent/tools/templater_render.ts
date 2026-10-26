@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 /**
  * templater_render — bridge to the Templater plugin.
  *
@@ -16,22 +17,22 @@
 import { TFile } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from './_shared';
 
-type TemplaterApi = Record<string, AnyValue> & {
+type TemplaterApi = Record<string, unknown> & {
   create_new_note_from_template?: (template: TFile, folder: string, fileName: string, openNewFile: boolean) => Promise<unknown>;
   parseTemplate?: (template: string, file?: TFile) => Promise<string> | string;
   parser?: { parseTemplate?: (template: string, file?: TFile) => Promise<string> | string };
 };
 
-function objectRecord(value: unknown): Record<string, AnyValue> | null {
-  return value && typeof value === 'object' ? value as Record<string, AnyValue> : null;
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null;
 }
 
-function getTemplater(app: AnyValue): TemplaterApi | null {
+function getTemplater(app: unknown): TemplaterApi | null {
   const appRecord = objectRecord(app);
   const plugins = objectRecord(objectRecord(appRecord?.plugins)?.plugins);
   const plugin = objectRecord(plugins?.['templater-obsidian']);
   const templater = objectRecord(plugin?.templater);
-  return templater as TemplaterApi | null;
+  return templater;
 }
 
 export const templaterRender: ToolImpl = buildTool({
@@ -57,7 +58,7 @@ export const templaterRender: ToolImpl = buildTool({
       additionalProperties: false,
     },
   },
-  preview: async (a) => `Templater ${a.mode}\n  template: ${a.template_path}\n  ${a.mode === 'to_file' ? `target:   ${a.target_path}` : '(no write — string output)'}`,
+  preview: async (a: import('../tool_arguments').ToolArguments) => `Templater ${a.mode}\n  template: ${a.template_path}\n  ${a.mode === 'to_file' ? `target:   ${a.target_path}` : '(no write — string output)'}`,
   run: async (app, args, ctx) => {
     if (ctx?.signal?.aborted) return 'Error: cancelled before start.';
     const t = getTemplater(app);
@@ -65,14 +66,14 @@ export const templaterRender: ToolImpl = buildTool({
     const mode = args.mode as 'to_file' | 'to_string';
     let templatePath: string;
     try { templatePath = assertVaultPath(args.template_path, 'template_path'); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const tplFile = app.vault.getAbstractFileByPath(templatePath);
     if (!(tplFile instanceof TFile)) return `Error: template not found: ${templatePath}`;
 
     if (mode === 'to_file') {
       let targetPath: string;
       try { targetPath = assertVaultPath(args.target_path ?? '', 'target_path'); }
-      catch (e) { return `Error: ${e.message}`; }
+      catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
       if (app.vault.getAbstractFileByPath(targetPath)) return `Error: target already exists: ${targetPath}`;
       try {
         // Use Templater\'s "create new note from template" path so all tp.* accessors
@@ -92,8 +93,8 @@ export const templaterRender: ToolImpl = buildTool({
         if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
         await app.vault.create(targetPath, rendered);
         return `Rendered ${templatePath} → ${targetPath} (fallback path).`;
-      } catch (e) {
-        return `Templater error: ${e?.message ?? e}`;
+      } catch (e: unknown) {
+        return `Templater error: ${errorMessage(e)}`;
       }
     }
 
@@ -104,8 +105,8 @@ export const templaterRender: ToolImpl = buildTool({
       const parser = t.parser ?? t;
       const rendered = await (parser.parseTemplate?.(raw, tplFile) ?? raw);
       return rendered;
-    } catch (e) {
-      return `Templater error: ${e?.message ?? e}`;
+    } catch (e: unknown) {
+      return `Templater error: ${errorMessage(e)}`;
     }
   },
 });

@@ -1,3 +1,4 @@
+import { errorMessage } from './unknown_data';
 import { PDFDocument } from 'pdf-lib';
 import { parsePdfPageSelection } from './pdf';
 
@@ -19,8 +20,8 @@ export async function slicePdfPages(
   const bytes = rawData instanceof Uint8Array ? rawData : new Uint8Array(rawData);
   let source: PDFDocument;
   try { source = await PDFDocument.load(bytes); }
-  catch (error) {
-    throw new Error(`Could not load PDF for native page slicing: ${error instanceof Error ? error.message : String(error)}`);
+  catch (error: unknown) {
+    throw new Error(`Could not load PDF for native page slicing: ${errorMessage(error)}`);
   }
   const totalPages = source.getPageCount();
   const selection = parsePdfPageSelection(pageRange, totalPages, Math.min(MAX_NATIVE_PDF_PAGES, maxPages));

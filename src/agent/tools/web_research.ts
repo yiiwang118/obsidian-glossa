@@ -1,3 +1,4 @@
+import { errorName, errorMessage } from '../../utils/unknown_data';
 import { buildTool, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects } from '../../utils/safe_web';
 import { decodeUtf8, extractWebMarkdown, summarizeMarkdown } from '../../utils/web_content';
@@ -13,7 +14,7 @@ export const webResearch: ToolImpl = buildTool({
   checkPermissions: async (app) => webReadPermission(app, 'Web research requires network approval.'),
   searchHint: 'search fetch synthesize web sources',
   describe: a => `research web "${String(a.goal ?? a.query ?? '').slice(0, 80)}"`,
-  preview: async (a) => {
+  preview: async (a: import('../tool_arguments').ToolArguments) => {
     const mode = typeof a.mode === 'string' && a.mode.trim() ? a.mode.trim() : 'answer';
     return [
       `Research goal: ${String(a.goal ?? '').trim()}`,
@@ -77,12 +78,12 @@ export const webResearch: ToolImpl = buildTool({
         fetched.length ? '\n## Extracted source notes\n' + fetched.join('\n\n') : '',
         downloadHints.length ? '\n## Download candidates\n' + downloadHints.join('\n') + '\n\nUse download_file with the selected direct URL if the user wants it saved.' : '',
       ].filter(Boolean).join('\n');
-    } catch (e) {
-      if (e?.name === 'AbortError') {
+    } catch (e: unknown) {
+      if (errorName(e) === 'AbortError') {
         if (ctx?.signal?.aborted) return 'Error: cancelled by user.';
         return 'Error: timeout during web research.';
       }
-      return `Error researching web: ${e?.message ?? e}`;
+      return `Error researching web: ${errorMessage(e)}`;
     }
   },
 });
@@ -112,8 +113,8 @@ export async function fetchSourceExcerpt(
       parsed.description ? `Description: ${parsed.description}` : '',
       excerpt,
     ].filter(Boolean).join('\n');
-  } catch (e) {
-    return `### ${result.title || result.domain}\nURL: ${result.url}\nFetch failed: ${e?.message ?? e}`;
+  } catch (e: unknown) {
+    return `### ${result.title || result.domain}\nURL: ${result.url}\nFetch failed: ${errorMessage(e)}`;
   }
 }
 

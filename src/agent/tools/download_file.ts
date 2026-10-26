@@ -1,3 +1,4 @@
+import { errorMessage as caughtErrorMessage, errorName } from '../../utils/unknown_data';
 import { TFile, TFolder } from 'obsidian';
 import { assertVaultPath, buildTool, normalizePathFields, vaultFolderOf, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects, parseHttpUrl } from '../../utils/safe_web';
@@ -20,7 +21,7 @@ export const downloadFile: ToolImpl = buildTool({
   searchHint: 'download public URL file to vault',
   backfillObservableInput: normalizePathFields(['save_to']),
   describe: a => `download ${a.url ?? a.query ?? 'file'}`,
-  preview: async (a) => {
+  preview: async (a: import('../tool_arguments').ToolArguments) => {
     const target = typeof a.save_to === 'string' && a.save_to.trim()
       ? a.save_to.trim()
       : `${DEFAULT_DOWNLOAD_DIR}/<inferred filename>`;
@@ -87,7 +88,7 @@ export const downloadFile: ToolImpl = buildTool({
     if (!rawUrl && query.length < 2) return 'Error: provide either a public url or a query/title with at least 2 characters.';
     if (rawUrl) {
       try { parseHttpUrl(rawUrl); }
-      catch (e) { return `Error: ${e.message}`; }
+      catch (e: unknown) { return `Error: ${caughtErrorMessage(e)}`; }
     }
     const settings = readWebSettings(app) as GlossaSettings;
     if (!settings.webAllowAutoDownload && args.confirm_intent !== true) {
@@ -111,9 +112,9 @@ export const downloadFile: ToolImpl = buildTool({
         const ext = validateFetchedCandidate(fetched, allowed, !!query);
         selected = { fetched, ext, candidate };
         break;
-      } catch (e) {
-        if (e instanceof Error && e.name === 'AbortError') throw e;
-        failures.push(`${candidate.url} -> ${errorMessage(e)}`);
+      } catch (e: unknown) {
+        if (e instanceof Error && errorName(e) === 'AbortError') throw e;
+        failures.push(`${candidate.url} -> ${caughtErrorMessage(e)}`);
       }
     }
     if (!selected) {
@@ -173,13 +174,13 @@ export const downloadFile: ToolImpl = buildTool({
         inspection,
         nextInspectionHint(target, ext),
       ].filter(Boolean).join('\n');
-    } catch (e) {
-      if (e?.name === 'AbortError') {
+    } catch (e: unknown) {
+      if (errorName(e) === 'AbortError') {
         if (ctx?.signal?.aborted) return 'Error: cancelled by user.';
         return 'Error: timeout after 60s';
       }
       const failedUrl = selected?.candidate.url ?? rawUrl;
-      return `Error downloading ${failedUrl}: ${e?.message ?? e}${downloadHttpFallbackHint(failedUrl, e, ctx?.signal)}`;
+      return `Error downloading ${failedUrl}: ${caughtErrorMessage(e)}${downloadHttpFallbackHint(failedUrl, e, ctx?.signal)}`;
     }
   },
 });
@@ -216,7 +217,7 @@ async function resolveDownloadCandidates(
   };
   if (rawUrl) add(rawUrl, 'direct URL');
   if (query) {
-    const discovered = await findDownloadCandidates(query, 12, signal).catch(() => []);
+    const discovered = await findDownloadCandidates(query, 12, signal).catch((): import('./web_search').SearchResult[] => []);
     for (const result of discovered) add(result.url, result.source);
   }
   return out;
@@ -272,12 +273,6 @@ function filenameFromQuery(query: string, ext: string): string {
   return withExtension(sanitizeFilename(title || 'download'), ext);
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
-  if (typeof error === 'number' || typeof error === 'boolean' || typeof error === 'bigint') return String(error);
-  return 'Unknown error';
-}
 
 function chooseTargetPath(saveTo: unknown, filename: unknown, finalUrl: string, ext: string, defaultFolder: unknown, saveToIsFolder = false): string {
   const explicit = typeof saveTo === 'string' ? saveTo.trim() : '';
@@ -306,8 +301,8 @@ async function inspectPdfDownload(buffer: ArrayBuffer, signal?: AbortSignal): Pr
       formatPdfDiagnosticMarkdown(res),
       firstLines ? `\nFirst-page text:\n${firstLines}` : '',
     ].filter(Boolean).join('\n');
-  } catch (e) {
-    return `PDF inspection: failed (${e?.message ?? e})`;
+  } catch (e: unknown) {
+    return `PDF inspection: failed (${caughtErrorMessage(e)})`;
   }
 }
 

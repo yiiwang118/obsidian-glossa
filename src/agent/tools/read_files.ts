@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 import { TFile } from 'obsidian';
 import { formatNoteRead, type NoteReadOptions } from '../../utils/note_read';
 import { assertVaultPath, buildTool, type ToolImpl } from './_shared';
@@ -82,8 +83,8 @@ export const readFiles: ToolImpl = buildTool({
         const path = assertVaultPath(request.path);
         const key = JSON.stringify({ path, startLine: request.startLine, endLine: request.endLine, maxLines: request.maxLines });
         if (!unique.has(key)) unique.set(key, { ...request, path });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+      } catch (error: unknown) {
+        const message = errorMessage(error);
         unique.set(`invalid:${unique.size}`, { ...request, path: `Error: ${message}` });
       }
     }
@@ -98,8 +99,8 @@ export const readFiles: ToolImpl = buildTool({
       try {
         const text = await app.vault.read(file);
         return formatNoteRead(request.path, text, request, BATCH_LIMITS);
-      } catch (error) {
-        return `Error: ${request.path}: ${error instanceof Error ? error.message : String(error)}`;
+      } catch (error: unknown) {
+        return `Error: ${request.path}: ${errorMessage(error)}`;
       }
     }));
 

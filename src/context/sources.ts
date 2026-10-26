@@ -1,3 +1,4 @@
+import { errorMessage } from '../utils/unknown_data';
 import { App, TFile, TFolder, MarkdownView, FileView } from 'obsidian';
 import { estimateTokens } from '../utils/tokens';
 import { uid } from '../utils/dom';
@@ -71,10 +72,10 @@ function selectionFileContext(app: App, el: HTMLElement): Pick<SelectionInfo, 's
 
   for (const leaf of leaves) {
     const view = leaf?.view;
-    const container = (view as AnyValue)?.containerEl as HTMLElement | undefined;
+    const container = view?.containerEl;
     if (!view || !container || !container.contains(el) || !container.contains(contentEl)) continue;
 
-    const file = view instanceof FileView ? view.file : (view as AnyValue).file;
+    const file = view instanceof FileView ? view.file : (view as typeof view & { file?: TFile }).file;
     if (!file) continue;
     return { source: sourceForFileView(view.getViewType?.(), file), file };
   }
@@ -172,11 +173,11 @@ export async function resolveFile(
         tokens: Math.ceil(size / 1024),
         pinned: false,
       };
-    } catch (e) {
+    } catch (e: unknown) {
       return {
         id: uid(), kind: 'file', label: file.basename + '.' + ext,
         detail: file.path,
-        content: `### Image read failed: ${file.path}\n\n${e?.message ?? e}`,
+        content: `### Image read failed: ${file.path}\n\n${errorMessage(e)}`,
         tokens: 0, pinned: false,
       };
     }
@@ -226,11 +227,11 @@ export async function resolveFile(
         language: inferSelectionLanguage(res.text),
         pinned: false,
       };
-    } catch (e) {
+    } catch (e: unknown) {
       return {
         id: uid(), kind: 'file', label: file.basename + '.pdf',
         detail: file.path,
-        content: `### PDF extraction failed: ${file.path}\n\n${e?.message ?? e}`,
+        content: `### PDF extraction failed: ${file.path}\n\n${errorMessage(e)}`,
         tokens: 0, pinned: false,
       };
     }
@@ -264,10 +265,10 @@ const WEB_FETCH_TIMEOUT_MS = 15_000;
 export async function resolveWebUrl(url: string): Promise<ContextItem> {
   let validated: URL;
   try { validated = parseHttpUrl(url); }
-  catch (e) {
+  catch (e: unknown) {
     return {
       id: uid(), kind: 'web', label: 'rejected', detail: url,
-      content: `(refused: ${e.message})`, tokens: 0, pinned: false,
+      content: `(refused: ${errorMessage(e)})`, tokens: 0, pinned: false,
     };
   }
   const ctl = new AbortController();
@@ -287,10 +288,10 @@ export async function resolveWebUrl(url: string): Promise<ContextItem> {
       tokens: estimateTokens(text),
       pinned: false,
     };
-  } catch (e) {
+  } catch (e: unknown) {
     return {
       id: uid(), kind: 'web', label: 'fetch failed', detail: validated.href,
-      content: `(failed to fetch ${validated.href}: ${e.message})`, tokens: 0, pinned: false,
+      content: `(failed to fetch ${validated.href}: ${errorMessage(e)})`, tokens: 0, pinned: false,
     };
   } finally {
     window.clearTimeout(timer);
@@ -353,11 +354,11 @@ export async function resolveDroppedFile(f: File): Promise<ContextItem> {
         language: inferSelectionLanguage(res.text),
         pinned: false,
       };
-    } catch (e) {
+    } catch (e: unknown) {
       return {
         id: uid(), kind: 'file', label: f.name,
         detail: `${humanSize(f.size)} · PDF`,
-        content: `### PDF extraction failed: ${f.name}\n\n${e?.message ?? e}`,
+        content: `### PDF extraction failed: ${f.name}\n\n${errorMessage(e)}`,
         tokens: 0, pinned: false,
       };
     }

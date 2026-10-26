@@ -50,7 +50,7 @@ async function ensureBundledFilesExtracted(app: App, skill: Skill): Promise<stri
     if (await adapter.exists(target)) continue; // idempotent
     try {
       await adapter.write(target, content);
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn(`[skill_render] failed to extract ${target}`, e);
     }
   }

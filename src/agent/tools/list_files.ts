@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 import { TFile, TFolder } from 'obsidian';
 import { assertVaultPath, buildTool, globToRegExp as sharedGlobToRegExp, type ToolImpl } from './_shared';
 
@@ -38,7 +39,7 @@ export const listFiles: ToolImpl = buildTool({
     let folder = '';
     if (args.folder && args.folder !== '/') {
       try { folder = assertVaultPath(args.folder, 'folder'); }
-      catch (error) { return `Error: ${error.message}`; }
+      catch (error: unknown) { return `Error: ${errorMessage(error)}`; }
     }
     const recursive = args.recursive ?? true;
     const allFiles = !!args.all_files;

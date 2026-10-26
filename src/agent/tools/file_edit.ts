@@ -1,3 +1,5 @@
+import type { ToolArguments } from '../tool_arguments';
+import { errorMessage } from '../../utils/unknown_data';
 import { TFile } from 'obsidian';
 import {
   applyTextEdits,
@@ -7,7 +9,7 @@ import {
 } from '../text_edit_engine';
 import { assertVaultPath, buildTool, normalizePathFields, vaultFolderOf, type ToolImpl } from './_shared';
 
-function operationsFromArgs(args: AnyValue): { operations?: TextEditOperation[]; error?: string } {
+function operationsFromArgs(args: ToolArguments): { operations?: TextEditOperation[]; error?: string } {
   const raw = Array.isArray(args.edits)
     ? args.edits
     : [{ old_string: args.old_string, new_string: args.new_string, replace_all: args.replace_all }];
@@ -31,10 +33,10 @@ export const fileEdit: ToolImpl = buildTool({
   isConcurrencySafe: () => false,
   searchHint: 'safe exact or normalized string replacements inside one note',
   backfillObservableInput: normalizePathFields(['file_path']),
-  preview: async (app, a: AnyValue) => {
+  preview: async (app: import('obsidian').App, a: ToolArguments) => {
     let filePath: string;
     try { filePath = assertVaultPath(a.file_path, 'file_path'); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const parsed = operationsFromArgs(a);
     if (!parsed.operations) return `Error: ${parsed.error}`;
     const operations = parsed.operations;
@@ -80,7 +82,7 @@ export const fileEdit: ToolImpl = buildTool({
   run: async (app, args) => {
     let filePath: string;
     try { filePath = assertVaultPath(args.file_path, 'file_path'); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const parsed = operationsFromArgs(args);
     if (!parsed.operations) return `Error: ${parsed.error}`;
     const operations = parsed.operations;

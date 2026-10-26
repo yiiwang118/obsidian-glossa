@@ -1,3 +1,6 @@
+import type { WireBlock, WireFunctionCall, WireMessage, WireReply, WireRequestBody, WireUsage } from './wire_types';
+import type { ToolArguments } from '../agent/tool_arguments';
+import { dataRecord, errorMessage } from '../utils/unknown_data';
 import { requestUrl } from 'obsidian';
 import { customEffortValue, isDeepSeekEndpoint, mapOpenAIReasoningEffort, type Endpoint } from '../types';
 import { applyOfficialAnthropicThinking, applyOfficialOpenAIReasoning, effortPassesThroughUnchanged, officialProvider, requestTemperature } from './reasoning_catalog';
@@ -63,7 +66,7 @@ export class CustomApiProvider implements LLMProvider {
   }
   defaultModel() { return this.ep.model ?? ''; }
 
-  private applyOpenAIReasoning(body: AnyValue): void {
+  private applyOpenAIReasoning(body: WireRequestBody): void {
     // Official APIs: the values and switches their documentation lists for the model.
     if (applyOfficialOpenAIReasoning(this.ep, body, customEffortValue(this.ep.customReasoningEffort))) return;
     // Third-party gateways: the selected value is sent unchanged.
@@ -79,7 +82,7 @@ export class CustomApiProvider implements LLMProvider {
     if (mapped) body.reasoning_effort = mapped;
   }
 
-  private applyAnthropicThinking(body: AnyValue, streaming = true): void {
+  private applyAnthropicThinking(body: WireRequestBody, streaming = true): void {
     const custom = customEffortValue(this.ep.customReasoningEffort);
     if (officialProvider(this.ep) === 'anthropic') {
       // An explicit thinking setting in Extra body stays the user's decision.
@@ -121,7 +124,7 @@ export class CustomApiProvider implements LLMProvider {
     try {
       const style = this.ep.apiStyle ?? 'openai';
       const url = customApiUrl(this.ep, style === 'anthropic' ? 'chat' : 'models');
-      const headers: AnyValue = { 'Content-Type': 'application/json', ...(this.ep.headers ?? {}) };
+      const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(this.ep.headers ?? {}) };
       if (style === 'anthropic') {
         headers['x-api-key'] = this.ep.apiKey;
         headers['anthropic-version'] = '2023-06-01';
@@ -133,14 +136,14 @@ export class CustomApiProvider implements LLMProvider {
         headers['Authorization'] = `Bearer ${this.ep.apiKey}`;
         const r = await requestUrl({ url, method: 'GET', headers, throw: false });
         if (r.status < 400) {
-          const j: AnyValue = r.json;
+          const j = dataRecord(r.json as unknown) as WireReply;
           const n = Array.isArray(j?.data) ? j.data.length : 0;
           return { ok: true, message: bi(`HTTP 200 · ${n} models available`, `HTTP 200 · 可用模型 ${n} 个`) };
         }
         return { ok: false, message: `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 160)}` };
       }
-    } catch (e) {
-      return { ok: false, message: e.message ?? String(e) };
+    } catch (e: unknown) {
+      return { ok: false, message: errorMessage(e) };
     }
   }
 
@@ -160,13 +163,13 @@ export class CustomApiProvider implements LLMProvider {
   private async *requestNonStreaming(req: ChatRequest, style: 'openai' | 'anthropic'): AsyncGenerator<ChatChunk> {
     if (style === 'anthropic') {
       const url = customApiUrl(this.ep);
-      const headers: AnyValue = {
+      const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         'x-api-key': this.ep.apiKey,
         'anthropic-version': '2023-06-01',
         ...(this.ep.headers ?? {}),
       };
-      const messages: AnyValue[] = [];
+      const messages: WireMessage[] = [];
       let lastUserIndex = -1;
       for (let index = req.messages.length - 1; index >= 0; index--) {
         if (req.messages[index].role === 'user') {
@@ -177,24 +180,24 @@ export class CustomApiProvider implements LLMProvider {
       for (let index = 0; index < req.messages.length; index++) {
         const m = req.messages[index];
         if (m.role === 'tool') {
-          let resultContent: AnyValue = m.content;
+          let resultContent: string | WireBlock[] = m.content;
           if (m.toolContentBlocks?.length) {
-            const blocks: AnyValue[] = [];
+            const blocks: WireBlock[] = [];
             if (m.content) blocks.push({ type: 'text', text: m.content });
             for (const b of m.toolContentBlocks) blocks.push(toAnthropicContentBlock(b));
             resultContent = blocks;
           }
-          const trBlock: AnyValue = { type: 'tool_result', tool_use_id: m.toolCallId, content: resultContent };
+          const trBlock: WireBlock = { type: 'tool_result', tool_use_id: m.toolCallId, content: resultContent };
           if (m.toolIsError) trBlock.is_error = true;
           messages.push({ role: 'user', content: [trBlock] });
         } else if (m.role === 'assistant' && m.toolCalls?.length) {
           // Thinking blocks of this turn go back first and unchanged.
-          const blocks: AnyValue[] = [...(m.thinkingBlocks ?? [])];
+          const blocks: WireBlock[] = [...(m.thinkingBlocks ?? [])];
           if (m.content) blocks.push({ type: 'text', text: m.content });
           for (const tc of m.toolCalls) blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.args ?? {} });
           messages.push({ role: 'assistant', content: blocks });
         } else if (m.role === 'user' && index === lastUserIndex && req.attachedImages?.length) {
-          const blocks: AnyValue[] = [{ type: 'text', text: m.content }];
+          const blocks: WireBlock[] = [{ type: 'text', text: m.content }];
           for (const image of req.attachedImages) {
             const match = /^data:([^;]+);base64,(.+)$/.exec(image.dataUri);
             if (match) blocks.push({ type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } });
@@ -202,7 +205,7 @@ export class CustomApiProvider implements LLMProvider {
           messages.push({ role: 'user', content: blocks });
         } else if (m.role !== 'system') messages.push({ role: m.role, content: m.content });
       }
-      const body: AnyValue = { model: req.model ?? this.ep.model, max_tokens: req.maxTokens ?? 4096, messages, stream: false };
+      const body: WireRequestBody = { model: req.model ?? this.ep.model, max_tokens: req.maxTokens ?? 4096, messages, stream: false };
       this.applyAnthropicThinking(body, false);
       if (req.systemPrompt) body.system = stripBoundary(req.systemPrompt);
       try {
@@ -211,15 +214,15 @@ export class CustomApiProvider implements LLMProvider {
           yield { type: 'error', error: withReasoningEffortHint(this.ep, `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 300)}`) };
           return;
         }
-        const j = r.json;
-        const blocks: AnyValue[] = j.content ?? [];
-        const thinkingBlocks = blocks.filter((b: AnyValue) => b.type === 'thinking' || b.type === 'redacted_thinking');
+        const j = dataRecord(r.json as unknown) as WireReply;
+        const blocks: WireBlock[] = j.content ?? [];
+        const thinkingBlocks = blocks.filter((b) => b.type === 'thinking' || b.type === 'redacted_thinking');
         // Thinking text and replay blocks are surfaced for the official API, where
         // Glossa requests readable summaries; gateways keep their earlier behaviour.
         const surfaceThinking = officialProvider(this.ep) === 'anthropic';
-        const reasoning = surfaceThinking ? thinkingBlocks.map((b: AnyValue) => typeof b.thinking === 'string' ? b.thinking : '').filter(Boolean).join('\n\n') : '';
+        const reasoning = surfaceThinking ? thinkingBlocks.map((b) => typeof b.thinking === 'string' ? b.thinking : '').filter(Boolean).join('\n\n') : '';
         if (reasoning) yield { type: 'reasoning', text: reasoning };
-        const text = blocks.filter((b: AnyValue) => b.type === 'text').map((b: AnyValue) => b.text).join('');
+        const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('');
         if (text) yield { type: 'text', text };
         // Emit any tool_use blocks as tool_call chunks. Without this, agent
         // mode under `useObsidianFetch` silently hangs: the model asked to
@@ -237,18 +240,18 @@ export class CustomApiProvider implements LLMProvider {
           thinkingBlocks: surfaceThinking && thinkingBlocks.length ? thinkingBlocks : undefined,
           usage: { input: j.usage?.input_tokens, output: j.usage?.output_tokens },
         };
-      } catch (e) { yield { type: 'error', error: e.message }; }
+      } catch (e: unknown) { yield { type: 'error', error: errorMessage(e) }; }
       return;
     }
 
     const url = customApiUrl(this.ep);
-    const headers: AnyValue = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${this.ep.apiKey}`,
       ...(this.ep.headers ?? {}),
     };
     const messages = buildOpenAICompatibleMessages(req);
-    const body: AnyValue = { model: req.model ?? this.ep.model, messages, stream: false };
+    const body: WireRequestBody = { model: req.model ?? this.ep.model, messages, stream: false };
     const temperature = requestTemperature(this.ep, req.temperature);
     if (temperature !== undefined) body.temperature = temperature;
     if (req.maxTokens) body.max_tokens = req.maxTokens;
@@ -259,7 +262,7 @@ export class CustomApiProvider implements LLMProvider {
         yield { type: 'error', error: withReasoningEffortHint(this.ep, `HTTP ${r.status}: ${redactErrorBody(r.text).slice(0, 300)}`) };
         return;
       }
-      const j = r.json;
+      const j = dataRecord(r.json as unknown) as WireReply;
       const msg = j.choices?.[0]?.message ?? {};
       const split = splitThinkTags(typeof msg.content === 'string' ? msg.content : '');
       const reasoning = [typeof msg.reasoning_content === 'string' ? msg.reasoning_content : typeof msg.reasoning === 'string' ? msg.reasoning : '', split.reasoning].filter(Boolean).join('\n\n');
@@ -270,23 +273,23 @@ export class CustomApiProvider implements LLMProvider {
       // Anthropic non-stream path above — without this, useObsidianFetch +
       // agent mode silently exits after the first turn even when the model
       // wanted to invoke a tool.
-      const toolCalls: AnyValue[] = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+      const toolCalls: WireFunctionCall[] = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
       for (const tc of toolCalls) {
         const fn = tc.function ?? {};
-        let args: AnyValue = {};
+        let args: ToolArguments = {};
         if (typeof fn.arguments === 'string' && fn.arguments) {
-          try { args = JSON.parse(fn.arguments); }
-          catch (e) {
+          try { args = dataRecord(JSON.parse(fn.arguments) as unknown); }
+          catch (e: unknown) {
             // Non-empty but unparsable args — surface as error chunk rather
             // than silently dispatching with {}. See issue 1.12.
-            yield { type: 'error', error: `Tool call "${fn.name}" had unparsable arguments: ${e}` };
+            yield { type: 'error', error: `Tool call "${fn.name}" had unparsable arguments: ${errorMessage(e)}` };
             continue;
           }
         }
         yield { type: 'tool_call', id: String(tc.id ?? Date.now().toString(36)), name: String(fn.name ?? 'unknown'), args };
       }
       yield { type: 'final', text, reasoningContent: reasoning || undefined, usage: j.usage ? { input: j.usage.prompt_tokens, output: j.usage.completion_tokens } : undefined };
-    } catch (e) { yield { type: 'error', error: e.message }; }
+    } catch (e: unknown) { yield { type: 'error', error: errorMessage(e) }; }
   }
 
   /** Hit /v1/models to discover available models. Returns [] on failure.
@@ -295,7 +298,7 @@ export class CustomApiProvider implements LLMProvider {
     if (!this.ep.baseUrl || !this.ep.apiKey) return [];
     const style = this.ep.apiStyle ?? 'openai';
     const url = customApiUrl(this.ep, 'models');
-    const headers: AnyValue = style === 'anthropic'
+    const headers: Record<string, string> = style === 'anthropic'
       ? { 'x-api-key': this.ep.apiKey, 'anthropic-version': '2023-06-01', ...(this.ep.headers ?? {}) }
       : { 'Authorization': `Bearer ${this.ep.apiKey}`, ...(this.ep.headers ?? {}) };
     try {
@@ -309,33 +312,33 @@ export class CustomApiProvider implements LLMProvider {
       if (looksHtml) {
         throw new Error('GET /models returned HTML, not JSON. Check that Base URL points to the API root, e.g. https://host/v1.');
       }
-      let j: AnyValue;
+      let j: WireReply;
       try {
-        j = r.json;
+        j = dataRecord(r.json as unknown);
       } catch {
         throw new Error(`GET /models returned non-JSON${body ? `: ${body.slice(0, 160)}` : '.'}`);
       }
-      const ids = (j.data ?? []).map((m: AnyValue) => m.id ?? m.name).filter(Boolean);
+      const ids = (j.data ?? []).map((m) => m.id ?? m.name).filter(Boolean);
       const sorted = [...new Set<string>(ids)].sort();
       if (sorted.length) return sorted;
       return style === 'anthropic' ? ANTHROPIC_KNOWN_MODELS : [];
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn('[plugin] listModels failed', e);
       if (style === 'anthropic') return ANTHROPIC_KNOWN_MODELS;
-      throw e instanceof Error ? e : new Error(String(e));
+      throw e instanceof Error ? e : new Error(errorMessage(e));
     }
   }
 
   /* ---------------- OpenAI-compatible ---------------- */
   private async *streamOpenAI(req: ChatRequest): AsyncGenerator<ChatChunk> {
     const url = customApiUrl(this.ep);
-    const headers: AnyValue = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${this.ep.apiKey}`,
       ...(this.ep.headers ?? {}),
     };
     const messages = buildOpenAICompatibleMessages(req);
-    const body: AnyValue = {
+    const body: WireRequestBody = {
       model: req.model ?? this.ep.model,
       messages,
       stream: true,
@@ -352,8 +355,8 @@ export class CustomApiProvider implements LLMProvider {
     let resp: Response;
     try {
       resp = await nativeStreamingHttpRequest(url, { method: 'POST', headers, body: JSON.stringify(customApiBody(this.ep, body)), signal: req.signal });
-    } catch (e) {
-      yield { type: 'error', error: `network: ${e.message}` };
+    } catch (e: unknown) {
+      yield { type: 'error', error: `network: ${errorMessage(e)}` };
       return;
     }
     if (!resp.ok) {
@@ -371,7 +374,7 @@ export class CustomApiProvider implements LLMProvider {
     let buf = '';
     let bufText = '';
     let bufReasoning = '';      // DeepSeek-reasoner style
-    let usage: AnyValue;
+    let usage: WireUsage;
     const toolCalls = new Map<number, { id: string; name: string; argsStr: string }>();
     // Reasoning written into the answer as <think>…</think> goes to the reasoning card.
     const thinkTags = new ThinkTagSplitter();
@@ -411,8 +414,8 @@ export class CustomApiProvider implements LLMProvider {
         if (line.startsWith('data:')) {
           const data = line.slice(5).trim();
           if (data !== '[DONE]') {
-            let ev: AnyValue;
-            try { ev = JSON.parse(data); }
+            let ev: WireReply;
+            try { ev = dataRecord(JSON.parse(data) as unknown); }
             catch { ev = null; }
             if (ev) {
               const delta = ev.choices?.[0]?.delta;
@@ -465,7 +468,7 @@ export class CustomApiProvider implements LLMProvider {
         continue;
       }
       try {
-        const args = JSON.parse(slot.argsStr);
+        const args = dataRecord(JSON.parse(slot.argsStr) as unknown);
         yield { type: 'tool_call', id: slot.id, name: slot.name, args };
       } catch {
         yield { type: 'error', error: `Tool call "${slot.name}" had truncated/unparsable JSON args from stream — likely the proxy dropped the connection mid-message.` };
@@ -484,13 +487,13 @@ export class CustomApiProvider implements LLMProvider {
   /* ---------------- Anthropic-compatible ---------------- */
   private async *streamAnthropic(req: ChatRequest): AsyncGenerator<ChatChunk> {
     const url = customApiUrl(this.ep);
-    const headers: AnyValue = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'x-api-key': this.ep.apiKey,
       'anthropic-version': '2023-06-01',
       ...(this.ep.headers ?? {}),
     };
-    const messages: AnyValue[] = [];
+    const messages: WireMessage[] = [];
     const lastUserIdx = (() => {
       for (let i = req.messages.length - 1; i >= 0; i--) if (req.messages[i].role === 'user') return i;
       return -1;
@@ -500,17 +503,17 @@ export class CustomApiProvider implements LLMProvider {
       if (m.role === 'tool') {
         // Rich content: prefer toolContentBlocks (images/etc) over plain text.
         // Anthropic tool_result content can be either a string OR an array of content blocks.
-        let resultContent: AnyValue;
+        let resultContent: string | WireBlock[];
         if (m.toolContentBlocks?.length) {
           // Send blocks PLUS the text as a leading text block for context
-          const blocks: AnyValue[] = [];
+          const blocks: WireBlock[] = [];
           if (m.content) blocks.push({ type: 'text', text: m.content });
           for (const b of m.toolContentBlocks) blocks.push(toAnthropicContentBlock(b));
           resultContent = blocks;
         } else {
           resultContent = m.content;
         }
-        const trBlock: AnyValue = { type: 'tool_result', tool_use_id: m.toolCallId, content: resultContent };
+        const trBlock: WireBlock = { type: 'tool_result', tool_use_id: m.toolCallId, content: resultContent };
         if (m.toolIsError) trBlock.is_error = true;
         messages.push({ role: 'user', content: [trBlock] });
         continue;
@@ -519,14 +522,14 @@ export class CustomApiProvider implements LLMProvider {
       if (m.role === 'assistant' && m.toolCalls?.length) {
         // Anthropic canonical: assistant content is an array of thinking + text + tool_use
         // blocks. Thinking blocks produced in this turn are passed back unchanged.
-        const blocks: AnyValue[] = [...(m.thinkingBlocks ?? [])];
+        const blocks: WireBlock[] = [...(m.thinkingBlocks ?? [])];
         if (m.content) blocks.push({ type: 'text', text: m.content });
         for (const tc of m.toolCalls) blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.args ?? {} });
         messages.push({ role: 'assistant', content: blocks });
         continue;
       }
       if (i === lastUserIdx && req.attachedImages?.length) {
-        const blocks: AnyValue[] = [{ type: 'text', text: m.content }];
+        const blocks: WireBlock[] = [{ type: 'text', text: m.content }];
         for (const img of req.attachedImages) {
           const match = img.dataUri.match(/^data:([^;]+);base64,(.+)$/);
           if (match) blocks.push({ type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } });
@@ -536,7 +539,7 @@ export class CustomApiProvider implements LLMProvider {
         messages.push({ role: m.role, content: m.content });
       }
     }
-    const body: AnyValue = {
+    const body: WireRequestBody = {
       model: req.model ?? this.ep.model,
       max_tokens: req.maxTokens ?? 4096,
       messages,
@@ -571,10 +574,11 @@ export class CustomApiProvider implements LLMProvider {
       // promote to a single text block first.
       for (let k = messages.length - 1; k >= 0; k--) {
         if (messages[k].role !== 'user') continue;
-        if (typeof messages[k].content === 'string') {
-          messages[k] = { role: 'user', content: [{ type: 'text', text: messages[k].content }] };
+        const content = messages[k].content;
+        if (typeof content === 'string') {
+          messages[k] = { role: 'user', content: [{ type: 'text', text: content }] };
         }
-        const arr = messages[k].content as AnyValue[];
+        const arr = messages[k].content as WireBlock[];
         if (arr.length) {
           arr[arr.length - 1] = { ...arr[arr.length - 1], cache_control: { type: 'ephemeral' } };
         }
@@ -607,7 +611,7 @@ export class CustomApiProvider implements LLMProvider {
     let hasReasoning = false;
     // Thinking / redacted_thinking blocks by stream index, kept verbatim for replay.
     // Surfaced for the official API, where Glossa asks for readable summaries.
-    const thinkingBlocks = new Map<number, AnyValue>();
+    const thinkingBlocks = new Map<number, WireBlock>();
     const surfaceThinking = officialProvider(this.ep) === 'anthropic';
 
     let lastChunkAt = Date.now();
@@ -639,7 +643,7 @@ export class CustomApiProvider implements LLMProvider {
         if (line.startsWith('data:')) {
           const data = line.slice(5).trim();
           if (data) {
-            let ev: AnyValue; try { ev = JSON.parse(data); } catch { ev = null; }
+            let ev: WireReply; try { ev = dataRecord(JSON.parse(data) as unknown); } catch { ev = null; }
             if (ev) {
               if (ev.type === 'message_delta' && typeof ev.delta?.stop_reason === 'string') {
                 stopReason = ev.delta.stop_reason;
@@ -691,7 +695,7 @@ export class CustomApiProvider implements LLMProvider {
         continue;
       }
       try {
-        const args = JSON.parse(slot.argsStr);
+        const args = dataRecord(JSON.parse(slot.argsStr) as unknown);
         yield { type: 'tool_call', id: slot.id, name: slot.name, args };
       } catch {
         yield { type: 'error', error: `Tool call "${slot.name}" had truncated/unparsable JSON args from stream — likely the proxy dropped the connection mid-message.` };
@@ -747,8 +751,8 @@ export function mergeAnthropicStreamUsage(
  * requestUrl transports. Rich image tool results are hoisted only after the
  * complete consecutive tool-result group, preserving the required
  * assistant(tool_calls) -> tool... sequence. */
-export function buildOpenAICompatibleMessages(req: ChatRequest): AnyValue[] {
-  const messages: AnyValue[] = [];
+export function buildOpenAICompatibleMessages(req: ChatRequest): WireMessage[] {
+  const messages: WireMessage[] = [];
   if (req.systemPrompt) messages.push({ role: 'system', content: stripBoundary(req.systemPrompt) });
   let lastUserIndex = -1;
   for (let index = req.messages.length - 1; index >= 0; index--) {
@@ -758,7 +762,7 @@ export function buildOpenAICompatibleMessages(req: ChatRequest): AnyValue[] {
     }
   }
 
-  let pendingToolMedia: AnyValue[] = [];
+  let pendingToolMedia: WireBlock[] = [];
   const flushToolMedia = () => {
     if (!pendingToolMedia.length) return;
     messages.push({
@@ -796,7 +800,7 @@ export function buildOpenAICompatibleMessages(req: ChatRequest): AnyValue[] {
 
     flushToolMedia();
     if (message.role === 'assistant' && message.toolCalls?.length) {
-      const assistant: AnyValue = {
+      const assistant: WireMessage = {
         role: 'assistant',
         content: message.content || null,
         tool_calls: message.toolCalls.map(call => ({
@@ -814,7 +818,7 @@ export function buildOpenAICompatibleMessages(req: ChatRequest): AnyValue[] {
       continue;
     }
     if (message.role === 'user' && index === lastUserIndex && req.attachedImages?.length) {
-      const content: AnyValue[] = [{ type: 'text', text: message.content }];
+      const content: WireBlock[] = [{ type: 'text', text: message.content }];
       for (const image of req.attachedImages) {
         content.push({ type: 'image_url', image_url: { url: image.dataUri } });
       }
@@ -827,7 +831,7 @@ export function buildOpenAICompatibleMessages(req: ChatRequest): AnyValue[] {
   return messages;
 }
 
-function toAnthropicContentBlock(block: ToolContentBlock): AnyValue {
+function toAnthropicContentBlock(block: ToolContentBlock): WireBlock {
   if (block.type !== 'document') return block;
   return {
     type: 'document',

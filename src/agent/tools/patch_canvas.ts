@@ -1,3 +1,4 @@
+import { dataRecord, errorMessage, scalarText } from '../../utils/unknown_data';
 /**
  * patch_canvas — surgical node/edge edits to a .canvas file.
  *
@@ -17,8 +18,8 @@ import { assertVaultPath, buildTool, normalizePathFields, type ToolImpl } from '
 type Op = 'add_node' | 'remove_node' | 'update_node' | 'add_edge' | 'remove_edge';
 
 interface CanvasDoc {
-  nodes?: AnyValue[];
-  edges?: AnyValue[];
+  nodes?: Record<string, unknown>[];
+  edges?: Record<string, unknown>[];
 }
 
 export const patchCanvas: ToolImpl = buildTool({
@@ -44,72 +45,76 @@ export const patchCanvas: ToolImpl = buildTool({
       additionalProperties: false,
     },
   },
-  preview: async (a) => `${a.op} on ${a.path}\n\n${JSON.stringify(a.payload, null, 2).slice(0, 400)}`,
+  preview: async (a: import('../tool_arguments').ToolArguments) => `${a.op} on ${a.path}\n\n${JSON.stringify(a.payload, null, 2).slice(0, 400)}`,
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     if (!path.endsWith('.canvas')) return `Error: ${path} is not a .canvas file.`;
     const op = args.op as Op;
     const payload = args.payload ?? {};
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;
     let doc: CanvasDoc;
-    try { doc = JSON.parse(await app.vault.read(f)); }
-    catch (e) { return `Error: invalid JSON in ${path}: ${e.message}`; }
+    try {
+      const parsed: unknown = JSON.parse(await app.vault.read(f));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Canvas document must be an object.');
+      doc = dataRecord(parsed);
+    }
+    catch (e: unknown) { return `Error: invalid JSON in ${path}: ${errorMessage(e)}`; }
     if (!Array.isArray(doc.nodes)) doc.nodes = [];
     if (!Array.isArray(doc.edges)) doc.edges = [];
 
     let summary = '';
     if (op === 'add_node') {
       if (!payload.id || !payload.type) return 'Error: add_node payload requires id + type.';
-      if (doc.nodes.some(n => n.id === payload.id)) return `Error: node ${payload.id} already exists.`;
+      if (doc.nodes.some(n => n.id === payload.id)) return `Error: node ${scalarText(payload.id)} already exists.`;
       const nodeError = validateNewNode(payload);
       if (nodeError) return `Error: ${nodeError}`;
       doc.nodes.push(payload);
-      summary = `Added node ${payload.id} (${payload.type}).`;
+      summary = `Added node ${scalarText(payload.id)} (${scalarText(payload.type)}).`;
     } else if (op === 'remove_node') {
       const id = payload.id;
       if (!id) return 'Error: remove_node payload requires id.';
       const beforeN = doc.nodes.length;
       doc.nodes = doc.nodes.filter(n => n.id !== id);
-      if (doc.nodes.length === beforeN) return `Error: node ${id} not found.`;
+      if (doc.nodes.length === beforeN) return `Error: node ${scalarText(id)} not found.`;
       const beforeE = doc.edges.length;
       doc.edges = doc.edges.filter(e => e.fromNode !== id && e.toNode !== id);
-      summary = `Removed node ${id} and ${beforeE - doc.edges.length} touching edge(s).`;
+      summary = `Removed node ${scalarText(id)} and ${beforeE - doc.edges.length} touching edge(s).`;
     } else if (op === 'update_node') {
       const id = payload.id;
       if (!id) return 'Error: update_node payload requires id.';
       const node = doc.nodes.find(n => n.id === id);
-      if (!node) return `Error: node ${id} not found.`;
+      if (!node) return `Error: node ${scalarText(id)} not found.`;
       // Shallow merge — preserves id.
       const patches = { ...payload };
       delete patches.id;
       for (const field of ['x', 'y', 'width', 'height']) {
         if (field in patches && !Number.isInteger(patches[field])) return `Error: update_node ${field} must be an integer.`;
       }
-      if ('width' in patches && patches.width <= 0) return 'Error: update_node width must be positive.';
-      if ('height' in patches && patches.height <= 0) return 'Error: update_node height must be positive.';
+      if ('width' in patches && Number(patches.width) <= 0) return 'Error: update_node width must be positive.';
+      if ('height' in patches && Number(patches.height) <= 0) return 'Error: update_node height must be positive.';
       Object.assign(node, patches);
-      summary = `Updated node ${id} (${Object.keys(patches).length} field(s)).`;
+      summary = `Updated node ${scalarText(id)} (${Object.keys(patches).length} field(s)).`;
     } else if (op === 'add_edge') {
       if (!payload.id || !payload.fromNode || !payload.toNode) {
         return 'Error: add_edge payload requires id + fromNode + toNode.';
       }
-      if (doc.edges.some(e => e.id === payload.id)) return `Error: edge ${payload.id} already exists.`;
-      const nodeIds = new Set(doc.nodes.map(node => String(node.id)));
-      if (!nodeIds.has(payload.fromNode) || !nodeIds.has(payload.toNode)) {
+      if (doc.edges.some(e => e.id === payload.id)) return `Error: edge ${scalarText(payload.id)} already exists.`;
+      const nodeIds = new Set(doc.nodes.map(node => scalarText(node.id)));
+      if (typeof payload.fromNode !== 'string' || typeof payload.toNode !== 'string' || !nodeIds.has(payload.fromNode) || !nodeIds.has(payload.toNode)) {
         return 'Error: add_edge endpoints must reference existing node IDs.';
       }
       doc.edges.push(payload);
-      summary = `Added edge ${payload.id}: ${payload.fromNode} → ${payload.toNode}.`;
+      summary = `Added edge ${scalarText(payload.id)}: ${scalarText(payload.fromNode)} → ${scalarText(payload.toNode)}.`;
     } else if (op === 'remove_edge') {
       const id = payload.id;
       if (!id) return 'Error: remove_edge payload requires id.';
       const before = doc.edges.length;
       doc.edges = doc.edges.filter(e => e.id !== id);
-      if (doc.edges.length === before) return `Error: edge ${id} not found.`;
-      summary = `Removed edge ${id}.`;
+      if (doc.edges.length === before) return `Error: edge ${scalarText(id)} not found.`;
+      summary = `Removed edge ${scalarText(id)}.`;
     } else {
       return 'Error: unknown canvas operation.';
     }
@@ -119,12 +124,12 @@ export const patchCanvas: ToolImpl = buildTool({
   },
 });
 
-function validateNewNode(node: AnyValue): string | null {
-  if (!['text', 'file', 'link', 'group'].includes(node.type)) return `unsupported node type "${node.type}"`;
+function validateNewNode(node: Record<string, unknown>): string | null {
+  if (typeof node.type !== 'string' || !['text', 'file', 'link', 'group'].includes(node.type)) return `unsupported node type "${scalarText(node.type)}"`;
   for (const field of ['x', 'y', 'width', 'height']) {
     if (!Number.isInteger(node[field])) return `add_node ${field} must be an integer`;
   }
-  if (node.width <= 0 || node.height <= 0) return 'add_node width and height must be positive';
+  if (Number(node.width) <= 0 || Number(node.height) <= 0) return 'add_node width and height must be positive';
   if (node.type === 'text' && typeof node.text !== 'string') return 'text node requires a text string';
   if (node.type === 'file' && typeof node.file !== 'string') return 'file node requires a vault-relative file path';
   if (node.type === 'link' && typeof node.url !== 'string') return 'link node requires a URL';

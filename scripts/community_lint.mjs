@@ -1,16 +1,20 @@
 import { ESLint } from 'eslint';
 import obsidianmd from 'eslint-plugin-obsidianmd';
 
-// Independent of eslint.config.mjs and its local boundary exceptions.
+// Independent of eslint.config.mjs; no type-safety boundary exemptions.
+// Keep the type-safety rules reported by plugin review enabled as well.
 // Public scanner configuration:
 // https://github.com/obsidianmd/eslint-plugin/blob/master/docs/configuration.md#community-plugin-scanner-configuration
 const securityRules = new Set([
   'no-eval', 'no-implied-eval', 'no-unsanitized/method',
   'no-unsanitized/property', 'obsidianmd/regex-lookbehind', 'obsidianmd/no-forbidden-elements',
 ]);
-const skippedRules = [
-  'no-undef', '@typescript-eslint/no-unsafe-member-access', '@typescript-eslint/no-unsafe-assignment',
+const typeSafetyRules = [
+  '@typescript-eslint/no-unsafe-member-access', '@typescript-eslint/no-unsafe-assignment',
   '@typescript-eslint/no-unsafe-argument', '@typescript-eslint/no-unsafe-call', '@typescript-eslint/no-unsafe-return',
+];
+const skippedRules = [
+  'no-undef',
   '@typescript-eslint/restrict-template-expressions', '@typescript-eslint/no-base-to-string', 'import/no-unresolved',
   'obsidianmd/validate-manifest', 'obsidianmd/validate-license',
   'obsidianmd/commands/no-command-in-command-id', 'obsidianmd/commands/no-plugin-id-in-command-id',
@@ -32,6 +36,7 @@ const eslint = new ESLint({
       files: ['**/*.{ts,tsx,js,jsx}'],
       rules: {
         ...Object.fromEntries([...securityRules].map(rule => [rule, 'error'])),
+        ...Object.fromEntries(typeSafetyRules.map(rule => [rule, 'warn'])),
         ...Object.fromEntries(skippedRules.map(rule => [rule, 'off'])),
       },
     },

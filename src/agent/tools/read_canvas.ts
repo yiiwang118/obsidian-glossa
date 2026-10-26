@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 /**
  * read_canvas — parse a .canvas file and return its structured contents.
  *
@@ -40,8 +41,8 @@ export const readCanvas: ToolImpl = buildTool({
   searchHint: 'parse json canvas file nodes edges',
   searchTags: ['canvas inspect', 'mind map graph', '读取画布', '节点边'],
   backfillObservableInput(input) {
-    if (typeof (input as AnyValue).path === 'string') {
-      (input as AnyValue).path = ((input as AnyValue).path as string).replace(/^\.\//, '').trim();
+    if (typeof input.path === 'string') {
+      input.path = (input.path).replace(/^\.\//, '').trim();
     }
   },
   describe: a => `read canvas ${a.path}`,
@@ -96,14 +97,14 @@ export const readCanvas: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     if (!path.endsWith('.canvas')) return `Error: ${path} is not a .canvas file.`;
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;
     const raw = await app.vault.read(f);
     let doc: CanvasDoc;
-    try { doc = JSON.parse(raw); }
-    catch (e) { return `Error: invalid JSON in ${path}: ${e.message}`; }
+    try { doc = JSON.parse(raw) as CanvasDoc; }
+    catch (e: unknown) { return `Error: invalid JSON in ${path}: ${errorMessage(e)}`; }
     const nodes = doc.nodes ?? [];
     const edges = doc.edges ?? [];
     const byType = new Map<string, number>();

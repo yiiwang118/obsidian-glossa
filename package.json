@@ -1,6 +1,6 @@
 {
   "name": "glossa",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Local-first AI sidebar for context-aware chat, precise note editing, PDF and image analysis, and web research.",
   "main": "main.js",
   "scripts": {

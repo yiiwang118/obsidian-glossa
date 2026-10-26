@@ -1,3 +1,4 @@
+import { installedPlugin, onHostEvent } from '../utils/obsidian_host';
 /**
  * Plugin bridge registration — detect-then-register.
  *
@@ -36,14 +37,14 @@ export const BRIDGE_DESCRIPTORS: BridgeDescriptor[] = [
     toolName: 'dataview_query',
     pluginId: 'dataview',
     label: 'Dataview',
-    isReady: (app) => !!(app as AnyValue).plugins?.plugins?.['dataview']?.api,
+    isReady: (app) => !!installedPlugin(app, 'dataview').api,
   },
   {
     toolName: 'templater_render',
     pluginId: 'templater-obsidian',
     label: 'Templater',
     isReady: (app) => {
-      const t = (app as AnyValue).plugins?.plugins?.['templater-obsidian'];
+      const t = installedPlugin(app, 'templater-obsidian');
       return !!t?.templater;
     },
   },
@@ -52,7 +53,7 @@ export const BRIDGE_DESCRIPTORS: BridgeDescriptor[] = [
     pluginId: 'obsidian-tasks-plugin',
     label: 'Tasks',
     isReady: (app) => {
-      const t = (app as AnyValue).plugins?.plugins?.['obsidian-tasks-plugin'];
+      const t = installedPlugin(app, 'obsidian-tasks-plugin');
       // Tasks plugin exposes apiV1 (and earlier apiV0); accept either.
       return !!(t?.apiV1 || t?.api);
     },
@@ -73,7 +74,7 @@ export function onBridgeChange(cb: () => void): () => void {
 
 function notify() {
   for (const cb of listeners) {
-    try { cb(); } catch (e) { console.warn('[plugin-bridges] listener threw', e); }
+    try { cb(); } catch (e: unknown) { console.warn('[plugin-bridges] listener threw', e); }
   }
 }
 
@@ -121,9 +122,9 @@ export function __resetForTests(): void {
 export function watchPluginBridges(app: App): () => void {
   probeBridges(app);
   const handlers: Array<() => void> = [];
-  const events = app.workspace as AnyValue;
+  const events = app.workspace;
   const subscribe = (name: string) => {
-    const h = events.on?.(name, () => probeBridges(app));
+    const h = onHostEvent(events, name, () => { probeBridges(app); });
     if (h) handlers.push(() => events.offref?.(h));
   };
   // These two are Obsidian internal events. Defensive try/catch — if a future
@@ -132,8 +133,7 @@ export function watchPluginBridges(app: App): () => void {
   try { subscribe('plugins:plugin-disabled'); } catch { /* ignore */ }
   // Re-probe on layout change too (some plugins finish init after layout).
   try {
-    const h = (app as AnyValue).workspace.onLayoutReady?.(() => probeBridges(app));
-    if (h) handlers.push(() => {});
+    app.workspace.onLayoutReady(() => { probeBridges(app); });
   } catch { /* ignore */ }
   return () => {
     for (const off of handlers) {

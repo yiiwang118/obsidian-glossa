@@ -1,3 +1,7 @@
+interface ToolCardElement extends HTMLElement { _elapsedEl?: HTMLElement; _statusEl?: HTMLElement }
+import { hostSettings, onHostEvent, legacyKeyCode } from '../utils/obsidian_host';
+import type { ToolArguments } from '../agent/tool_arguments';
+import { scalarText, dataRecord, errorMessage } from '../utils/unknown_data';
 import { excerptSourceText, makeChatExcerpt, type ChatExcerpt } from '../temporary_chat';
 import { openTemporaryChat } from './temporary_chat_view';
 import { selectedChatPassages } from './chat_excerpt_selection';
@@ -119,7 +123,8 @@ function shouldRenderToolEvent(ev: ToolEvent): boolean {
 }
 
 function isHTMLElementNode(node: unknown): node is HTMLElement {
-  return !!node && typeof node === 'object' && typeof (node as AnyValue).instanceOf === 'function' && (node as AnyValue).instanceOf(HTMLElement);
+  const candidate = node as { instanceOf?: (constructor: typeof HTMLElement) => boolean };
+  return !!candidate && typeof candidate.instanceOf === 'function' && candidate.instanceOf(HTMLElement);
 }
 
 interface MsgUI {
@@ -167,7 +172,7 @@ type RunActivityStatus = 'thinking' | 'tool' | 'idle';
 
 interface PendingApproval {
   tool: ToolImpl;
-  args: AnyValue;
+  args: ToolArguments;
   settle: (result: ApprovalResult) => void;
   el?: HTMLElement;
   cleanup?: () => void;
@@ -239,7 +244,7 @@ class ChatRunHub {
   notify() {
     for (const view of this.views) view.updateHistoryBadge();
     for (const listener of [...this.listeners]) {
-      try { listener(); } catch (error) { console.warn('[Glossa] history refresh failed', error); }
+      try { listener(); } catch (error: unknown) { console.warn('[Glossa] history refresh failed', error); }
     }
   }
 
@@ -508,7 +513,7 @@ export class GlossaView extends ItemView {
     this.app.workspace.onLayoutReady(() => { void this.refreshAutoContext(); });
     this.registerEvent(this.app.workspace.on('active-leaf-change', () => { void this.refreshAutoContext(); }));
     this.registerEvent(this.app.workspace.on('file-open', () => { void this.refreshAutoContext(); }));
-    this.registerEvent(this.app.workspace.on('editor-selection-change' as AnyValue, () => this.refreshSelection()));
+    this.registerEvent(onHostEvent(this.app.workspace, 'editor-selection-change', () => this.refreshSelection()));
     activeDocument.addEventListener('selectionchange', this.onDomSelectionChange);
 
     // Re-render any header / input chrome whose strings come from `t()` when
@@ -760,8 +765,8 @@ export class GlossaView extends ItemView {
       // Fall through to the internal settings pane below.
     }
     try {
-      (this.app as AnyValue).setting?.open?.();
-      (this.app as AnyValue).setting?.openTabById?.('community-plugins');
+      hostSettings(this.app)?.open?.();
+      hostSettings(this.app)?.openTabById?.('community-plugins');
     } catch {
       quickNotice(bi('Open Settings → Community plugins and search Glossa.', '打开设置 → 第三方插件，搜索 Glossa。'), 5000);
     }
@@ -871,7 +876,7 @@ export class GlossaView extends ItemView {
   }
 
   private openPluginSettings() {
-    const settings = (this.app as AnyValue).setting;
+    const settings = hostSettings(this.app);
     settings?.open?.();
     settings?.openTabById?.(this.plugin.manifest.id);
   }
@@ -989,8 +994,8 @@ export class GlossaView extends ItemView {
       item = file.extension === 'md'
         ? makeCurrentFileItem(file, await this.app.vault.cachedRead(file))
         : await resolveFile(this.app, file, { pdfTask: pdfReadTaskForPrompt(userText) });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+    } catch (error: unknown) {
+      const message = errorMessage(error);
       item = {
         id: `current-${expectedPath}`,
         kind: 'file',
@@ -1456,7 +1461,7 @@ export class GlossaView extends ItemView {
      // to `content` for legacy messages and all assistant messages.
     const bodySrc = m.displayContent ?? m.content ?? '';
     const { visible, thinking } = extractThinking(bodySrc);
-    if (thinking && reasoningCard && m.role === 'assistant' && !options.live && !(m as AnyValue)._mergedInlineThinking) {
+    if (thinking && reasoningCard && m.role === 'assistant' && !options.live && !m._mergedInlineThinking) {
       // Append the extracted block to the existing reasoningContent so the
       // single unified card displays everything. Persist on the message so
       // export / replay see the merged form.
@@ -1469,7 +1474,7 @@ export class GlossaView extends ItemView {
         ? `${m.reasoningContent}\n\n---\n\n${thinking}`
         : thinking;
       m.reasoningContent = merged;
-      (m as AnyValue)._mergedInlineThinking = true;
+      m._mergedInlineThinking = true;
       // Update the unified card label
       const lbl = reasoningCard.querySelector('.nc-thinking-summary');
       if (lbl) lbl.textContent = reasoningLabel(merged.length);
@@ -1746,7 +1751,7 @@ export class GlossaView extends ItemView {
   }
 
   /* ---------- Plan board (todo_write sticky) ---------- */
-  private updatePlanBoard(session: ChatSession, items: AnyValue[]) {
+  private updatePlanBoard(session: ChatSession, items: NonNullable<ToolArguments['items']>) {
     session.plan = items
       .filter(it => it && typeof it.content === 'string')
       .map(it => ({
@@ -1833,7 +1838,7 @@ export class GlossaView extends ItemView {
       const m = this.session.messages[i];
       for (const ev of m.toolEvents ?? []) {
         if (ev.name === 'todo_write' && Array.isArray(ev.args?.items)) {
-          recovered = ev.args.items.map((it: AnyValue) => ({
+          recovered = ev.args.items.map((it) => ({
             content: String(it?.content ?? ''),
             activeForm: typeof it?.activeForm === 'string' ? it.activeForm : undefined,
             status: (['pending','in_progress','completed'].includes(it?.status) ? it.status : 'pending') as PlanItem['status'],
@@ -1902,8 +1907,8 @@ export class GlossaView extends ItemView {
     const statusText = ev.status === 'success' ? '✓' : ev.status === 'error' ? '✕' : ev.status === 'cancelled' ? '◼' : ev.status === 'denied' ? '−' : '·';
     const statusEl = el('span', { className: `nc-tool-event-status ${ev.status}`, text: statusText, parent: hdr });
     statusEl.title = ev.status === 'cancelled' ? bi('Cancelled', '已取消') : ev.errorCode ?? ev.status;
-    (box as AnyValue)._elapsedEl = elapsedEl;
-    (box as AnyValue)._statusEl = statusEl;
+    (box as ToolCardElement)._elapsedEl = elapsedEl;
+    (box as ToolCardElement)._statusEl = statusEl;
 
     // Chevron
     const chev = el('span', { className: 'nc-tool-event-chev', parent: hdr });
@@ -2209,15 +2214,15 @@ export class GlossaView extends ItemView {
               const result = await this.plugin.checkpoint.rollback(session.id, entry.turnId, paths);
               quickNotice(bi(`Restored ${result.restored} files.`, `已恢复 ${result.restored} 个文件。`)
                 + (result.failed.length ? '\n' + bi('Some files could not be restored:\n', '部分文件无法恢复：\n') + result.failed.join('\n') : ''), 7000);
-            } catch (error) {
-              quickNotice(bi('Undo failed: ', '撤销失败：') + String(error), 7000);
+            } catch (error: unknown) {
+              quickNotice(bi('Undo failed: ', '撤销失败：') + errorMessage(error), 7000);
             }
             await this.refreshEditSummaries();
           },
         });
         if (card) ui.wrap.after(card);
       }
-    } catch (error) { console.warn('[Glossa] edit summaries unavailable', error); }
+    } catch (error: unknown) { console.warn('[Glossa] edit summaries unavailable', error); }
   }
 
   private formatMessageTime(ts: number): string {
@@ -2236,7 +2241,7 @@ export class GlossaView extends ItemView {
       createdAt: Date.now(), updatedAt: Date.now(),
       mode: this.session.mode,
       endpointId: this.session.endpointId,
-      messages: JSON.parse(JSON.stringify(kept)),
+      messages: JSON.parse(JSON.stringify(kept)) as ChatMessage[],
     };
     this.persistSession();
     void this.plugin.store.saveSession(forked);
@@ -2274,7 +2279,7 @@ export class GlossaView extends ItemView {
      Streaming render — Obsidian MarkdownRenderer everywhere.
      Throttle 100ms; serialize concurrent renders; re-fire if buffer changed during render.
      ============================================================ */
-  private streamRenderTimer: AnyValue;
+  private streamRenderTimer: number;
   private streamRenderInFlight = false;
   /** The running turn whose output is on screen, if any. */
   private liveRun(): ChatRun | null {
@@ -2492,7 +2497,7 @@ export class GlossaView extends ItemView {
   /** A tool call waiting for approval belongs to its turn. The card is shown
    *  while the chat is on screen; a chat in the background keeps waiting and
    *  is marked in the history until the user opens it. */
-  private askInlineApproval(run: ChatRun, tool: ToolImpl, args: AnyValue, signal = run.controller.signal): Promise<ApprovalResult> {
+  private askInlineApproval(run: ChatRun, tool: ToolImpl, args: ToolArguments, signal = run.controller.signal): Promise<ApprovalResult> {
     return new Promise(resolve => {
       let settled = false;
       const pending: PendingApproval = {
@@ -2564,7 +2569,7 @@ export class GlossaView extends ItemView {
           const { previewEnvelope } = await import('../agent/patch_envelope');
           const { files, parseError } = await previewEnvelope(args.patch, async (p) => {
             const f = this.app.vault.getAbstractFileByPath(p);
-            return f && 'extension' in (f as AnyValue) ? await this.app.vault.read(f as AnyValue) : null;
+            return f instanceof TFile ? await this.app.vault.read(f) : null;
           });
           if (parseError) {
             el('div', { className: 'nc-inline-approval-warning', text: bi(`Parse error: ${parseError}`, `补丁解析失败：${parseError}`), parent: wrap });
@@ -2592,8 +2597,8 @@ export class GlossaView extends ItemView {
           // Legacy / single-file path
           let oldText = '', newText = '', label = '', note = '';
           if (name === 'delete_note' || name === 'rename_note') {
-            const source = this.app.vault.getAbstractFileByPath(String((name === 'delete_note' ? args.path : args.from) ?? ''));
-            label = name === 'delete_note' ? String(args.path ?? '') : `${args.from ?? ''} → ${args.to ?? ''}`;
+            const source = this.app.vault.getAbstractFileByPath(scalarText((name === 'delete_note' ? args.path : args.from) ?? ''));
+            label = name === 'delete_note' ? String(args.path ?? '') : `${scalarText(args.from ?? '')} → ${scalarText(args.to ?? '')}`;
             if (source instanceof TFolder) {
               const count = filesInFolder(source).length;
               note = name === 'delete_note'
@@ -2606,8 +2611,8 @@ export class GlossaView extends ItemView {
               oldText = ''; newText = args.new_string ?? '';
             } else {
               const f = this.app.vault.getAbstractFileByPath(args.file_path);
-              if (f && 'extension' in (f as AnyValue)) {
-                try { oldText = await this.app.vault.read(f as AnyValue); } catch { /* ignore */ }
+              if (f instanceof TFile) {
+                try { oldText = await this.app.vault.read(f); } catch { /* ignore */ }
               }
               if (typeof args.old_string === 'string' && oldText.includes(args.old_string)) {
                 newText = args.replace_all
@@ -2620,8 +2625,8 @@ export class GlossaView extends ItemView {
           } else if (name === 'write_note' || name === 'create_note' || name === 'edit_section' || name === 'apply_patch' || name === 'append_to_note') {
             label = args.path ?? '';
             const f = this.app.vault.getAbstractFileByPath(args.path);
-            if (f && 'extension' in (f as AnyValue)) {
-              try { oldText = await this.app.vault.read(f as AnyValue); } catch { /* ignore */ }
+            if (f instanceof TFile) {
+              try { oldText = await this.app.vault.read(f); } catch { /* ignore */ }
             }
             if (name === 'write_note' || name === 'create_note') newText = args.content ?? '';
             else if (name === 'edit_section' && typeof args.find === 'string' && args.find && oldText.includes(args.find)) newText = oldText.replace(args.find, args.replace ?? '');
@@ -2727,7 +2732,7 @@ export class GlossaView extends ItemView {
     }
   }
 
-  private reasoningRenderTimer: AnyValue;
+  private reasoningRenderTimer: number;
   private scheduleReasoningRender() {
     if (this.reasoningRenderTimer || !this.liveRun()?.ui?.reasoningCard) return;
     this.reasoningRenderTimer = window.setTimeout(() => {
@@ -2749,7 +2754,7 @@ export class GlossaView extends ItemView {
     }, 300);
   }
 
-  private elapsedTimer: AnyValue;
+  private elapsedTimer: number;
   private startElapsedTicker() {
     if (this.elapsedTimer) return;
     this.elapsedTimer = window.setInterval(() => this.tickElapsed(), 250);
@@ -2781,11 +2786,11 @@ export class GlossaView extends ItemView {
     const now = Date.now();
     for (const card of Array.from(ui.toolStack.children) as HTMLElement[]) {
       if (!card.classList.contains('nc-tool-event')) continue;
-      const statusEl = (card as AnyValue)._statusEl as HTMLElement | undefined;
+      const statusEl = (card as ToolCardElement)._statusEl;
       if (!statusEl) continue;
       const isActive = statusEl.classList.contains('running') || statusEl.classList.contains('pending');
       if (!isActive) continue;
-      const elapsedEl = (card as AnyValue)._elapsedEl as HTMLElement | undefined;
+      const elapsedEl = (card as ToolCardElement)._elapsedEl;
       const startedAttr = card.dataset.startedAt;
       if (elapsedEl && startedAttr) {
         elapsedEl.textContent = formatElapsed(now - parseInt(startedAttr));
@@ -2895,8 +2900,8 @@ export class GlossaView extends ItemView {
             if (prepared.compressed) {
               quickNotice(bi(`Screenshot compressed from ${(prepared.originalBytes / 1024 / 1024).toFixed(1)} MB to ${(prepared.file.size / 1024 / 1024).toFixed(1)} MB.`, `截图已从 ${(prepared.originalBytes / 1024 / 1024).toFixed(1)} MB 压缩到 ${(prepared.file.size / 1024 / 1024).toFixed(1)} MB。`));
             }
-          } catch (err) {
-            quickNotice(bi(`Failed to paste screenshot: ${err.message ?? err}`, `粘贴截图失败：${err.message ?? err}`));
+          } catch (err: unknown) {
+            quickNotice(bi(`Failed to paste screenshot: ${errorMessage(err)}`, `粘贴截图失败：${errorMessage(err)}`));
           }
         }
       })();
@@ -2918,7 +2923,7 @@ export class GlossaView extends ItemView {
       // COMMITS the IME selection — we must NOT treat that keydown as a
       // "send" intent. `e.isComposing` is the modern flag; legacy WebKit
       // doesn't set it but reports keyCode 229. Cover both.
-      if (e.isComposing || (e as AnyValue).keyCode === 229) return;
+      if (e.isComposing || legacyKeyCode(e) === 229) return;
       if (this.popup.onKey(e)) { e.preventDefault(); return; }
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
@@ -3159,7 +3164,7 @@ export class GlossaView extends ItemView {
       void (async () => {
         for (const f of files) {
           try { this.ctx.add(await resolveDroppedFile(f)); }
-          catch (err) { quickNotice(bi(`Failed to attach ${f.name}: ${err.message}`, `无法附加 ${f.name}：${err.message}`)); }
+          catch (err: unknown) { quickNotice(bi(`Failed to attach ${f.name}: ${errorMessage(err)}`, `无法附加 ${f.name}：${errorMessage(err)}`)); }
         }
       })();
     }, true);
@@ -3269,7 +3274,7 @@ export class GlossaView extends ItemView {
     if (!active && eps.length === 0) {
       items.push({
         label: bi('No endpoints — open Settings', '未配置 endpoint — 打开设置'),
-        onSelect: () => (this.app as AnyValue).setting.open(),
+        onSelect: () => hostSettings(this.app).open(),
       });
       this.togglePopup(this.modelBtn, items);
       return;
@@ -3298,8 +3303,8 @@ export class GlossaView extends ItemView {
               } else {
                 quickNotice(bi('No models returned by this endpoint.', '该 endpoint 未返回模型列表。'));
               }
-            } catch (err) {
-              quickNotice(bi(`Detect failed: ${err?.message ?? err}`, `检测失败：${err?.message ?? err}`), 6000);
+            } catch (err: unknown) {
+              quickNotice(bi(`Detect failed: ${errorMessage(err)}`, `检测失败：${errorMessage(err)}`), 6000);
             }
           },
         });
@@ -3311,8 +3316,8 @@ export class GlossaView extends ItemView {
       section: bi('More', '更多'),
       alwaysVisible: true,
       onSelect: () => {
-        (this.app as AnyValue).setting.open();
-        (this.app as AnyValue).setting.openTabById(this.plugin.manifest.id);
+        hostSettings(this.app).open();
+        hostSettings(this.app).openTabById(this.plugin.manifest.id);
       },
     });
 
@@ -3633,7 +3638,7 @@ export class GlossaView extends ItemView {
         const toolCalls = m.toolEvents.map(ev => ({
           id: ev.id,
           name: ev.name,
-          args: compactHistoricalToolArgs(ev.args ?? {}, keepFullToolContext),
+          args: dataRecord(compactHistoricalToolArgs(ev.args ?? {}, keepFullToolContext)),
         }));
         out.push({
           role: 'assistant',
@@ -3739,12 +3744,12 @@ export class GlossaView extends ItemView {
       }
       await this.flushPersistNow(session);
       quickNotice(bi(`Compacted ${result.summarisedCount} msgs → 1 summary (~${formatTokenCount(result.tokensSaved)} tok saved)`, `已把 ${result.summarisedCount} 条消息压缩成 1 条摘要（约省 ${formatTokenCount(result.tokensSaved)} tok）`));
-    } catch (e) {
+    } catch (e: unknown) {
       loading?.remove();
       if (signal?.aborted) return;
       // Nobody asked for an idle summary, so its failures are logged rather than announced.
       if (reason === 'idle') throw e;
-      quickNotice(bi(`Compact failed: ${e.message ?? e}`, `压缩失败：${e.message ?? e}`));
+      quickNotice(bi(`Compact failed: ${errorMessage(e)}`, `压缩失败：${errorMessage(e)}`));
     }
   }
 
@@ -4119,7 +4124,7 @@ export class GlossaView extends ItemView {
       history,
       enableTools,
       endpointKind: runEp.kind,
-      endpointFullAgent: !!(runEp as AnyValue).cliFullAgent,
+      endpointFullAgent: !!runEp.cliFullAgent,
       permissionLevel: this.plugin.settings.permissionLevel,
       runMode: this.plugin.settings.runMode,
       maxSteps: this.plugin.settings.agentMaxSteps,
@@ -4364,7 +4369,7 @@ export class GlossaView extends ItemView {
     target.updatedAt = Date.now();
     await this.flushPersistNow(target);
     if (!cancelled) this.hub.notice(target, loopHadError ? 'error' : 'done');
-    } catch (err) {
+    } catch (err: unknown) {
       finishedNormally = false;
       this.goalArmedIds.delete(target.id); disarmGoal(target);
       recordDiagnostic(target, { at: Date.now(), kind: 'error', code: 'SUBMIT_FAILED' });
@@ -4372,12 +4377,12 @@ export class GlossaView extends ItemView {
       // Surface the error to the user AND release the run.
       console.error('[Glossa] submit failed', err);
       const chat = screen() ? '' : `${this.oneLine(target.title || bi('Untitled chat', '未命名对话'), 40)} · `;
-      quickNotice(chat + bi(`Error: ${err?.message ?? err}`, `出错：${err?.message ?? err}`));
+      quickNotice(chat + bi(`Error: ${errorMessage(err)}`, `出错：${errorMessage(err)}`));
       // Clean up the empty assistant bubble we optimistically pushed before
       // the loop started. Without this, a failed submit leaves a permanent
       // empty card in the saved session (and the DOM); reloading the
       // session shows a ghost message-of-air for every prior failed turn.
-      try { this.dropEmptySegment(run); } catch (e) { console.warn('[Glossa] empty-assistant cleanup failed', e); }
+      try { this.dropEmptySegment(run); } catch (e: unknown) { console.warn('[Glossa] empty-assistant cleanup failed', e); }
       this.persistSession(target);
     } finally {
       if (isRunOpen(run.journal.state)) appendRunEvent(run.journal, signal.aborted ? 'cancelled' : 'failed');
@@ -4513,7 +4518,7 @@ export class GlossaView extends ItemView {
     this.cliProviderButton.hidden = !cli;
     this.cliProviderButton.disabled = this.streaming;
     clear(this.cliProviderButton);
-    if (cli) {
+    if (cli && ep.kind !== 'custom-api') {
       const label = CLI_PROVIDER_LABELS[ep.kind];
       setTrustedSvg(el('span', { className: 'nc-cli-brand', parent: this.cliProviderButton }), CLI_BRAND_ICONS[ep.kind]);
       el('span', { className: 'nc-provider-label', text: label, parent: this.cliProviderButton });
@@ -4619,9 +4624,9 @@ export class GlossaView extends ItemView {
         ep.cliModels = models; ep.cliModelsUpdatedAt = Date.now(); ep.cliModelsBinaryPath = binaryPath;
         if (!this.streaming) reconcileCliEffort(ep);
         await this.plugin.saveSettings();
-      } catch (error) {
+      } catch (error: unknown) {
         if (!controller.signal.aborted && !this.viewClosed) {
-          const detail = error instanceof Error ? error.message.slice(0, 300) : '';
+          const detail = error instanceof Error ? errorMessage(error).slice(0, 300) : '';
           const message = bi('Could not read CLI models. Check installation, login and proxy; use Refresh models to retry.', '无法读取 CLI 模型。请检查安装、登录和代理，再点击“刷新模型列表”重试。') + (detail ? `\n${detail}` : '');
           this.cliCatalogErrors.set(ep.id, message);
           if (force) quickNotice(message, 6000);

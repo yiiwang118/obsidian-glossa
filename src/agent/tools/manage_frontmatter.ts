@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 /**
  * manage_frontmatter — atomic CRUD over a single note's YAML properties.
  *
@@ -44,7 +45,7 @@ export const manageFrontmatter: ToolImpl = buildTool({
       additionalProperties: false,
     },
   },
-  preview: async (a) => {
+  preview: async (a: import('../tool_arguments').ToolArguments) => {
     const op = a.op;
     return op === 'list' ? `List frontmatter keys of ${a.path}`
          : op === 'get' ? `Get ${a.path}.${a.key}`
@@ -54,14 +55,14 @@ export const manageFrontmatter: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const op = args.op as 'get' | 'set' | 'delete' | 'list';
     const f = app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return `Error: not found: ${path}`;
 
     let result = '';
     try {
-      await app.fileManager.processFrontMatter(f, (fm: Record<string,AnyValue>) => {
+      await app.fileManager.processFrontMatter(f, (fm: Record<string, unknown>) => {
         if (op === 'list') {
           const keys = Object.keys(fm);
           result = keys.length === 0 ? '(no frontmatter)' : keys.join('\n');
@@ -84,8 +85,8 @@ export const manageFrontmatter: ToolImpl = buildTool({
           result = `Set ${key} = ${JSON.stringify(parsed)}.`;
         }
       });
-    } catch (e) {
-      return `Error: ${e.message}`;
+    } catch (e: unknown) {
+      return `Error: ${errorMessage(e)}`;
     }
     return result;
   },

@@ -1,3 +1,4 @@
+import type { ChatSession } from './types';
 import { TemporaryChatStore } from './temporary_chat';
 import { TemporaryChatView, VIEW_TYPE_TEMPORARY_CHAT, closeEndedTemporaryChats } from './ui/temporary_chat_view';
 import { Plugin, WorkspaceLeaf, Notice, addIcon } from 'obsidian';
@@ -38,14 +39,17 @@ export default class GlossaPlugin extends Plugin {
   private unlocked = true;     // true when keys are readable (encryption disabled or unlocked)
 
   checkpoint: CheckpointManager;
-  mcp: AnyValue;
+  mcp: import('./agent/loop').AgentLoopOptions['mcp'] & {
+    clients: unknown[]; start(): Promise<void>; stop(): Promise<void>; restart(): Promise<void>;
+    allTools(): import('./providers/types').ToolSpec[]; onChange(callback?: () => void): () => void;
+  };
   updateInfo: UpdateInfo | null = null;
   private updateCheckInFlight: Promise<UpdateInfo | null> | null = null;
   private selectionTranslation: SelectionTranslationController | null = null;
   private deferredTasks = new DeferredTasks();
 
   async onload() {
-    const raw = (await this.loadData()) ?? {};
+    const raw = (await this.loadData()) as Partial<GlossaSettings> & { __chats?: ChatSession[] } ?? {};
     const { __chats: legacy, ...settingsRaw } = raw;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, settingsRaw);
     this.hydrateCachedUpdateInfo();
@@ -100,8 +104,8 @@ export default class GlossaPlugin extends Plugin {
     for (const ep of (this.settings.endpoints ?? [])) {
       // Existing endpoints retain their request body when upgrading to 0.8.
       if (ep.kind === 'custom-api' && ep.extraBody === undefined) ep.extraBody = {};
-      if ((ep as AnyValue).kind === 'codex-cli' && (ep as AnyValue).model === 'gpt-5.4') {
-        (ep as AnyValue).model = '';
+      if (ep.kind === 'codex-cli' && ep.model === 'gpt-5.4') {
+        ep.model = '';
         codexMigratedCount++;
       }
     }
@@ -158,7 +162,7 @@ export default class GlossaPlugin extends Plugin {
     this.addCommand({ id: 'temporary-chat', name: 'Open temporary chat', callback: async () => { await this.activateView(); this.getView()?.openSideChat(); } });
     this.addCommand({ id: 'learned-skills', name: 'Manage learned skills', callback: () => openLearningModal(this) });
     this.addCommand({ id: 'new-chat', name: 'New chat',
-      callback: async () => { await this.activateView(); (this.getView() as AnyValue)?.startNewSession?.(); } });
+      callback: async () => { await this.activateView(); (this.getView())?.startNewSession?.(); } });
     this.addCommand({ id: 'unlock', name: 'Unlock encrypted keys',
       callback: () => this.tryUnlock() });
     this.addCommand({ id: 'check-for-updates', name: 'Check for updates',
@@ -176,7 +180,7 @@ export default class GlossaPlugin extends Plugin {
         name: cmd.title,
         callback: async () => {
           await this.activateView();
-          const view = this.getView() as AnyValue;
+          const view = this.getView();
           if (!view) return;
           const sel = getCurrentSelection(this.app);
           const af = this.app.workspace.getActiveFile();
@@ -208,7 +212,7 @@ export default class GlossaPlugin extends Plugin {
         const sel = editor.getSelection();
         if (!sel) { new Notice(bi('Select some text first.', '请先选中文本。')); return; }
         await this.activateView();
-        const view = this.getView() as AnyValue;
+        const view = this.getView();
         if (view) {
           view.inputEl.value = `Improve / rewrite this selection:\n\n${sel}\n\nKeep markdown intact.`;
           view.inputEl.dispatchEvent(new Event('input'));
@@ -276,7 +280,7 @@ export default class GlossaPlugin extends Plugin {
     );
     this.registerEvent(
       this.app.vault.on('modify', (file) => {
-        const p: string = (file as AnyValue)?.path ?? '';
+        const p: string = file?.path ?? '';
         if (p) scheduleActivate(p);
         // Editing a SKILL.md invalidates the discoverSkills TTL cache so
         // the next disc walk picks up the new frontmatter / body.
@@ -285,20 +289,20 @@ export default class GlossaPlugin extends Plugin {
     );
     this.registerEvent(
       this.app.vault.on('create', (file) => {
-        const p: string = (file as AnyValue)?.path ?? '';
+        const p: string = file?.path ?? '';
         if (p) scheduleActivate(p);
         invalidateSkillCacheForPath(p);
       }),
     );
     this.registerEvent(
       this.app.vault.on('delete', (file) => {
-        const p: string = (file as AnyValue)?.path ?? '';
+        const p: string = file?.path ?? '';
         invalidateSkillCacheForPath(p);
       }),
     );
     this.registerEvent(
       this.app.vault.on('rename', (file, oldPath) => {
-        const p: string = (file as AnyValue)?.path ?? '';
+        const p: string = file?.path ?? '';
         if (p) scheduleActivate(p);
         invalidateSkillCacheForPath(oldPath);
         invalidateSkillCacheForPath(p);
@@ -443,7 +447,7 @@ export default class GlossaPlugin extends Plugin {
       // Migrated from 200k → 600k; persist the new verifier so the next
       // unlock uses the upgraded handle directly without the legacy probe.
       this.settings.encryptionVerifier = result.upgradedVerifier;
-      try { await this.saveData(this.settings); } catch (e) { console.warn('[Glossa] upgraded verifier save failed', e); }
+      try { await this.saveData(this.settings); } catch (e: unknown) { console.warn('[Glossa] upgraded verifier save failed', e); }
       new Notice(bi('Encryption upgraded to 600k PBKDF2 iterations.', '加密已升级到 600k PBKDF2 迭代。'), 4000);
     }
     this.cryptoHandle = handle;

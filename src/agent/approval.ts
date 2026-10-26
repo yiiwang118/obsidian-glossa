@@ -1,3 +1,5 @@
+import type { ToolArguments } from './tool_arguments';
+import { errorMessage } from '../utils/unknown_data';
 import { App, Modal, Notice, TFile } from 'obsidian';
 import type { ToolImpl } from './tools';
 import { diffStats, lineDiff, applySelectedDiff, renderDiffInto } from '../utils/diff';
@@ -10,23 +12,25 @@ import { bi } from '../utils/i18n';
 export interface ApprovalResult {
   ok: boolean;
   /** If set, replaces the tool args at execution time (used by per-line diff edits). */
-  mutatedArgs?: AnyValue;
+  mutatedArgs?: ToolArguments;
   /** If the user picked an "Always allow…" option, this rule is persisted by the loop
    *  so future calls auto-resolve. */
   persistRule?: import('../types').PermissionRule;
 }
 
-export function askApproval(app: App, tool: ToolImpl, args: AnyValue): Promise<ApprovalResult> {
+export function askApproval(app: App, tool: ToolImpl, args: ToolArguments): Promise<ApprovalResult> {
   return new Promise(resolve => new ApprovalModal(app, tool, args, resolve).open());
 }
 
 class ApprovalModal extends Modal {
   private decided = false;
+  private __blockApprove?: string;
+  private __diff?: { oldText: string; newText: string; decisions: Map<number, boolean> };
 
   constructor(
     app: App,
     private tool: ToolImpl,
-    private args: AnyValue,
+    private args: ToolArguments,
     private onDecide: (r: ApprovalResult) => void,
   ) { super(app); }
 
@@ -48,8 +52,8 @@ class ApprovalModal extends Modal {
       let previewText = '';
       try {
         if (this.tool.preview) {
-          const fn = this.tool.preview as AnyValue;
-          previewText = (fn.length >= 2) ? await fn(this.app, this.args) : await fn(this.args);
+          const fn = this.tool.preview;
+          previewText = (fn.length >= 2) ? await (fn as (app: App, args: ToolArguments) => Promise<string>)(this.app, this.args) : await (fn as (args: ToolArguments) => Promise<string>)(this.args);
         } else {
           previewText = JSON.stringify(this.args, null, 2);
         }
@@ -66,7 +70,7 @@ class ApprovalModal extends Modal {
     // Visual cue when the diff-preview marked this approval as blocked.
     // The actual gate is in buildResult() so a fast Enter cannot bypass it,
     // but disabling the button + adding a tooltip makes the intent clear.
-    const block = (this as AnyValue).__blockApprove as string | undefined;
+    const block = this.__blockApprove;
     if (block) {
       allow.disabled = true;
       allow.title = block;
@@ -118,7 +122,7 @@ class ApprovalModal extends Modal {
           const f = this.app.vault.getAbstractFileByPath(a.file_path);
           if (!(f instanceof TFile)) { warnings.push(`File not found: ${a.file_path}. Tool will fail.`); return this.renderWarnings(label, warnings); }
           oldText = await this.app.vault.read(f);
-          const result = applyTextEdits(oldText, rawEdits.map((edit: AnyValue) => ({
+          const result = applyTextEdits(oldText, rawEdits.map((edit) => ({
             oldText: edit.old_string,
             newText: edit.new_string,
             replaceAll: edit.replace_all === true,
@@ -149,7 +153,7 @@ class ApprovalModal extends Modal {
         if (!(f instanceof TFile)) { warnings.push(`File not found: ${a.path}. Tool will fail.`); return this.renderWarnings(label, warnings); }
         oldText = await this.app.vault.read(f);
         const edits = a.edits ?? [];
-        const result = applyTextEdits(oldText, edits.map((edit: AnyValue) => ({
+        const result = applyTextEdits(oldText, edits.map((edit) => ({
           oldText: edit.search,
           newText: edit.replace,
         })));
@@ -209,7 +213,7 @@ class ApprovalModal extends Modal {
     });
     if (ops.length === 0) wrap.createDiv({ cls: 'nc-diff-line eq', text: bi('(No changes detected)', '（没有改动）') });
     // Stash for decide() to rebuild content if user toggled lines.
-    (this as AnyValue).__diff = { oldText, newText, decisions };
+    this.__diff = { oldText, newText, decisions };
     return wrap;
   }
 
@@ -221,12 +225,12 @@ class ApprovalModal extends Modal {
    *  the old window.setTimeout(0) button-disable — are turned into ok:false here,
    *  so the loop sees a denial and won't proceed. */
   private buildResult(): ApprovalResult {
-    const blockReason = (this as AnyValue).__blockApprove as string | undefined;
+    const blockReason = this.__blockApprove;
     if (blockReason) {
       try { new Notice(bi(`Approval blocked: ${blockReason}`, `无法批准：${blockReason}`), 5000); } catch { /* ignore */ }
       return { ok: false };
     }
-    const d = (this as AnyValue).__diff as { oldText: string; newText: string; decisions: Map<number, boolean> } | undefined;
+    const d = this.__diff;
     const name = this.tool.spec.name;
     if (!d) return { ok: true };
     // Has the user toggled anything off? If not, just approve as-is.
@@ -280,7 +284,7 @@ class ApprovalModal extends Modal {
       // is rendered AFTER this preview (see onOpen ordering), so we set a
       // flag the buildResult / keydown paths check rather than relying on a
       // window.setTimeout(0) that loses the race against a fast Enter press.
-      (this as AnyValue).__blockApprove = 'Envelope invalid.';
+      this.__blockApprove = 'Envelope invalid.';
       return wrap;
     }
 
@@ -289,10 +293,10 @@ class ApprovalModal extends Modal {
       this.args.__expectedFingerprints = Object.fromEntries(
         plan.snapshots.map(snapshot => [snapshot.path, snapshot.fingerprint]),
       );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? errorMessage(error) : errorMessage(error);
       wrap.createDiv({ cls: 'nc-approval-warning', text: bi(`Preflight failed: ${message}`, `预检失败：${message}`) });
-      (this as AnyValue).__blockApprove = 'Envelope preflight failed.';
+      this.__blockApprove = 'Envelope preflight failed.';
       return wrap;
     }
 
@@ -335,7 +339,7 @@ class ApprovalModal extends Modal {
       wrap.createDiv({ cls: 'nc-approval-warning', text: bi('Approve disabled while warnings are above — ask the model to retry.', '上面有警告时不能批准，请让模型重试。') });
       // Synchronous flag — see __blockApprove handling in decide()/keydown
       // path. Replaces the racy window.setTimeout(0) DOM-button disable.
-      (this as AnyValue).__blockApprove = 'Envelope has unresolved warnings.';
+      this.__blockApprove = 'Envelope has unresolved warnings.';
     }
     // Envelope is approved as-a-batch — no per-line decisions stashed.
     return wrap;
@@ -353,7 +357,7 @@ class ApprovalModal extends Modal {
     });
     setStyle(disabledMsg, { fontWeight: '700' });
     // Same synchronous-flag pattern — see __blockApprove in decide().
-    (this as AnyValue).__blockApprove = 'Diff invalid — see warnings.';
+    this.__blockApprove = 'Diff invalid — see warnings.';
     return wrap;
   }
 }

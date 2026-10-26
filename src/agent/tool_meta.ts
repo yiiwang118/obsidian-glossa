@@ -1,3 +1,4 @@
+import type { ToolArguments } from './tool_arguments';
 import { ICON } from '../ui/icons';
 import { bi } from '../utils/i18n';
 
@@ -7,7 +8,7 @@ export interface ToolMeta {
   verb: string;          // Active form, e.g. "Reading" → shown while running
   color: string;         // Accent color for status pill
   category: 'read' | 'write' | 'search' | 'web' | 'meta' | 'system';
-  summarize?: (args: AnyValue) => string;   // pull a key field out of args for the header line
+  summarize?: (args: ToolArguments) => string;   // pull a key field out of args for the header line
 }
 
 /** Labels and verbs are [English, Chinese], picked when shown so a language
@@ -194,7 +195,7 @@ export const TOOL_META: Record<string, ToolMetaEntry> = {
   rename_note: {
     icon: ICON.pencil, label: ['Rename', '重命名'], verb: ['Renaming', '正在重命名'],
     color: '#ff9d3d', category: 'write',
-    summarize: a => `${a.from} → ${a.to}`,
+    summarize: a => `${typeof a.from === 'string' ? a.from : ''} → ${typeof a.to === 'string' ? a.to : ''}`,
   },
   resolve_wikilink: {
     icon: ICON.link, label: ['Resolve link', '解析链接'], verb: ['Resolving', '正在解析'],
@@ -232,9 +233,10 @@ export const TOOL_META: Record<string, ToolMetaEntry> = {
     icon: ICON.file, label: ['Open file', '打开文件'], verb: ['Opening', '正在打开'],
     color: '#5b9bff', category: 'system',
     summarize: a => {
-      const tail = a?.to?.line ? ` :L${a.to.line}`
-                 : a?.to?.heading ? ` # ${a.to.heading}`
-                 : a?.to?.block ? ` ^${a.to.block}`
+      const to = typeof a.to === 'object' && a.to !== null ? a.to : {};
+      const tail = to.line ? ` :L${to.line}`
+                 : to.heading ? ` # ${to.heading}`
+                 : to.block ? ` ^${to.block}`
                  : '';
       return `${a.path}${tail}${a?.leaf && a.leaf !== 'active' ? `  [${a.leaf}]` : ''}`;
     },
@@ -281,10 +283,10 @@ import { getTool } from './tools';
 
 /** Header text shown above the tool card while it runs.
  *  Returns null to let the caller use its own default formatting. */
-export function renderToolUseMessage(name: string, args: AnyValue): HTMLElement | string | null {
+export function renderToolUseMessage(name: string, args: ToolArguments): HTMLElement | string | null {
   const tool = getTool(name);
   if (tool?.renderToolUseMessage) {
-    try { return tool.renderToolUseMessage(args); } catch (e) { console.warn('[tool render] use threw', e); }
+    try { return tool.renderToolUseMessage(args); } catch (e: unknown) { console.warn('[tool render] use threw', e); }
   }
   // Default: `<verb> <summary>` (e.g. "Reading Foo.md").
   const meta = metaFor(name);
@@ -293,41 +295,41 @@ export function renderToolUseMessage(name: string, args: AnyValue): HTMLElement 
 }
 
 /** Result block renderer. Returns null to use the default markdown renderer. */
-export function renderToolResultMessage(name: string, result: string, args: AnyValue): HTMLElement | string | null {
+export function renderToolResultMessage(name: string, result: string, args: ToolArguments): HTMLElement | string | null {
   const tool = getTool(name);
   if (tool?.renderToolResultMessage) {
-    try { return tool.renderToolResultMessage(result, args); } catch (e) { console.warn('[tool render] result threw', e); }
+    try { return tool.renderToolResultMessage(result, args); } catch (e: unknown) { console.warn('[tool render] result threw', e); }
   }
   return null;
 }
 
 /** Rejected-call renderer (user denied approval). */
-export function renderToolUseRejectedMessage(name: string, args: AnyValue): HTMLElement | string | null {
+export function renderToolUseRejectedMessage(name: string, args: ToolArguments): HTMLElement | string | null {
   const tool = getTool(name);
   if (tool?.renderToolUseRejectedMessage) {
-    try { return tool.renderToolUseRejectedMessage(args); } catch (e) { console.warn('[tool render] rejected threw', e); }
+    try { return tool.renderToolUseRejectedMessage(args); } catch (e: unknown) { console.warn('[tool render] rejected threw', e); }
   }
   return bi(`Tool "${name}" denied by user.`, `已拒绝工具「${name}」。`);
 }
 
 /** Errored-call renderer. */
-export function renderToolUseErrorMessage(name: string, error: string, args: AnyValue): HTMLElement | string | null {
+export function renderToolUseErrorMessage(name: string, error: string, args: ToolArguments): HTMLElement | string | null {
   const tool = getTool(name);
   if (tool?.renderToolUseErrorMessage) {
-    try { return tool.renderToolUseErrorMessage(error, args); } catch (e) { console.warn('[tool render] error threw', e); }
+    try { return tool.renderToolUseErrorMessage(error, args); } catch (e: unknown) { console.warn('[tool render] error threw', e); }
   }
   return null;
 }
 
 /** Activity description for spinner (e.g. "Reading Foo.md…"). Prefers tool's
  *  own hook; falls back to `${verb} ${summary}` from TOOL_META. */
-export function activityDescriptionFor(name: string, args: AnyValue): string {
+export function activityDescriptionFor(name: string, args: ToolArguments): string {
   const tool = getTool(name);
   if (tool?.getActivityDescription) {
     try {
       const v = tool.getActivityDescription(args);
       if (v) return v;
-    } catch (e) { console.warn('[tool render] activity threw', e); }
+    } catch (e: unknown) { console.warn('[tool render] activity threw', e); }
   }
   const meta = metaFor(name);
   const summary = tool?.getToolUseSummary?.(args) ?? meta.summarize?.(args) ?? '';

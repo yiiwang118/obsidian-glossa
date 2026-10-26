@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 import { assertVaultPath, buildTool, normalizePathFields, vaultFolderOf, type ToolImpl } from './_shared';
 
 export const createNote: ToolImpl = buildTool({
@@ -9,7 +10,7 @@ export const createNote: ToolImpl = buildTool({
   searchTags: ['new file', 'write note', '新建笔记', '创建文件'],
   backfillObservableInput: normalizePathFields(['path']),
   describe: a => `create ${a.path}`,
-  preview: async (a) => `Create new note\n\n${a.path}\n\n→ ${(a.content ?? '').length} chars`,
+  preview: async (a: import('../tool_arguments').ToolArguments) => `Create new note\n\n${a.path}\n\n→ ${(a.content ?? '').length} chars`,
   spec: {
     name: 'create_note',
     description: 'Create one new vault file and any missing parent folders. Fails rather than overwriting when the path exists. For multi-file creation use apply_patch. Requires user approval.',
@@ -26,13 +27,13 @@ export const createNote: ToolImpl = buildTool({
   run: async (app, args) => {
     let path: string;
     try { path = assertVaultPath(args.path); }
-    catch (e) { return `Error: ${e.message}`; }
+    catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
     const content = typeof args.content === 'string' ? args.content : '';
     try {
       const folder = vaultFolderOf(path);
       if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
       await app.vault.create(path, content);
       return `Created ${path}.`;
-    } catch (e) { return `Error: ${e.message}`; }
+    } catch (e: unknown) { return `Error: ${errorMessage(e)}`; }
   },
 });

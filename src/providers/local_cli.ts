@@ -138,7 +138,7 @@ export async function discoverLocalCliModels(ep: Endpoint, cwd: string, proxy?: 
         }
       }
     });
-    send(grok ? { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } } } : codex ? { id: 1, method: 'initialize', params: { clientInfo: { name: 'glossa', version: '1.0.0' }, capabilities: {} } } : { type: 'control_request', request_id: 'glossa-models', request: { subtype: 'initialize' } });
+    send(grok ? { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } } } : codex ? { id: 1, method: 'initialize', params: { clientInfo: { name: 'glossa', version: '1.2.0' }, capabilities: {} } } : { type: 'control_request', request_id: 'glossa-models', request: { subtype: 'initialize' } });
     if (signal?.aborted) abort();
   });
 }
@@ -178,7 +178,7 @@ export class LocalCliProvider implements LLMProvider {
         args.push('--prompt-file', promptPath);
       }
       child = childProcess.spawn(binary, args, { cwd, env, shell: false, detached: !Platform.isWin, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    } catch (error) {
+    } catch (error: unknown) {
       if (promptDir) fs.rmSync(promptDir, { recursive: true, force: true });
       throw error;
     }

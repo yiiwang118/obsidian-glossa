@@ -1,3 +1,4 @@
+import { legacyKeyCode } from '../utils/obsidian_host';
 import { App, Menu, Modal, Notice } from 'obsidian';
 import type GlossaPlugin from '../main';
 import type { ChatSummary } from '../chat_store';
@@ -114,7 +115,7 @@ class HistoryPopover {
     // Document-level keyboard navigation (capture phase, stopPropagation when
     // handled, so the underlying chat textarea doesn't also process arrows).
     this.keyHandler = (e: KeyboardEvent) => {
-      if ((e as AnyValue).isComposing || (e as AnyValue).keyCode === 229) return;
+      if (e.isComposing || legacyKeyCode(e) === 229) return;
       if (this.root.ownerDocument.querySelector('.menu, .modal-container')) return;
       if (this.renamingId || this.folderEditor !== null) return;
       if (e.key === 'Escape') { this.onClose(); e.preventDefault(); e.stopPropagation(); return; }

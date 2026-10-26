@@ -1,3 +1,4 @@
+import type { PdfJsLibrary, PdfJsDocument } from './pdfjs_types';
 import { loadPdfJs, type App, type TFile } from 'obsidian';
 import {
   awaitWithAbortSignal,
@@ -38,13 +39,13 @@ export async function renderVaultPdfPagesCached(
   const key = `${vaultFileFingerprint(file)}\u0000${pageRange}\u0000${maxPages}\u0000${scale}`;
   const shared = renderedPageCache.getOrCreate(key, async () => {
     const data = await app.vault.readBinary(file);
-    const pdfjs = await loadPdfJs();
+    const pdfjs = await loadPdfJs() as PdfJsLibrary;
     const loadingTask = pdfjs.getDocument({
       data: new Uint8Array(data).slice(),
       useWorkerFetch: false,
       isEvalSupported: false,
     });
-    let doc: AnyValue = null;
+    let doc: PdfJsDocument = null;
     try {
       doc = await loadingTask.promise;
       const totalPages = Math.max(0, Number(doc?.numPages) || 0);

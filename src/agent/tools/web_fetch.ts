@@ -1,3 +1,4 @@
+import { errorName, errorMessage as caughtErrorMessage } from '../../utils/unknown_data';
 import { buildTool, type ToolImpl } from './_shared';
 import { fetchWithSafeRedirects, parseHttpUrl } from '../../utils/safe_web';
 import { decodeUtf8, extractWebMarkdown, fetchBytesWithCap, summarizeMarkdown, type WebFetchBytesResult, type WebFetchOptions } from '../../utils/web_content';
@@ -18,7 +19,7 @@ export const webFetch: ToolImpl = buildTool({
   checkPermissions: async (app) => webReadPermission(app, 'Network fetch requires approval.'),
   searchHint: 'fetch public web URL extract markdown',
   describe: a => `fetch ${a.url}`,
-  preview: async (a) => {
+  preview: async (a: import('../tool_arguments').ToolArguments) => {
     const url = typeof a.url === 'string' ? a.url.trim() : '';
     let domain = '';
     try { domain = new URL(url).hostname; } catch { /* noop */ }
@@ -82,14 +83,14 @@ export const webFetch: ToolImpl = buildTool({
         ? parsed.links.slice(0, 80).map(l => `- [${l.text}](${l.url})`).join('\n')
         : '';
       return [meta, body ? `\n---\n${body}` : '', linkBlock ? `\n---\nLinks:\n${linkBlock}` : ''].join('\n').trim();
-    } catch (e) {
-      if (e.name === 'AbortError') {
+    } catch (e: unknown) {
+      if (errorName(e) === 'AbortError') {
         // Distinguish "user pressed Stop" from "10s timeout" so the
         // surfaced message is honest.
         if (ctx?.signal?.aborted) return `Error: cancelled by user.`;
         return `Error: timeout after 30s`;
       }
-      return `Error fetching ${url}: ${e.message}`;
+      return `Error fetching ${url}: ${caughtErrorMessage(e)}`;
     }
   },
 });
@@ -101,7 +102,7 @@ export async function fetchBytesWithHttpFallback(
 ): Promise<WebFetchFallbackResult> {
   try {
     return await fetchBytesWithCap(fetcher, url, opts);
-  } catch (e) {
+  } catch (e: unknown) {
     const fallbackUrl = httpFallbackUrl(url, e, opts.signal);
     if (!fallbackUrl) throw e;
     try {
@@ -109,10 +110,10 @@ export async function fetchBytesWithHttpFallback(
       return {
         ...fetched,
         fallbackFrom: url,
-        fallbackError: errorMessage(e),
+        fallbackError: caughtErrorMessage(e),
       };
-    } catch (fallbackError) {
-      throw new Error(`initial fetch failed (${errorMessage(e)}); HTTP fallback also failed (${errorMessage(fallbackError)})`);
+    } catch (fallbackError: unknown) {
+      throw new Error(`initial fetch failed (${caughtErrorMessage(e)}); HTTP fallback also failed (${errorMessage(fallbackError)})`);
     }
   }
 }

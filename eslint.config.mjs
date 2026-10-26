@@ -1,6 +1,5 @@
 import obsidianmd from 'eslint-plugin-obsidianmd';
 import globals from 'globals';
-import boundaryOverrides from './scripts/lint_boundaries.mjs';
 import { defineConfig, globalIgnores } from 'eslint/config';
 
 export default defineConfig(
@@ -15,7 +14,6 @@ export default defineConfig(
       globals: {
         ...globals.browser,
         ...globals.node,
-        AnyValue: 'readonly',
       },
       parserOptions: {
         projectService: true,
@@ -50,5 +48,4 @@ export default defineConfig(
       }],
     },
   },
-  ...boundaryOverrides,
 );

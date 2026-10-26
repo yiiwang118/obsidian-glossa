@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/unknown_data';
 /**
  * get_periodic_note — resolve a daily / weekly / monthly note by type + offset.
  *
@@ -10,10 +11,15 @@
  * tokens supported in the fallback path:
  *   YYYY, MM, DD, gggg (year-of-week), HH, mm, ss
  */
-import { TFile } from 'obsidian';
+import { TFile, type App } from 'obsidian';
 import { buildTool, type ToolImpl } from './_shared';
 
 type Granularity = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+
+interface PeriodicHost {
+  internalPlugins?: { plugins?: Record<string, { instance?: { options?: PeriodicConfig } }> };
+  plugins?: { plugins?: Record<string, { settings?: Partial<Record<Granularity, PeriodicConfig & { enabled?: boolean }>> }> };
+}
 
 interface PeriodicConfig {
   format: string;
@@ -48,7 +54,7 @@ function applyOffset(d: Date, granularity: Granularity, offset: number): Date {
 
 /** Read Daily-Notes core plugin config: format defaults to YYYY-MM-DD, folder
  *  empty (vault root). Returns null if the core plugin is disabled. */
-function readBuiltinDaily(app: AnyValue): PeriodicConfig | null {
+function readBuiltinDaily(app: App & PeriodicHost): PeriodicConfig | null {
   // Daily Notes core plugin has been renamed across versions; check both.
   const cfg = app.internalPlugins?.plugins?.['daily-notes']?.instance?.options;
   if (!cfg) return null;
@@ -60,7 +66,7 @@ function readBuiltinDaily(app: AnyValue): PeriodicConfig | null {
 }
 
 /** Periodic-Notes (community) per-granularity settings. */
-function readPeriodicPlugin(app: AnyValue, granularity: Granularity): PeriodicConfig | null {
+function readPeriodicPlugin(app: App & PeriodicHost, granularity: Granularity): PeriodicConfig | null {
   const plugin = app.plugins?.plugins?.['periodic-notes'];
   if (!plugin) return null;
   const s = plugin.settings?.[granularity];
@@ -72,7 +78,7 @@ function readPeriodicPlugin(app: AnyValue, granularity: Granularity): PeriodicCo
   };
 }
 
-function resolveConfig(app: AnyValue, granularity: Granularity): PeriodicConfig | null {
+function resolveConfig(app: App & PeriodicHost, granularity: Granularity): PeriodicConfig | null {
   // Prefer the dedicated periodic-notes plugin (it supports all 5 granularities).
   const pp = readPeriodicPlugin(app, granularity);
   if (pp) return pp;
@@ -109,7 +115,7 @@ export const getPeriodicNote: ToolImpl = buildTool({
       return `Error: type must be one of daily/weekly/monthly/quarterly/yearly, got "${args.type}".`;
     }
     const offset = Number.isFinite(args.offset) ? Number(args.offset) : 0;
-    const cfg = resolveConfig(app as AnyValue, granularity);
+    const cfg = resolveConfig(app, granularity);
     if (!cfg) return `Error: no ${granularity}-notes config found. Enable the Daily Notes core plugin or install Periodic Notes.`;
     const target = applyOffset(new Date(), granularity, offset);
     const basename = formatDate(cfg.format, target);
@@ -132,8 +138,8 @@ export const getPeriodicNote: ToolImpl = buildTool({
       if (folder) try { await app.vault.createFolder(folder); } catch { /* ignore */ }
       await app.vault.create(path, body);
       return `Created ${path}.\nGranularity: ${granularity}\nOffset: ${offset}`;
-    } catch (e) {
-      return `Error creating ${path}: ${e.message}`;
+    } catch (e: unknown) {
+      return `Error creating ${path}: ${errorMessage(e)}`;
     }
   },
 });

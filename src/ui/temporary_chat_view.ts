@@ -1,3 +1,4 @@
+import { errorMessage } from '../utils/unknown_data';
 import { App, Component, ItemView, Notice, WorkspaceLeaf, normalizePath, type Menu, type ViewStateResult } from 'obsidian';
 import type GlossaPlugin from '../main';
 import type { ChatSession, Endpoint } from '../types';
@@ -37,7 +38,7 @@ export async function openTemporaryChat(plugin: GlossaPlugin, session: ChatSessi
       await leaf.setViewState({ type: VIEW_TYPE_TEMPORARY_CHAT, active: true, state: { id: chat.id } });
       await plugin.app.workspace.revealLeaf(leaf);
       viewOf(leaf)?.focusComposer();
-    } catch (error) { leaf.detach(); throw error; }
+    } catch (error: unknown) { leaf.detach(); throw error; }
   })();
   opening.set(chat, pending);
   try { await pending; } finally { opening.delete(chat); }
@@ -418,8 +419,8 @@ export class TemporaryChatView extends ItemView {
       const options = { language: currentLanguage(), model: ready.model, modelLabel: ready.model || ready.label, budgetTokens: sideChatBudget(ready.model, this.plugin.settings.maxContextTokens) };
       const provider = buildProvider({ ...ready }, this.plugin.settings.globalProxy);
       await (kind === 'retry' ? chat.retry(provider, options) : chat.send(provider, prompt, options));
-    } catch (error) {
-      if (!this.closed && this.lifecycle === lifecycle) new Notice(error instanceof Error ? error.message : String(error), 6000);
+    } catch (error: unknown) {
+      if (!this.closed && this.lifecycle === lifecycle) new Notice(errorMessage(error), 6000);
     } finally { if (this.lifecycle === lifecycle) { this.preparing = false; this.sync(); } }
   }
 
@@ -445,8 +446,8 @@ export class TemporaryChatView extends ItemView {
       if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
       await this.app.vault.create(path, content);
       new Notice(bi(`Saved to ${path}`, `已保存到 ${path}`));
-    } catch (error) {
-      new Notice(bi('Could not save the note: ', '保存笔记失败：') + (error instanceof Error ? error.message : String(error)), 6000);
+    } catch (error: unknown) {
+      new Notice(bi('Could not save the note: ', '保存笔记失败：') + (errorMessage(error)), 6000);
     }
   }
 
